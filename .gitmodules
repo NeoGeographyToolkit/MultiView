@@ -1,0 +1,13 @@
+[submodule "texrecon"]
+	path = texrecon
+	url = https://github.com/oleg-alexandrov/mvs-texturing
+[submodule "mapmap"]
+	path = mapmap
+	url = git@github.com:oleg-alexandrov/mapmap_cpu.git
+[submodule "rayint"]
+	path = rayint
+	url = git@github.com:oleg-alexandrov/rayint.git
+	branch = cuda
+[submodule "mve"]
+	path = mve
+	url = git@github.com:oleg-alexandrov/mve.git
