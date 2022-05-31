@@ -118,6 +118,10 @@ endif()
 # Build texrecon (the repo name is mvs-texturing)
 add_subdirectory(texrecon)
 
+# TODO(oalexan1): The code needs to be compiled a few times till it succeeds
+# This should be fixed by making mve, mapmap, and rayint submodules.
+# But note that rayint builds its own copy of mve which complicates things.
+
 # Set up the include files for texrecon
 set(TEXRECON_INCLUDE_DIRS 
     ${CMAKE_CURRENT_SOURCE_DIR}/elibs/rayint/libs
