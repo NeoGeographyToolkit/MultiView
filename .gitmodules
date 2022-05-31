@@ -1,0 +1,3 @@
+[submodule "mvs-texturing"]
+	path = mvs-texturing
+	url = git@github.com:oleg-alexandrov/mvs-texturing.git
