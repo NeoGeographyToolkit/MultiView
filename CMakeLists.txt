@@ -2,22 +2,18 @@ cmake_minimum_required(VERSION 3.16.2) # For boost 1.72
 
 project(MultiView VERSION 0.1.0 DESCRIPTION "MultiView")
 
-if("${RIG_CALIBRATOR_DEPS_DIR}" STREQUAL "")
-  message(FATAL_ERROR "You need to set RIG_CALIBRATOR_DEPS_DIR pointing to a conda env having the dependencies.")
+if("${MULTIVIEW_DEPS_DIR}" STREQUAL "")
+  message(FATAL_ERROR "Set MULTIVIEW_DEPS_DIR as the path to a conda env having the dependencies.")
 endif()
 
 set(CMAKE_BUILD_TYPE "Release")
 message(STATUS "Setting build type: ${CMAKE_BUILD_TYPE}")
 
 # Where to search for dependencies
-set(CMAKE_PREFIX_PATH "${RIG_CALIBRATOR_DEPS_DIR};${CMAKE_PREFIX_PATH}")
-set(CMAKE_MODULE_PATH "${RIG_CALIBRATOR_DEPS_DIR}/lib/cmake/Ceres;${CMAKE_MODULE_PATH}")
+set(CMAKE_PREFIX_PATH "${MULTIVIEW_DEPS_DIR};${CMAKE_PREFIX_PATH}")
+set(CMAKE_MODULE_PATH "${MULTIVIEW_DEPS_DIR}/lib/cmake/Ceres;${CMAKE_MODULE_PATH}")
 
 set(CMAKE_CXX_STANDARD 11)
-
-if("${RIG_CALIBRATOR_DEPS_DIR}" STREQUAL "")
-  message(FATAL_ERROR "You need to set RIG_CALIBRATOR_DEPS_DIR pointing to a conda env having the dependencies.")
-endif()
 
 # Image libs
 find_package(PNG REQUIRED)
@@ -60,21 +56,18 @@ else (CERES_FOUND)
 endif (CERES_FOUND)
 
 # Boost
-#set(REQUIRED_BOOST_LIBS system filesystem thread)
-set(Boost_USE_RELEASE_LIBS  ON)  # only find release libs
-set(Boost_USE_MULTITHREADED ON)
-set(Boost_USE_STATIC_RUNTIME OFF)
+set(Boost_USE_RELEASE_LIBS   ON)
+set(Boost_USE_MULTITHREADED  ON)
 set(BUILD_SHARED_LIBS        ON)
+set(Boost_USE_STATIC_RUNTIME OFF)
 set(Boost_USE_STATIC_LIBS OFF)
-set(BOOST_ROOT       "${RIG_CALIBRATOR_DEPS_DIR}")
-set(BOOST_LIBRARYDIR "${RIG_CALIBRATOR_DEPS_DIR}/lib")
-set(BOOST_INCLUDEDIR "${RIG_CALIBRATOR_DEPS_DIR}/include")
+set(BOOST_ROOT       "${MULTIVIEW_DEPS_DIR}")
+set(BOOST_LIBRARYDIR "${MULTIVIEW_DEPS_DIR}/lib")
+set(BOOST_INCLUDEDIR "${MULTIVIEW_DEPS_DIR}/include")
 set(Boost_NO_SYSTEM_PATHS ON) # Do not search anywhere else
 set(Boost_DEBUG ON) # to help figure out issues
 set(Boost_DETAILED_FAILURE_MSG ON)
-
 find_package(Boost 1.70 REQUIRED COMPONENTS filesystem)
-
 if (Boost_FOUND)
     message("Successfully found Boost version ${Boost_VERSION}.")
     message("Boost include dir = ${Boost_INCLUDE_DIRS}")
@@ -84,7 +77,7 @@ if (Boost_FOUND)
     include_directories(${Boost_INCLUDE_DIRS})
     link_directories(${Boost_LIBRARY_DIRS})
 else (Boost_FOUND)
-  message(FATAL_ERROR "Can't find boost.")
+    message(FATAL_ERROR "Can't find boost.")
 endif (Boost_FOUND)
 
 # OpenCV
@@ -123,17 +116,17 @@ if(OPENMP_FOUND)
 endif()
 
 # Build texrecon (the repo name is mvs-texturing)
-add_subdirectory(mvs-texturing)
+add_subdirectory(texrecon)
 
 # Set up the include files for texrecon
 set(TEXRECON_INCLUDE_DIRS 
     ${CMAKE_CURRENT_SOURCE_DIR}/elibs/rayint/libs
     ${CMAKE_CURRENT_SOURCE_DIR}/elibs/mve/libs
-    ${CMAKE_CURRENT_SOURCE_DIR}/mvs-texturing/libs)
+    ${CMAKE_CURRENT_SOURCE_DIR}/texrecon/libs)
 include_directories(${TEXRECON_INCLUDE_DIRS})
 
 # Set up the texrecon libraries
-set(TEXRECON_DIR ${CMAKE_BINARY_DIR}/mvs-texturing)
+set(TEXRECON_DIR ${CMAKE_BINARY_DIR}/texrecon)
 set(TEXRECON_LIBRARIES
     ${TEXRECON_DIR}/libs/tex/libtex.a
     # TODO(oalexan1): Link these dynamically and add as submodules
@@ -150,6 +143,3 @@ target_link_libraries(rig_calibrator_tool rig_camera_model rig_calibrator rig_op
     ${TEXRECON_LIBRARIES} ${OpenCV_LIBRARIES}
     ${CERES_LIBRARIES} ${JPEG_LIBRARIES} ${PNG_LIBRARIES} ${TIFF_LIBRARIES}
     gflags glog Boost::filesystem)
-
-
-
