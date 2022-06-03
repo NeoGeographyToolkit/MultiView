@@ -84,6 +84,9 @@
 // and the indices pointing to the left and right ref bracketing
 // cameras are identical.
 
+// TODO(oalexan1): Replace --float_sparse_map with something else
+// TODO(oalexan1): Modularize this code!
+
 #include <ceres/ceres.h>
 #include <ceres/rotation.h>
 #include <ceres/problem.h>
