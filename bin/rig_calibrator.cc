@@ -17,6 +17,10 @@
  * under the License.
  */
 
+// TODO(oalexan1): Replace --float_sparse_map with something else
+// TODO(oalexan1): Modularize this code!
+// Remove all mentions of nav_cam, sci_cam, haz_cam.
+
 // The algorithm:
 
 // We assume our camera rig has n camera types. Each can be image or
@@ -83,9 +87,6 @@
 // ref_to_cam_transform (extrinsics) is the identity and kept fixed,
 // and the indices pointing to the left and right ref bracketing
 // cameras are identical.
-
-// TODO(oalexan1): Replace --float_sparse_map with something else
-// TODO(oalexan1): Modularize this code!
 
 #include <ceres/ceres.h>
 #include <ceres/rotation.h>

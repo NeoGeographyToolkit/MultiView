@@ -115,6 +115,9 @@ if(OPENMP_FOUND)
     set(CMAKE_EXE_LINKER_FLAGS "${CMAKE_EXE_LINKER_FLAGS} ${OpenMP_EXE_LINKER_FLAGS}")
 endif()
 
+# Build voxblox, which provides the voxblox_mesh tool for fusing point clouds into meshes
+add_subdirectory(voxblox)
+
 # Build texrecon (the repo name is mvs-texturing)
 add_subdirectory(texrecon)
 
@@ -142,8 +145,26 @@ add_subdirectory(camera_model)
 add_subdirectory(openMVG)
 add_subdirectory(rig_calibrator)
 
-add_executable(rig_calibrator_tool tools/rig_calibrator.cc)
-target_link_libraries(rig_calibrator_tool rig_camera_model rig_calibrator rig_openMVG
-    ${TEXRECON_LIBRARIES} ${OpenCV_LIBRARIES}
-    ${CERES_LIBRARIES} ${JPEG_LIBRARIES} ${PNG_LIBRARIES} ${TIFF_LIBRARIES}
+add_executable(rig_calibrator bin/rig_calibrator.cc)
+target_link_libraries(rig_calibrator 
+    rig_calibrator_multiview rig_calibrator_openMVG rig_calibrator_camera_model
+    ${TEXRECON_LIBRARIES} ${OpenCV_LIBRARIES} ${CERES_LIBRARIES}
+    ${JPEG_LIBRARIES} ${PNG_LIBRARIES} ${TIFF_LIBRARIES}
     gflags glog Boost::filesystem)
+# Create the executable in the bin bin directory
+set_target_properties(rig_calibrator PROPERTIES RUNTIME_OUTPUT_DIRECTORY "${CMAKE_BINARY_DIR}/bin")
+
+# TODO(oalexan1): Note sure about the robustness of the logic below but it seems to work
+if(APPLE)
+  set_target_properties(rig_calibrator PROPERTIES
+    INSTALL_RPATH "@loader_path;${MULTIVIEW_DEPS_DIR}/lib")
+elseif(UNIX) # Unix which is not Apple
+  set_target_properties(rig_calibrator PROPERTIES
+    INSTALL_RPATH "$ORIGIN:$ORIGIN/../lib:${MULTIVIEW_DEPS_DIR}/lib")
+endif()
+
+install(TARGETS rig_calibrator RUNTIME DESTINATION ${CMAKE_INSTALL_BINDIR})
+
+# TODO(oalexan1): Add here logic for installing the libs and tools
+# See if to make the mve and texrecon libraries shared,
+# as those will be used by both rig_calibrator and texrecon

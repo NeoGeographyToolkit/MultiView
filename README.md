@@ -6,8 +6,11 @@ This will be a collection of tools for calibration of a camera rig with image an
 
 # Build
 
-When you clone this library make sure you add the --recursive flag to
-your git clone command. Alternatively, you can run git submodule
-update --init --recursive after cloning.
+This package depends on other repositories, which are included as submodules,
+and those may have their own dependencies. Hence, this repo should be cloned as::
 
-git clone --recursive git@github.com:oleg-alexandrov/MultiView.git
+    git clone --recursive git@github.com:oleg-alexandrov/MultiView.git
+
+Otherwise, after cloning it, run::
+
+    git submodule update --init --recursive
