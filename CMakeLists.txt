@@ -20,6 +20,17 @@ find_package(PNG REQUIRED)
 find_package(JPEG REQUIRED)
 find_package(TIFF REQUIRED)
 
+# TBB
+FIND_PACKAGE(TBB REQUIRED)
+
+# OpenMP
+FIND_PACKAGE(OpenMP REQUIRED)
+if(OPENMP_FOUND)
+    set(CMAKE_C_FLAGS "${CMAKE_C_FLAGS} ${OpenMP_C_FLAGS}")
+    set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} ${OpenMP_CXX_FLAGS}")
+    set(CMAKE_EXE_LINKER_FLAGS "${CMAKE_EXE_LINKER_FLAGS} ${OpenMP_EXE_LINKER_FLAGS}")
+endif()
+
 # GFlags 
 find_package(Gflags REQUIRED)
 if (GFLAGS_FOUND)
@@ -118,39 +129,36 @@ endif()
 # Build voxblox, which provides the voxblox_mesh tool for fusing point clouds into meshes
 add_subdirectory(voxblox)
 
+# Build mapmap
+add_subdirectory(mapmap)
+
+# Build mve
+add_subdirectory(mve)
+
+# Build rayint
+add_subdirectory(rayint)
+
 # Build texrecon (the repo name is mvs-texturing)
 add_subdirectory(texrecon)
 
-# TODO(oalexan1): The code needs to be compiled a few times till it succeeds
-# This should be fixed by making mve, mapmap, and rayint submodules.
-# But note that rayint builds its own copy of mve which complicates things.
-
-# Set up the include files for texrecon
-set(TEXRECON_INCLUDE_DIRS 
-    ${CMAKE_CURRENT_SOURCE_DIR}/elibs/rayint/libs
-    ${CMAKE_CURRENT_SOURCE_DIR}/elibs/mve/libs
-    ${CMAKE_CURRENT_SOURCE_DIR}/texrecon/libs)
-include_directories(${TEXRECON_INCLUDE_DIRS})
-
-# Set up the texrecon libraries
-set(TEXRECON_DIR ${CMAKE_BINARY_DIR}/texrecon)
-set(TEXRECON_LIBRARIES
-    ${TEXRECON_DIR}/libs/tex/libtex.a
-    # TODO(oalexan1): Link these dynamically and add as submodules
-    # Then move them from the source directory to the build directory
-    ${CMAKE_CURRENT_SOURCE_DIR}/elibs/mve/libs/mve/libmve.a
-    ${CMAKE_CURRENT_SOURCE_DIR}/elibs/mve/libs/util/libmve_util.a)
+include_directories(${CMAKE_SOURCE_DIR}/rayint/libs
+    ${CMAKE_SOURCE_DIR}/mve/libs
+    ${CMAKE_SOURCE_DIR}/texrecon/libs
+)
 
 add_subdirectory(camera_model)
 add_subdirectory(openMVG)
 add_subdirectory(rig_calibrator)
 
+# TODO(oalexan1): Move this to the rig_calibrator dir
 add_executable(rig_calibrator bin/rig_calibrator.cc)
 target_link_libraries(rig_calibrator 
     rig_calibrator_multiview rig_calibrator_openMVG rig_calibrator_camera_model
-    ${TEXRECON_LIBRARIES} ${OpenCV_LIBRARIES} ${CERES_LIBRARIES}
+    texture_reconstruction ${TEXRECON_LIBRARIES} ${OpenCV_LIBRARIES} ${CERES_LIBRARIES}
     ${JPEG_LIBRARIES} ${PNG_LIBRARIES} ${TIFF_LIBRARIES}
+    TBB::tbb TBB::tbbmalloc mve mve_util
     gflags glog Boost::filesystem)
+
 # Create the executable in the bin bin directory
 set_target_properties(rig_calibrator PROPERTIES RUNTIME_OUTPUT_DIRECTORY "${CMAKE_BINARY_DIR}/bin")
 
@@ -164,7 +172,3 @@ elseif(UNIX) # Unix which is not Apple
 endif()
 
 install(TARGETS rig_calibrator RUNTIME DESTINATION ${CMAKE_INSTALL_BINDIR})
-
-# TODO(oalexan1): Add here logic for installing the libs and tools
-# See if to make the mve and texrecon libraries shared,
-# as those will be used by both rig_calibrator and texrecon
