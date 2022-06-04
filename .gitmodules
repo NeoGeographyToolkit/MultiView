@@ -8,3 +8,6 @@
 [submodule "mapmap"]
 	path = mapmap
 	url = git@github.com:oleg-alexandrov/mapmap_cpu.git
+[submodule "mve"]
+	path = mve
+	url = git@github.com:oleg-alexandrov/mve.git
