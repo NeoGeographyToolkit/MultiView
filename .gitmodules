@@ -11,3 +11,6 @@
 [submodule "mve"]
 	path = mve
 	url = git@github.com:oleg-alexandrov/mve.git
+[submodule "rayint"]
+	path = rayint
+	url = https://github.com/oleg-alexandrov/rayint
