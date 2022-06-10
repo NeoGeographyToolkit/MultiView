@@ -14,3 +14,6 @@
 [submodule "rayint"]
 	path = rayint
 	url = https://github.com/oleg-alexandrov/rayint
+[submodule "TheiaSfM"]
+	path = TheiaSfM
+	url = git@github.com:oleg-alexandrov/TheiaSfM.git
