@@ -2184,8 +2184,6 @@ int main(int argc, char** argv) {
   tbb::task_arena schedule(tbb::task_arena::automatic); // to force linking to tbb
 #endif
 
-  std::cout << "--rig config " << FLAGS_rig_config << std::endl;
-
   dense_map::parameterValidation();
 
   // We assume that the first cam is the ref cam (its id is 0)
