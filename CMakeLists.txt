@@ -91,6 +91,14 @@ else (Boost_FOUND)
     message(FATAL_ERROR "Can't find boost.")
 endif (Boost_FOUND)
 
+# Jasper, needed by OpenCV
+find_package(Jasper REQUIRED)
+if (JASPER_FOUND)
+   message("-- Found Jasper: ${JASPER_INCLUDE_DIRS}")
+else (JASPER_FOUND)
+   message(FATAL_ERROR "Cannot find Jasper.")
+endif (JASPER_FOUND)
+
 # OpenCV
 find_package(OpenCV 3.2.0 REQUIRED)
 # Find OpenCV and fix a 3.3.1 bug
@@ -126,21 +134,13 @@ if(OPENMP_FOUND)
     set(CMAKE_EXE_LINKER_FLAGS "${CMAKE_EXE_LINKER_FLAGS} ${OpenMP_EXE_LINKER_FLAGS}")
 endif()
 
-# # Qhull 
-# find_package(Qhull REQUIRED)
-# if (QHULL_FOUND)
-#    message("-- Found Qhull")
-# else (QHULL_FOUND)
-#    message(FATAL_ERROR "Can't find Qhull.")
-# endif (QHULL_FOUND)
-
 # Pcl
-set(QHULL_ROOT "${MULTIVIEW_DEPS_DIR}")
+set(QHULL_ROOT "${MULTIVIEW_DEPS_DIR}") # so it does not pick system Qhull
 find_package(PCL REQUIRED)
 if (PCL_FOUND)
    message("-- Found PCL ${PCL_COMMON_INCLUDE_DIR}")
 else (PCL_FOUND)
-   message(FATAL_ERROR "Can't find Pcl.")
+   message(FATAL_ERROR "Can't find PCL.")
 endif (PCL_FOUND)
 
 # Build voxblox, which provides the voxblox_mesh tool for fusing point clouds into meshes
