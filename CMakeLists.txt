@@ -1,4 +1,4 @@
-cmake_minimum_required(VERSION 3.16.2) # For boost 1.72
+cmake_minimum_required(VERSION 3.15.5)
 
 project(MultiView VERSION 0.1.0 DESCRIPTION "MultiView")
 
@@ -77,8 +77,8 @@ set(BOOST_LIBRARYDIR "${MULTIVIEW_DEPS_DIR}/lib")
 set(BOOST_INCLUDEDIR "${MULTIVIEW_DEPS_DIR}/include")
 set(Boost_NO_SYSTEM_PATHS ON) # Do not search anywhere else
 set(Boost_DEBUG ON) # to help figure out issues
-set(Boost_DETAILED_FAILURE_MSG ON)
-find_package(Boost 1.70 REQUIRED COMPONENTS filesystem)
+set(Boost_DETAILED_FAILURE_MSG OFF) # When on, helps with debugging
+find_package(Boost 1.68 REQUIRED COMPONENTS filesystem)
 if (Boost_FOUND)
     message("Successfully found Boost version ${Boost_VERSION}.")
     message("Boost include dir = ${Boost_INCLUDE_DIRS}")
@@ -126,6 +126,23 @@ if(OPENMP_FOUND)
     set(CMAKE_EXE_LINKER_FLAGS "${CMAKE_EXE_LINKER_FLAGS} ${OpenMP_EXE_LINKER_FLAGS}")
 endif()
 
+# # Qhull 
+# find_package(Qhull REQUIRED)
+# if (QHULL_FOUND)
+#    message("-- Found Qhull")
+# else (QHULL_FOUND)
+#    message(FATAL_ERROR "Can't find Qhull.")
+# endif (QHULL_FOUND)
+
+# Pcl
+set(QHULL_ROOT "${MULTIVIEW_DEPS_DIR}")
+find_package(PCL REQUIRED)
+if (PCL_FOUND)
+   message("-- Found PCL ${PCL_COMMON_INCLUDE_DIR}")
+else (PCL_FOUND)
+   message(FATAL_ERROR "Can't find Pcl.")
+endif (PCL_FOUND)
+
 # Build voxblox, which provides the voxblox_mesh tool for fusing point clouds into meshes
 add_subdirectory(voxblox)
 
@@ -149,26 +166,3 @@ include_directories(${CMAKE_SOURCE_DIR}/rayint/libs
 add_subdirectory(camera_model)
 add_subdirectory(openMVG)
 add_subdirectory(rig_calibrator)
-
-# TODO(oalexan1): Move this to the rig_calibrator dir
-add_executable(rig_calibrator bin/rig_calibrator.cc)
-target_link_libraries(rig_calibrator 
-    rig_calibrator_multiview rig_calibrator_openMVG rig_calibrator_camera_model
-    texture_reconstruction ${TEXRECON_LIBRARIES} ${OpenCV_LIBRARIES} ${CERES_LIBRARIES}
-    ${JPEG_LIBRARIES} ${PNG_LIBRARIES} ${TIFF_LIBRARIES}
-    TBB::tbb TBB::tbbmalloc mve mve_util
-    gflags glog Boost::filesystem)
-
-# Create the executable in the bin bin directory
-set_target_properties(rig_calibrator PROPERTIES RUNTIME_OUTPUT_DIRECTORY "${CMAKE_BINARY_DIR}/bin")
-
-# TODO(oalexan1): Note sure about the robustness of the logic below but it seems to work
-if(APPLE)
-  set_target_properties(rig_calibrator PROPERTIES
-    INSTALL_RPATH "@loader_path;${MULTIVIEW_DEPS_DIR}/lib")
-elseif(UNIX) # Unix which is not Apple
-  set_target_properties(rig_calibrator PROPERTIES
-    INSTALL_RPATH "$ORIGIN:$ORIGIN/../lib:${MULTIVIEW_DEPS_DIR}/lib")
-endif()
-
-install(TARGETS rig_calibrator RUNTIME DESTINATION ${CMAKE_INSTALL_BINDIR})

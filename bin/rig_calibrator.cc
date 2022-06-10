@@ -123,6 +123,8 @@
 #include <Eigen/Geometry>
 #include <Eigen/Core>
 
+#include <oneapi/tbb/task_arena.h>
+
 #include <rig_calibrator/dense_map_utils.h>
 #include <rig_calibrator/system_utils.h>
 #include <rig_calibrator/interest_point.h>
@@ -2179,6 +2181,7 @@ int main(int argc, char** argv) {
 #else
   google::InitGoogleLogging(argv[0]);
   google::ParseCommandLineFlags(&argc, &argv, true);
+  tbb::task_arena schedule(tbb::task_arena::automatic); // to force linking to tbb
 #endif
 
   std::cout << "--rig config " << FLAGS_rig_config << std::endl;
