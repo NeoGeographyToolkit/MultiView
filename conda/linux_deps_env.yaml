@@ -40,7 +40,9 @@ dependencies:
   - harfbuzz=1.3.4=2
   - hdf5=1.8.18=3
   - icu=58.2=hf484d3e_1000
+  - ilmbase=2.5.5=h780b84a_0
   - jasper=1.900.1=h07fcdf6_1006
+  - jemalloc=5.2.1=h9c3ff4c_6
   - jpeg=9e=h166bdaf_1
   - kernel-headers_linux-64=3.10.0=h4a8ded7_13
   - krb5=1.16.3=hc83ff2d_1000
@@ -59,6 +61,7 @@ dependencies:
   - libglvnd-cos7-x86_64=1.0.1=h9b0a68f_1105
   - libgomp=11.2.0=h1d223b6_15
   - libiconv=1.15=h516909a_1006
+  - libjemalloc=5.2.1=h9c3ff4c_6
   - liblapack=3.9.0=13_linux64_openblas
   - libopenblas=0.3.18=hf726d26_0
   - libpng=1.6.37=h21135ba_2
@@ -83,6 +86,7 @@ dependencies:
   - numpy=1.13.3=py36_blas_openblas_200
   - openblas=0.2.19=2
   - opencv=3.2.0=np113py36_blas_openblas_203
+  - openexr=2.5.5=hf817b99_0
   - openjpeg=2.3.0=hf38bd82_1003
   - openmp=8.0.1=0
   - openssl=1.0.2u=h516909a_0
@@ -98,10 +102,13 @@ dependencies:
   - python_abi=3.6=2_cp36m
   - qhull=7.2.0=0
   - qt=5.9.6=7
+  - rapidjson=1.1.0=he1b5a44_1002
   - readline=7.0=hf8c457e_1001
   - rhash=1.4.1=h7f98852_0
+  - rocksdb=6.13.3=hdbe7b06_1
   - setuptools=58.0.4=py36h5fab9bb_2
   - six=1.16.0=pyh6c4a22f_0
+  - snappy=1.1.9=hbd366e4_1
   - sqlite=3.28.0=h8b20d00_0
   - suitesparse=5.10.1=h9e50725_1
   - superlu=5.2.2=hfe2efc7_0
