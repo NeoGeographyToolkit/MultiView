@@ -17,3 +17,6 @@
 [submodule "TheiaSfM"]
 	path = TheiaSfM
 	url = git@github.com:oleg-alexandrov/TheiaSfM.git
+[submodule "oiio"]
+	path = oiio
+	url = git@github.com:oleg-alexandrov/oiio.git
