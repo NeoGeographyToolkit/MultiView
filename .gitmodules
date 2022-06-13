@@ -18,5 +18,5 @@
 	path = TheiaSfM
 	url = git@github.com:oleg-alexandrov/TheiaSfM.git
 [submodule "oiio"]
-	path = oiio
+	path = OpenImageIO
 	url = git@github.com:oleg-alexandrov/oiio.git
