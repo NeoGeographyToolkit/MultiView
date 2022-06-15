@@ -29,6 +29,7 @@ Then the software can be built (on Linux) as follows::
 
     mkdir build
     cd build
+    conda activate rig_calibrator
     toolsPath=$HOME/miniconda3/envs/rig_calibrator
     $toolsPath/bin/cmake ..                                        \
       -DCMAKE_VERBOSE_MAKEFILE=TRUE                                \
@@ -38,4 +39,6 @@ Then the software can be built (on Linux) as follows::
       -DCMAKE_CXX_COMPILER=$toolsPath/bin/x86_64-conda-linux-gnu-c++
     make -j 20
     make install
+
+The resulting tools will be installed in MultiView/install.
 

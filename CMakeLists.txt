@@ -9,11 +9,14 @@ endif()
 set(CMAKE_BUILD_TYPE "Release")
 message(STATUS "Setting build type: ${CMAKE_BUILD_TYPE}")
 
+set(CMAKE_CXX_STANDARD 11)
+
 # Where to search for dependencies
 set(CMAKE_PREFIX_PATH "${MULTIVIEW_DEPS_DIR};${CMAKE_PREFIX_PATH}")
 set(CMAKE_MODULE_PATH "${MULTIVIEW_DEPS_DIR}/lib/cmake/Ceres;${CMAKE_MODULE_PATH}")
 
-set(CMAKE_CXX_STANDARD 11)
+# Where to search for include files
+include_directories("${MULTIVIEW_DEPS_DIR}/include")
 
 # Image libs
 find_package(PNG REQUIRED)
