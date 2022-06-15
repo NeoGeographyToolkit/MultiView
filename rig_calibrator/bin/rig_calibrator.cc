@@ -323,10 +323,17 @@ DEFINE_string(rig_config, "",
               "robot's lua-based config file. The same format is used as for when this tool "
               "saves the outputs with the --save_images_and_depth_clouds option.");
 
+DEFINE_string(nvm_file, "",
+              "Read images and camera poses from an nvm file, as exported by Theia.");
+
 DEFINE_string(image_list, "",
               "Read images and camera poses from this list, rather than a sparse map and "
               "bag file. The same format is used as for when this tool saves the outputs "
               "with the --save_images_and_depth_clouds option.");
+
+DEFINE_bool(use_initial_rig_transforms, false,
+            "Use the transforms among the sensors of the rig specified via --rig-config."
+            "Otherwise derive it from the poses of individual cameras.");
 
 DEFINE_bool(save_matches, false,
             "Save the interest point matches. Stereo Pipeline's viewer can be used for "
@@ -1032,8 +1039,8 @@ void parameterValidation() {
   if (FLAGS_rig_config == "")
     LOG(FATAL) << "Must specify the initial rig configuration via --rig_config.\n";
 
-  if (FLAGS_image_list == "")
-    LOG(FATAL) << "Must specify the image list via --image_list.\n";
+  if (FLAGS_image_list == "" && FLAGS_nvm_file == "")
+    LOG(FATAL) << "Must specify the image list via --image_list or --nvm_file.\n";
 #endif
 
   return;
@@ -1184,16 +1191,11 @@ void lookupImagesAndBrackets(  // Inputs
         double ref_to_cam_offset = ref_to_cam_timestamp_offsets[cam_type];
         double beg_timestamp     = ref_timestamps[beg_ref_it] + ref_to_cam_offset;
         double end_timestamp     = ref_timestamps[end_ref_it] + ref_to_cam_offset;
+        if (end_timestamp == beg_timestamp && last_timestamp)  // necessary adjustment
+          end_timestamp = std::nextafter(end_timestamp, end_timestamp + 1.0); 
 
-        if (end_timestamp < beg_timestamp)
+        if (end_timestamp <= beg_timestamp)
           LOG(FATAL) << "Ref timestamps must be in strictly increasing order.\n";
-
-        // Allow a little exception for the last timestamp
-        if (end_timestamp == beg_timestamp && !last_timestamp)
-          LOG(FATAL) << "Ref timestamps must be in strictly increasing order.\n";
-
-        if (end_timestamp - beg_timestamp > bracket_len)
-          continue;  // Must respect the bracket length
 
         // Find the image timestamp closest to the midpoint of the brackets. This will give
         // more room to vary the timestamp later.
@@ -1236,7 +1238,7 @@ void lookupImagesAndBrackets(  // Inputs
             break;  // Need not succeed, but then there's no need to go on as we are at the end
 
           // Check if the found time is in the bracket
-          bool is_in_bracket = (beg_timestamp <= found_time && found_time <= end_timestamp);
+          bool is_in_bracket = (beg_timestamp <= found_time && found_time < end_timestamp);
           double curr_dist = std::abs(found_time - mid_timestamp);
 
           if (curr_dist < best_dist && is_in_bracket) {
@@ -1256,8 +1258,12 @@ void lookupImagesAndBrackets(  // Inputs
 
         if (best_time < 0.0) continue;  // bracketing failed
 
+        if (best_time > beg_timestamp && end_timestamp - beg_timestamp > bracket_len)
+          continue;  // Must respect the bracket length, unless best time equals beg time
+        
         // Note how we allow best_time == beg_timestamp if there's no other choice
-        if (best_time < beg_timestamp || best_time > end_timestamp) continue;  // no luck
+        if (best_time < beg_timestamp || best_time >= end_timestamp)
+          continue;  // no luck
 
         cam.camera_type   = cam_type;
         cam.timestamp     = best_time;
@@ -1314,6 +1320,7 @@ void lookupImagesAndBrackets(  // Inputs
                                cloud_start_positions[cam_type],  // this will move forward
                                cam.cloud_timestamp);             // found time
 
+      std::cout << "--pushing cam of type " << cam.camera_type << ' ' << cam.beg_ref_index << ' ' << cam.end_ref_index << std::endl;
       cams.push_back(cam);
     }  // end loop over camera types
   }    // end loop over ref images
@@ -2138,6 +2145,14 @@ void readRigConfig(std::string const& rig_config, bool & have_rig_transforms, in
       readConfigVals(f, "undistorted_image_size:", 2, vals);
       Eigen::Vector2i undistorted_image_size(vals[0], vals[1]);
 
+      std::cout << "--temporary 5" << std::endl;
+      std::cout << "--- in this case distortion must be fixed!" << std::endl;
+      if (distortion.size() == 0) {
+        distortion = Eigen::VectorXd(5);
+        for (int it = 0; it < distortion.size(); it++) 
+          distortion[it] = 0;
+      }
+      
       camera::CameraParameters params(image_size, focal_length, optical_center, distortion);
       params.SetUndistortedSize(undistorted_image_size);
       cam_params.push_back(params);
@@ -2172,6 +2187,91 @@ void readRigConfig(std::string const& rig_config, bool & have_rig_transforms, in
   return;
 }
 
+// TODO(oalexan1): Move this to utils
+// Reads the NVM control network format.
+void ReadNVM(std::string const& input_filename,
+             std::vector<Eigen::Matrix2Xd > * cid_to_keypoint_map,
+             std::vector<std::string> * cid_to_filename,
+             std::vector<std::map<int, int> > * pid_to_cid_fid,
+             std::vector<Eigen::Vector3d> * pid_to_xyz,
+             std::vector<Eigen::Affine3d> *
+             cid_to_cam_t_global) {
+  std::ifstream f(input_filename, std::ios::in);
+  std::string token;
+  std::getline(f, token);
+  
+  // Assert that we start with our NVM token
+  if (token.compare(0, 6, "NVM_V3") != 0) {
+    LOG(FATAL) << "File doesn't start with NVM token";
+  }
+
+  // Read the number of cameras
+  ptrdiff_t number_of_cid;
+  f >> number_of_cid;
+  if (number_of_cid < 1) {
+    LOG(FATAL) << "NVM file is missing cameras";
+  }
+
+  // Resize all our structures to support the number of cameras we now expect
+  cid_to_keypoint_map->resize(number_of_cid);
+  cid_to_filename->resize(number_of_cid);
+  cid_to_cam_t_global->resize(number_of_cid);
+  for (ptrdiff_t cid = 0; cid < number_of_cid; cid++) {
+    // Clear keypoints from map. We'll read these in shortly
+    cid_to_keypoint_map->at(cid).resize(Eigen::NoChange_t(), 2);
+
+    // Read the line that contains camera information
+    double focal, dist1, dist2;
+    Eigen::Quaterniond q;
+    Eigen::Vector3d c;
+    f >> token >> focal;
+    f >> q.w() >> q.x() >> q.y() >> q.z();
+    f >> c[0] >> c[1] >> c[2] >> dist1 >> dist2;
+    cid_to_filename->at(cid) = token;
+
+    // Solve for t, which is part of the affine transform
+    Eigen::Matrix3d r = q.matrix();
+    cid_to_cam_t_global->at(cid).linear() = r;
+    cid_to_cam_t_global->at(cid).translation() = -r * c;
+  }
+
+  // Read the number of points
+  ptrdiff_t number_of_pid;
+  f >> number_of_pid;
+  if (number_of_pid < 1) {
+    LOG(FATAL) << "The NVM file has no triangulated points.";
+  }
+
+  // Read the point
+  pid_to_cid_fid->resize(number_of_pid);
+  pid_to_xyz->resize(number_of_pid);
+  Eigen::Vector3d xyz;
+  Eigen::Vector3i color;
+  Eigen::Vector2d pt;
+  ptrdiff_t cid, fid;
+  for (ptrdiff_t pid = 0; pid < number_of_pid; pid++) {
+    pid_to_cid_fid->at(pid).clear();
+
+    ptrdiff_t number_of_measures;
+    f >> xyz[0] >> xyz[1] >> xyz[2] >>
+      color[0] >> color[1] >> color[2] >> number_of_measures;
+    pid_to_xyz->at(pid) = xyz;
+    for (ptrdiff_t m = 0; m < number_of_measures; m++) {
+      f >> cid >> fid >> pt[0] >> pt[1];
+
+      pid_to_cid_fid->at(pid)[cid] = fid;
+
+      if (cid_to_keypoint_map->at(cid).cols() <= fid) {
+        cid_to_keypoint_map->at(cid).conservativeResize(Eigen::NoChange_t(), fid + 1);
+      }
+      cid_to_keypoint_map->at(cid).col(fid) = pt;
+    }
+
+    if (!f.good())
+      LOG(FATAL) << "Unable to correctly read PID: " << pid;
+  }
+}
+  
 }  // namespace dense_map
 
 int main(int argc, char** argv) {
@@ -2205,6 +2305,9 @@ int main(int argc, char** argv) {
     dense_map::readLuaConfig(have_rig_transforms, ref_cam_type, cam_names, cam_params,
                              ref_to_cam_trans, depth_to_image, ref_to_cam_timestamp_offsets);
 
+  std::cout << "--fix here!" << std::endl;
+  have_rig_transforms = FLAGS_use_initial_rig_transforms;
+  
   // This is needed to make the tool reading a rig config file agree
   // with it reading a lua config file
   // double f = cam_params[ref_cam_type].GetFocalLength();
@@ -2272,11 +2375,158 @@ int main(int argc, char** argv) {
   std::vector<std::vector<dense_map::ImageMessage>> image_data;
   std::vector<std::vector<dense_map::ImageMessage>> depth_data;
   if (FLAGS_image_list != "")
-    dense_map::readImageAndDepthData(  // Inputs
-      FLAGS_image_list, ref_cam_type,
-      // Outputs
-      ref_timestamps, world_to_ref, image_data, depth_data);
+    dense_map::readImageAndDepthData(FLAGS_image_list, ref_cam_type, // in
+                                     ref_timestamps, world_to_ref, image_data, depth_data); // out
+  else if (FLAGS_nvm_file != "") {
+    std::vector<Eigen::Matrix2Xd> cid_to_keypoint_map;
+    std::vector<std::string> cid_to_filename;
+    std::vector<std::map<int, int> > pid_to_cid_fid;
+    std::vector<Eigen::Vector3d> pid_to_xyz;
+    std::vector<Eigen::Affine3d> cid_to_cam_t_global;
 
+    // cid_to_cam_t_global has world_to_cam
+    dense_map::ReadNVM(FLAGS_nvm_file,  
+                       &cid_to_keypoint_map,  
+                       &cid_to_filename,  
+                       &pid_to_cid_fid,  
+                       &pid_to_xyz,  
+                       &cid_to_cam_t_global);
+
+    // Read here temporarily the images and depth maps
+    std::map<int, std::map<double, dense_map::ImageMessage>> image_maps;
+    std::map<int, std::map<double, dense_map::ImageMessage>> depth_maps;
+    
+    std::string dir = "theia_test";
+    std::cout << "--must have here dir!" << std::endl;
+    for (size_t it = 0; it < cid_to_filename.size(); it++) {
+      //std::cout << "--file is " << cid_to_filename[it] << std::endl;
+      size_t  pos = cid_to_filename[it].find("_");
+      if (pos == std::string::npos) 
+        LOG(FATAL) << "Un-handled case!\n";
+      std::string cam_name = cid_to_filename[it].substr(0, pos);
+      std::string stamp_str = cid_to_filename[it].substr(pos + 1);
+      std::cout << "--cam name " << cam_name << std::endl;
+      //std::cout << "--stamp_str " << stamp_str << std::endl;
+      double timestamp = atof(stamp_str.c_str());
+      std::cout.precision(18);
+      //std::cout << "--timestamp " << timestamp << std::endl;
+      timestamp = floor(timestamp/10.0);
+      std::cout << "--temporary!" << std::endl;
+      std::cout << "--bracketing needs to happen better" << std::endl;
+      std::cout << "--timestamp " << timestamp << std::endl;
+
+      // TODO(oalexan1): Must run Theia with brackets, two nav cams for each
+      // sci cam! Hopefully it will not fail to find all poses!
+      
+      std::string image_file = dir + "/" + cid_to_filename[it];
+      std::cout << "--image " << image_file << std::endl;
+
+      // TODO(oalexan1): This needs to be done in a better way
+      int cam_type = 0;
+      for (size_t c = 0; c < cam_names.size(); c++) {
+        if (cam_names[c] == cam_name) 
+          cam_type = c;
+      }
+
+      image_maps[cam_type][timestamp].image        = cv::imread(image_file, cv::IMREAD_UNCHANGED);
+      image_maps[cam_type][timestamp].name         = image_file;
+      image_maps[cam_type][timestamp].timestamp    = timestamp;
+      image_maps[cam_type][timestamp].world_to_cam = cid_to_cam_t_global[it];
+
+      depth_maps[cam_type][timestamp].name         = image_file;
+      depth_maps[cam_type][timestamp].timestamp    = timestamp;
+    }
+
+    // TODO(oalexan1): Duplicated code
+    // Find the range of sensor ids.
+    int max_cam_type = ref_cam_type;
+    for (auto it = image_maps.begin(); it != image_maps.end(); it++)
+      max_cam_type = std::max(max_cam_type, it->first);
+    for (auto it = depth_maps.begin(); it != depth_maps.end(); it++)
+      max_cam_type = std::max(max_cam_type, it->first);
+    
+    // Store all images and depth clouds in vectors chronologically for
+    // fast access later.
+    image_data.resize(max_cam_type + 1);
+    depth_data.resize(max_cam_type + 1);
+    for (size_t cam_type = 0; cam_type < image_data.size(); cam_type++) {
+      std::map<double, dense_map::ImageMessage> & image_map = image_maps[cam_type];
+      std::map<double, dense_map::ImageMessage> & depth_map = depth_maps[cam_type];
+      
+      for (auto it = image_map.begin(); it != image_map.end(); it++) {
+        image_data[cam_type].push_back(it->second);
+
+        std::cout << "--add type and stamp " << cam_type << ' ' << it->second.timestamp
+                  << std::endl;
+        
+        // Collect the ref cam timestamps and world_to_ref as well
+        if (cam_type == ref_cam_type) {
+          world_to_ref.push_back(it->second.world_to_cam);
+          ref_timestamps.push_back(it->second.timestamp);
+        }
+      }
+      
+      for (auto it = depth_map.begin(); it != depth_map.end(); it++)
+        depth_data[cam_type].push_back(it->second);
+    }
+
+    if (!have_rig_transforms) {
+      int num_cams = image_data.size();
+      std::cout << "---num cams " << num_cams << std::endl;
+      std::vector<Eigen::MatrixXd> accum_ref_to_cam(num_cams);
+      std::vector<int> count(num_cams, 0);
+      for (int cam_it = 0; cam_it < num_cams; cam_it++) {
+        accum_ref_to_cam[cam_it] = Eigen::MatrixXd::Zero(4, 4);
+     
+        for (size_t it = 0; it < ref_timestamps.size(); it++) {
+          std::cout.precision(18);
+          std::cout << "--ref timestamp " << ref_timestamps[it] << std::endl;
+          double timestamp = ref_timestamps[it];
+          
+          if (image_maps[ref_cam_type].find(timestamp) == image_maps[ref_cam_type].end())
+            continue;
+          if (image_maps[cam_it].find(timestamp) == image_maps[cam_it].end())
+            continue;
+
+          Eigen::MatrixXd world_to_ref = image_maps[ref_cam_type][timestamp].world_to_cam.matrix();
+          Eigen::MatrixXd world_to_cam = image_maps[cam_it][timestamp].world_to_cam.matrix();
+
+          Eigen::MatrixXd curr_ref_to_cam = world_to_cam * (world_to_ref.inverse());
+          std::cout << "--curr_ref_to_cam\n" << curr_ref_to_cam << std::endl;
+
+          accum_ref_to_cam[cam_it] += curr_ref_to_cam;
+          count[cam_it]++;
+        }
+      }
+
+      for (int cam_it = 0; cam_it < num_cams; cam_it++) {
+        ref_to_cam_trans[cam_it].matrix() = accum_ref_to_cam[cam_it] / count[cam_it];
+        // Remove any scale factor after averaging
+        ref_to_cam_trans[cam_it].linear() /= 
+          pow(ref_to_cam_trans[cam_it].linear().determinant(), 1.0 / 3.0);
+      }
+      
+    }
+
+    // TODO(oalexan1): Bracketing not necessary and it will fail if there is no rig
+    // constraint!
+
+    // TODO(oalexan1): Must do time interpolation! After bracketing!
+    
+    std::cout << "---must use some median here! " << std::endl;
+    std::cout << "--what if some input cameras have gross errors or are missing?" << std::endl;
+    
+    //     //Eigen::MatrixXd world_to_haz = cid_to_cam_t_global[0].matrix();
+    //     // Eigen::MatrixXd world_to_sci = cid_to_cam_t_global[1].matrix();
+    //     //std::cout << "--haz to sci2 " << world_to_sci * (world_to_haz.inverse()) << std::endl;
+    
+    //     Eigen::MatrixXd world_to_sci = cid_to_cam_t_global[0].matrix();
+    //     Eigen::MatrixXd world_to_nav = cid_to_cam_t_global[1].matrix();
+    
+    //     std::cout << "--nav to sci " << world_to_sci * (world_to_nav.inverse()) << std::endl;
+    //     return 1;
+  }
+  
   // Put transforms of the reference cameras in a vector. We will optimize them.
   int num_ref_cams = world_to_ref.size();
   if (world_to_ref.size() != ref_timestamps.size())
@@ -2293,21 +2543,28 @@ int main(int argc, char** argv) {
   dense_map::rigid_transform_to_array(identity, &identity_vec[0]);
 
   // Put all timestamps to use in a vector, in the same order as the cameras
+  std::cout << "---problem here!" << std::endl;
   std::vector<std::set<double>> cam_timestamps_to_use = {std::set<double>(),
                                                          std::set<double>(),
                                                          sci_cam_timestamps_to_use};
 
   // Which intrinsics from which cameras to float
+  std::cout << "---num cam types " << num_cam_types << std::endl;
+  std::cout << "--fix here!" << std::endl;
   std::vector<std::set<std::string>> intrinsics_to_float(num_cam_types);
-  dense_map::parse_intrinsics_to_float(FLAGS_nav_cam_intrinsics_to_float, intrinsics_to_float[0]);
-  dense_map::parse_intrinsics_to_float(FLAGS_haz_cam_intrinsics_to_float, intrinsics_to_float[1]);
-  dense_map::parse_intrinsics_to_float(FLAGS_sci_cam_intrinsics_to_float, intrinsics_to_float[2]);
-
+  if (num_cam_types == 3) {
+    dense_map::parse_intrinsics_to_float(FLAGS_nav_cam_intrinsics_to_float, intrinsics_to_float[0]);
+    dense_map::parse_intrinsics_to_float(FLAGS_haz_cam_intrinsics_to_float, intrinsics_to_float[1]);
+    dense_map::parse_intrinsics_to_float(FLAGS_sci_cam_intrinsics_to_float, intrinsics_to_float[2]);
+  }
+  
   std::string depth_to_image_name = "depth_to_image";
   std::set<std::string> extrinsics_to_float;
   dense_map::parse_extrinsics_to_float(cam_names, cam_names[ref_cam_type], depth_to_image_name,
                                        FLAGS_extrinsics_to_float, extrinsics_to_float);
-
+  
+  std::cout << "--num extrinsics to float " << extrinsics_to_float.size() << std::endl;
+  
   if (!FLAGS_affine_depth_to_image && FLAGS_float_scale &&
       extrinsics_to_float.find(depth_to_image_name) == extrinsics_to_float.end())
     LOG(FATAL) << "Cannot float the scale of depth_to_image_transform unless this "
@@ -2361,6 +2618,8 @@ int main(int argc, char** argv) {
       LOG(FATAL) << "The cameras are expected to have distortion.";
     distortions[it] = cam_params[it].GetDistortion();
   }
+
+  std::cout << "--what if there is no input distortion?" << std::endl;
 
   // Build a map for quick access for all the messages we may need
   std::vector<std::string> topics;
@@ -2514,7 +2773,7 @@ int main(int argc, char** argv) {
       world_to_cam);
 
     std::vector<Eigen::Vector3d> xyz_vec;
-    dense_map::multiViewTriangulation(  // Inputs
+    dense_map::multiViewTriangulation(// Inputs
                                       cam_params, cams, world_to_cam, pid_to_cid_fid, keypoint_vec,
                                       // Outputs
                                       pid_cid_fid_inlier, xyz_vec);
@@ -2565,8 +2824,9 @@ int main(int argc, char** argv) {
           beg_cam_ptr = &world_to_ref_vec[dense_map::NUM_RIGID_PARAMS * beg_ref_index];
 
           // Right bracketing camera. When the cam is the ref type,
-          // this is nominal and not used.
-          if (cam_type == ref_cam_type)
+          // this is nominal and not used. Also when the current cam
+          // is the last one and has exactly same timestamp as the ref cam
+          if (cam_type == ref_cam_type || beg_ref_index == end_ref_index)
             end_cam_ptr = &identity_vec[0];
           else
             end_cam_ptr = &world_to_ref_vec[dense_map::NUM_RIGID_PARAMS * end_ref_index];
