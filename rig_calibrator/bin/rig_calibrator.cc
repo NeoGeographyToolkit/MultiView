@@ -357,15 +357,16 @@ Eigen::Affine3d calc_interp_world_to_ref(const double* beg_world_to_ref_t,
     Eigen::Affine3d end_world_to_ref_aff;
     array_to_rigid_transform(end_world_to_ref_aff, end_world_to_ref_t);
 
+    // Handle the degenerate case
+    if (end_ref_stamp == beg_ref_stamp) 
+      return beg_world_to_ref_aff;
+    
     // Covert from cam time to ref time and normalize. It is very
     // important that below we subtract the big numbers from each
     // other first, which are the timestamps, then subtract whatever
     // else is necessary. Otherwise we get problems with numerical
     // precision with CERES.
-    // Note how the denominator never becomes 0.
-    double alpha = 0.0;
-    if (end_ref_stamp != beg_ref_stamp) 
-      alpha = ((cam_stamp - beg_ref_stamp) - ref_to_cam_offset)
+    double alpha = ((cam_stamp - beg_ref_stamp) - ref_to_cam_offset)
         / (end_ref_stamp - beg_ref_stamp);
     
     if (alpha < 0.0 || alpha > 1.0) LOG(FATAL) << "Out of bounds in interpolation.\n";
@@ -2029,12 +2030,12 @@ void writeRigConfig(std::string const& out_dir, bool model_rig, int ref_cam_type
     f << "\n";
 
     if (D.size() == 0) f << "distortion_type: " << dense_map::NO_DISTORION << "\n";
-    if (D.size() == 1)
+    else if (D.size() == 1)
       f << "distortion_type: " << dense_map::FISHEYE_DISTORTION << "\n";
     else if (D.size() >= 4 && D.size() <= 5)
       f << "distortion_type: " << dense_map::RADTAN_DISTORTION << "\n";
     else
-      LOG(FATAL) << "Expecting 0, 1, 4, or 5 distortion coefficients.\n";
+      LOG(FATAL) << "Expecting 0, 1, 4, or 5 distortion coefficients. Got: " << D.size() << ".\n";
 
     Eigen::Vector2i image_size = cam_params[cam_type].GetDistortedSize();
     f << "image_size: " << image_size[0] << ' ' << image_size[1] << "\n";
@@ -2216,15 +2217,6 @@ void readRigConfig(std::string const& rig_config, bool have_rig_transforms, int 
       readConfigVals(f, "undistorted_image_size:", 2, vals);
       Eigen::Vector2i undistorted_image_size(vals[0], vals[1]);
 
-      std::cout << "--temporary 5" << std::endl;
-      std::cout << "--- in this case distortion must be fixed!" << std::endl;
-      std::cout << "But must write no distortion on output!" << std::endl;
-      if (distortion.size() == 0) {
-        distortion = Eigen::VectorXd(5);
-        for (int it = 0; it < distortion.size(); it++) 
-          distortion[it] = 0;
-      }
-      
       camera::CameraParameters params(image_size, focal_length, optical_center, distortion);
       params.SetUndistortedSize(undistorted_image_size);
       cam_params.push_back(params);
@@ -2466,6 +2458,9 @@ void calc_rig_transforms(int ref_cam_type, int num_cam_types,
       
       Eigen::Affine3d ref_to_cam_aff
         = world_to_cam[cam_it] * (interp_world_to_ref_aff.inverse());
+
+      std::cout << "--ref to cam for it " << cam_type << "\n"
+                << ref_to_cam_aff.matrix() << std::endl;
       accum_ref_to_cam[cam_type] += ref_to_cam_aff.matrix();
       count[cam_type]++;
     }
@@ -2772,13 +2767,8 @@ int main(int argc, char** argv) {
   for (int it = 0; it < num_cam_types; it++) {
     focal_lengths[it] = cam_params[it].GetFocalLength();  // average the two focal lengths
     optical_centers[it] = cam_params[it].GetOpticalOffset();
-
-    if (cam_params[it].GetDistortion().size() == 0)
-      LOG(FATAL) << "The cameras are expected to have distortion.";
     distortions[it] = cam_params[it].GetDistortion();
   }
-
-  std::cout << "--what if there is no input distortion?" << std::endl;
 
   // TODO(oalexan1): Eliminate world_to_cam, use only world_to_cam_vec
   // If using no extrinsics, each camera will float separately, using
@@ -2873,6 +2863,9 @@ int main(int argc, char** argv) {
     std::vector<std::map<int, std::map<int, int>>> pid_cid_fid_to_residual_index;
     pid_cid_fid_to_residual_index.resize(pid_to_cid_fid.size());
 
+    // For when we don't have distortion but must get a pointer to distortion for the interface
+    double distortion_placeholder = 0.0;
+    
     // Form the problem
     ceres::Problem problem;
     std::vector<std::string> residual_names;
@@ -2947,6 +2940,13 @@ int main(int argc, char** argv) {
         // Remember the index of the residuals about to create
         pid_cid_fid_to_residual_index[pid][cid][fid] = residual_names.size();
 
+        // Handle the case of no distortion
+        double * distortion_ptr = NULL;
+        if (distortions[cam_type].size() > 0) 
+          distortion_ptr = &distortions[cam_type][0];
+        else
+          distortion_ptr = &distortion_placeholder;
+        
         residual_names.push_back(cam_names[cam_type] + "_pix_x");
         residual_names.push_back(cam_names[cam_type] + "_pix_y");
         residual_scales.push_back(1.0);
@@ -2955,7 +2955,7 @@ int main(int argc, char** argv) {
           (bracketed_cost_function, bracketed_loss_function,
            beg_cam_ptr, end_cam_ptr, ref_to_cam_ptr, &xyz_vec[pid][0],
            &ref_to_cam_timestamp_offsets[cam_type],
-           &focal_lengths[cam_type], &optical_centers[cam_type][0], &distortions[cam_type][0]);
+           &focal_lengths[cam_type], &optical_centers[cam_type][0], distortion_ptr);
 
         // See which intrinsics to float
         if (intrinsics_to_float[cam_type].find("focal_length") ==
@@ -2964,8 +2964,9 @@ int main(int argc, char** argv) {
         if (intrinsics_to_float[cam_type].find("optical_center") ==
             intrinsics_to_float[cam_type].end())
           problem.SetParameterBlockConstant(&optical_centers[cam_type][0]);
-        if (intrinsics_to_float[cam_type].find("distortion") == intrinsics_to_float[cam_type].end())
-          problem.SetParameterBlockConstant(&distortions[cam_type][0]);
+        if (intrinsics_to_float[cam_type].find("distortion")
+            == intrinsics_to_float[cam_type].end() || distortions[cam_type].size() == 0)
+          problem.SetParameterBlockConstant(distortion_ptr);
 
         // When the camera is the ref type, the right bracketing
         // camera is just a placeholder which is not used, hence
