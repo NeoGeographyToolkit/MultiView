@@ -1056,6 +1056,9 @@ void parameterValidation() {
   if (FLAGS_save_matches && FLAGS_out_dir == "")
     LOG(FATAL) << "Cannot save matches if no output directory was provided.\n";
 
+  if (FLAGS_use_initial_rig_transforms && FLAGS_no_extrinsics)
+    LOG(FATAL) << "Cannot use initial rig transforms if not modeling the rig.\n";
+  
 #if !HAVE_ASTROBEE
   if (FLAGS_rig_config == "")
     LOG(FATAL) << "Must specify the initial rig configuration via --rig_config.\n";
@@ -1345,7 +1348,6 @@ void lookupImagesAndBrackets(  // Inputs
                                cloud_start_positions[cam_type],  // this will move forward
                                cam.cloud_timestamp);             // found time
 
-      std::cout << "--pushing cam of type " << cam.camera_type << ' ' << cam.beg_ref_index << ' ' << cam.end_ref_index << std::endl;
       cams.push_back(cam);
     }  // end loop over camera types
   }    // end loop over ref images
@@ -1900,7 +1902,7 @@ void ImageDataToVectors
   
 // TODO(oalexan1): Move to utils
 // Read the images, depth clouds, and their metadata
-void readImageAndDepthData(  // Inputs
+void readImageAndDepthData(// Inputs
   std::string const& image_list_file, int ref_cam_type,
   // Outputs
   std::vector<double>& ref_timestamps, std::vector<Eigen::Affine3d>& world_to_ref,
@@ -2337,6 +2339,70 @@ void ReadNVM(std::string const& input_filename,
       LOG(FATAL) << "Unable to correctly read PID: " << pid;
   }
 }
+
+// Given the transforms from each camera to the world and their timestamps,
+// find an initial guess for the relationship among the sensors on the rig.
+// Note that strictly speaking the transforms in world_to_ref_vec are among
+// those in world_to_cam, but we don't have a way of looking them up in that
+// vector.
+void calc_rig_transforms(int ref_cam_type, int num_cam_types,
+                         std::vector<dense_map::cameraImage> const& cams,
+                         std::vector<double>                 const& world_to_ref_vec,
+                         std::vector<Eigen::Affine3d>        const& world_to_cam,
+                         std::vector<double>                 const& ref_timestamps,
+                         std::vector<double>                 const& ref_to_cam_timestamp_offsets,
+                         // Output
+                         std::vector<Eigen::Affine3d>             & ref_to_cam_trans) {
+
+  // Sanity check
+  if (cams.size() != world_to_cam.size()) 
+    LOG(FATAL) << "There must be as many world to cam transforms as metadata sets for them.\n";
+  
+  // Wipe the output
+  ref_to_cam_trans.resize(num_cam_types);
+
+  std::vector<int> count(num_cam_types, 0);
+  std::vector<Eigen::MatrixXd> accum_ref_to_cam(num_cam_types);
+  for (int cam_type = 0; cam_type < num_cam_types; cam_type++) 
+    accum_ref_to_cam[cam_type] = Eigen::MatrixXd::Zero(4, 4);
+  
+  for (size_t cam_it = 0; cam_it < cams.size(); cam_it++) {
+    int beg_index = cams[cam_it].beg_ref_index;
+    int end_index = cams[cam_it].end_ref_index;
+    int cam_type = cams[cam_it].camera_type;
+    
+    if (cam_type == ref_cam_type) {
+      // The identity transform, from the ref sensor to itself
+      accum_ref_to_cam[cam_type] = Eigen::MatrixXd::Identity(4, 4);
+      count[cam_type] = 1;
+    } else {
+      // We have world_to_ref transform at times bracketing current time,
+      // and world_to_cam at current time. Interp world_to_ref
+      // at current time, then find ref_to_cam.
+      Eigen::Affine3d interp_world_to_ref_aff
+        = dense_map::calc_interp_world_to_ref
+        (&world_to_ref_vec[dense_map::NUM_RIGID_PARAMS * beg_index],
+         &world_to_ref_vec[dense_map::NUM_RIGID_PARAMS * end_index],
+         ref_timestamps[beg_index], ref_timestamps[end_index],
+         ref_to_cam_timestamp_offsets[cam_type],
+         cams[cam_it].timestamp);
+      
+      Eigen::Affine3d ref_to_cam_aff
+        = world_to_cam[cam_it] * (interp_world_to_ref_aff.inverse());
+      accum_ref_to_cam[cam_type] += ref_to_cam_aff.matrix();
+      count[cam_type]++;
+    }
+  }
+  
+  // Average the transforms, then remove any scale factor from the rotations
+  for (int cam_type = 0; cam_type < num_cam_types; cam_type++) {
+    ref_to_cam_trans[cam_type].matrix() = accum_ref_to_cam[cam_type] / count[cam_type];
+    ref_to_cam_trans[cam_type].linear() /= 
+      pow(ref_to_cam_trans[cam_type].linear().determinant(), 1.0 / 3.0);
+  }
+  
+  return;
+}
   
 }  // namespace dense_map
 
@@ -2596,28 +2662,28 @@ int main(int argc, char** argv) {
   // are up-to-date. Use the version of calc_world_to_cam_transforms
   // without world_to_cam_vec, on input which was not computed yet.
 
-  // Put the extrinsics in arrays, so we can optimize them
   std::vector<double> ref_to_cam_vec(num_cam_types * dense_map::NUM_RIGID_PARAMS);
   if (have_rig_transforms) {
 
-    // TODO(oalexan1): Eliminate ref_to_cam_trans, keep only ref_to_cam_vec
+    // Put the extrinsics in arrays, so we can optimize them
     for (int cam_type = 0; cam_type < num_cam_types; cam_type++)
       dense_map::rigid_transform_to_array
         (ref_to_cam_trans[cam_type],
          &ref_to_cam_vec[dense_map::NUM_RIGID_PARAMS * cam_type]);
 
-    // Using the rig transform in ref_to_cam_vec and world_to_ref_vec, calculate
-    // world_to_cam, the transform to all cameras
+    // Using the rig transforms in ref_to_cam_vec and transforms from
+    // world to each ref cam in world_to_ref_vec, calculate world_to_cam,
+    // the transforms from the world to each camera
     dense_map::calc_world_to_cam_transforms(// Inputs
                                             cams, world_to_ref_vec, ref_timestamps, ref_to_cam_vec,
                                             ref_to_cam_timestamp_offsets,
                                             // Output
                                             world_to_cam);
   } else {
-    // TODO(oalexan1): Make this into a function
-    // These were read with the images
-    std::vector<int> start_pos(num_cam_types, 0);  // to help advance in time
+
+    // Parse the transform from the world to each cam, which were known on input
     world_to_cam.resize(cams.size());
+    std::vector<int> start_pos(num_cam_types, 0);  // to help advance in time
     for (size_t cam_it = 0; cam_it < cams.size(); cam_it++) {
       int cam_type = cams[cam_it].camera_type;
       for (size_t pos = start_pos[cam_type]; pos < image_data[cam_type].size(); pos++) {
@@ -2629,54 +2695,17 @@ int main(int argc, char** argv) {
       }
     }
 
-    // Find the transforms among the sensors on the rig, stored in ref_to_cam.
-    // This requires time interpolation and averaging of all candidates.
-    // TODO(oalexan1): Check with the other block where we already have the
-    // rig transforms.
-    std::vector<int> count(num_cam_types, 0);
-    std::vector<Eigen::MatrixXd> accum_ref_to_cam(num_cam_types);
-    for (int cam_type = 0; cam_type < num_cam_types; cam_type++) 
-      accum_ref_to_cam[cam_type] = Eigen::MatrixXd::Zero(4, 4);
+    // Using the transforms from the world to each camera, compute
+    // the rig transforms
+    dense_map::calc_rig_transforms(ref_cam_type, num_cam_types,  
+                                   cams, world_to_ref_vec, world_to_cam,  
+                                   ref_timestamps,  ref_to_cam_timestamp_offsets,  
+                                   // Output
+                                   ref_to_cam_trans);
     
-    for (size_t cam_it = 0; cam_it < cams.size(); cam_it++) {
-      int beg_index = cams[cam_it].beg_ref_index;
-      int end_index = cams[cam_it].end_ref_index;
-      int cam_type = cams[cam_it].camera_type;
-
-      std::cout << "--cam type " << cam_type << std::endl;
-      std::cout << "--cam it " << cam_it << ' ' << beg_index << ' ' << end_index << std::endl;
-      
-      if (cam_type == ref_cam_type) {
-        // The identity transform, from the ref sensor to itself
-        accum_ref_to_cam[cam_type] = Eigen::MatrixXd::Identity(4, 4);
-        count[cam_type] = 1;
-      } else {
-        // We have world_to_ref transform at times bracketing current time,
-        // and world_to_cam at current time. Interp world_to_ref
-        // at current time, then find ref_to_cam.
-        Eigen::Affine3d interp_world_to_ref_aff
-          = dense_map::calc_interp_world_to_ref
-          (&world_to_ref_vec[dense_map::NUM_RIGID_PARAMS * beg_index],
-           &world_to_ref_vec[dense_map::NUM_RIGID_PARAMS * end_index],
-           ref_timestamps[beg_index], ref_timestamps[end_index],
-           ref_to_cam_timestamp_offsets[cam_type],
-           cams[cam_it].timestamp);
-
-        Eigen::Affine3d ref_to_cam_aff
-          = world_to_cam[cam_it] * (interp_world_to_ref_aff.inverse());
-        accum_ref_to_cam[cam_type] += ref_to_cam_aff.matrix();
-        count[cam_type]++;
-      }
-    }
-
-    // Average the transforms, then remove any scale factor from the rotations
-    for (int cam_type = 0; cam_type < num_cam_types; cam_type++) {
-      ref_to_cam_trans[cam_type].matrix() = accum_ref_to_cam[cam_type] / count[cam_type];
-      ref_to_cam_trans[cam_type].linear() /= 
-        pow(ref_to_cam_trans[cam_type].linear().determinant(), 1.0 / 3.0);
-    }
     
-    // TODO(oalexan1): Duplicate code
+    // TODO(oalexan1): Having both ref_to_cam_vec and ref_to_cam_trans complicates
+    // things
     for (int cam_type = 0; cam_type < num_cam_types; cam_type++) {
       dense_map::rigid_transform_to_array
         (ref_to_cam_trans[cam_type],
