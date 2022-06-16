@@ -2218,6 +2218,7 @@ void readRigConfig(std::string const& rig_config, bool have_rig_transforms, int 
 
       std::cout << "--temporary 5" << std::endl;
       std::cout << "--- in this case distortion must be fixed!" << std::endl;
+      std::cout << "But must write no distortion on output!" << std::endl;
       if (distortion.size() == 0) {
         distortion = Eigen::VectorXd(5);
         for (int it = 0; it < distortion.size(); it++) 
