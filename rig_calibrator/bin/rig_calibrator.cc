@@ -117,6 +117,12 @@
 #include <rig_calibrator/dense_map_noros_utils.h>
 #endif
 
+#include <rig_calibrator/dense_map_utils.h>
+#include <rig_calibrator/system_utils.h>
+#include <rig_calibrator/interest_point.h>
+#include <rig_calibrator/texture_processing.h>
+#include <rig_calibrator/camera_image.h>
+
 #include <gflags/gflags.h>
 #include <glog/logging.h>
 
@@ -124,12 +130,7 @@
 #include <Eigen/Core>
 
 #include <oneapi/tbb/task_arena.h>
-
-#include <rig_calibrator/dense_map_utils.h>
-#include <rig_calibrator/system_utils.h>
-#include <rig_calibrator/interest_point.h>
-#include <rig_calibrator/texture_processing.h>
-#include <rig_calibrator/camera_image.h>
+#include <boost/filesystem.hpp>
 
 #include <string>
 #include <map>
@@ -1902,12 +1903,13 @@ void ImageDataToVectors
   
 // TODO(oalexan1): Move to utils
 // Read the images, depth clouds, and their metadata
-void readImageAndDepthData(// Inputs
+void readDataFromList(// Inputs
   std::string const& image_list_file, int ref_cam_type,
   // Outputs
   std::vector<double>& ref_timestamps, std::vector<Eigen::Affine3d>& world_to_ref,
   std::vector<std::vector<ImageMessage>>& image_data,
   std::vector<std::vector<ImageMessage>>& depth_data) {
+  
   // Clear the outputs
   ref_timestamps.clear();
   world_to_ref.clear();
@@ -2340,6 +2342,80 @@ void ReadNVM(std::string const& input_filename,
   }
 }
 
+// Read camera information and images from an NVM file, exported
+// from Theia
+  // TODO(oalexan1): Move to utils
+void readDataFromNvm(// Inputs
+                     std::string const& nvm_file, int ref_cam_type,
+                     std::vector<std::string> const& cam_names,
+                     // Outputs
+                     std::vector<double>& ref_timestamps,
+                     std::vector<Eigen::Affine3d>& world_to_ref,
+                     std::vector<std::vector<ImageMessage>>& image_data,
+                     std::vector<std::vector<ImageMessage>>& depth_data) {
+
+  std::vector<Eigen::Matrix2Xd> cid_to_keypoint_map;
+  std::vector<std::string> cid_to_filename;
+  std::vector<std::map<int, int> > pid_to_cid_fid;
+  std::vector<Eigen::Vector3d> pid_to_xyz;
+  std::vector<Eigen::Affine3d> cid_to_cam_t_global;
+  
+  // cid_to_cam_t_global has world_to_cam
+  dense_map::ReadNVM(nvm_file,  
+                     &cid_to_keypoint_map,  
+                     &cid_to_filename,  
+                     &pid_to_cid_fid,  
+                     &pid_to_xyz,  
+                     &cid_to_cam_t_global);
+  
+  // Read here temporarily the images and depth maps
+  std::map<int, std::map<double, dense_map::ImageMessage>> image_maps;
+  std::map<int, std::map<double, dense_map::ImageMessage>> depth_maps;
+  
+  for (size_t it = 0; it < cid_to_filename.size(); it++) {
+    
+    // The cam name is the subdir having the images
+    std::string cam_name =
+      boost::filesystem::path(cid_to_filename[it]).parent_path().filename().string();
+    
+    // The timestamp is the image name
+    std::string basename = boost::filesystem::path(cid_to_filename[it]).filename().string();
+    if (basename.empty() || basename[0] < '0' || basename[0] > '9')
+      LOG(FATAL) << "Image name (without directory) must start with digits. Got: "
+                 << basename << "\n";
+    double timestamp = atof(basename.c_str());
+
+    // Infer cam type from cam name
+    int cam_type = 0;
+    bool success = false;
+    for (size_t cam_it = 0; cam_it < cam_names.size(); cam_it++) {
+      if (cam_names[cam_it] == cam_name) {
+        cam_type = cam_it;
+        success = true;
+        break;
+      }
+    }
+
+    if (!success) 
+      LOG(FATAL) << "Could not extract cam_name from path/to/cam_name/image.jpg, "
+                 << "given image: " << cid_to_filename[it] << "\n";
+    
+    image_maps[cam_type][timestamp].image
+      = cv::imread(cid_to_filename[it], cv::IMREAD_UNCHANGED);
+    image_maps[cam_type][timestamp].name         = cid_to_filename[it];
+    image_maps[cam_type][timestamp].timestamp    = timestamp;
+    image_maps[cam_type][timestamp].world_to_cam = cid_to_cam_t_global[it];
+    
+    // TODO(oalexan1): Read depths here
+    depth_maps[cam_type][timestamp].name         = cid_to_filename[it];
+    depth_maps[cam_type][timestamp].timestamp    = timestamp;
+  }
+
+  // This entails some book-keeping 
+  dense_map::ImageDataToVectors(ref_cam_type, image_maps,  depth_maps, // in
+                                ref_timestamps, world_to_ref, image_data, depth_data); // out
+}
+                       
 // Given the transforms from each camera to the world and their timestamps,
 // find an initial guess for the relationship among the sensors on the rig.
 // Note that strictly speaking the transforms in world_to_ref_vec are among
@@ -2507,92 +2583,11 @@ int main(int argc, char** argv) {
   std::vector<std::vector<dense_map::ImageMessage>> image_data;
   std::vector<std::vector<dense_map::ImageMessage>> depth_data;
   if (FLAGS_image_list != "")
-    dense_map::readImageAndDepthData(FLAGS_image_list, ref_cam_type, // in
+    dense_map::readDataFromList(FLAGS_image_list, ref_cam_type, // in
                                      ref_timestamps, world_to_ref, image_data, depth_data); // out
-  else if (FLAGS_nvm_file != "") {
-    // TODO(oalexan1): Make the code below a function
-    std::vector<Eigen::Matrix2Xd> cid_to_keypoint_map;
-    std::vector<std::string> cid_to_filename;
-    std::vector<std::map<int, int> > pid_to_cid_fid;
-    std::vector<Eigen::Vector3d> pid_to_xyz;
-    std::vector<Eigen::Affine3d> cid_to_cam_t_global;
-
-    // cid_to_cam_t_global has world_to_cam
-    dense_map::ReadNVM(FLAGS_nvm_file,  
-                       &cid_to_keypoint_map,  
-                       &cid_to_filename,  
-                       &pid_to_cid_fid,  
-                       &pid_to_xyz,  
-                       &cid_to_cam_t_global);
-
-    // Read here temporarily the images and depth maps
-    std::map<int, std::map<double, dense_map::ImageMessage>> image_maps;
-    std::map<int, std::map<double, dense_map::ImageMessage>> depth_maps;
-    
-    std::string dir = "theia_test";
-    std::cout << "--must have here dir!" << std::endl;
-    for (size_t it = 0; it < cid_to_filename.size(); it++) {
-      //std::cout << "--file is " << cid_to_filename[it] << std::endl;
-      size_t  pos = cid_to_filename[it].find("_");
-      if (pos == std::string::npos) 
-        LOG(FATAL) << "Un-handled case!\n";
-      std::string cam_name = cid_to_filename[it].substr(0, pos);
-      std::string stamp_str = cid_to_filename[it].substr(pos + 1);
-      std::cout << "--cam name " << cam_name << std::endl;
-      //std::cout << "--stamp_str " << stamp_str << std::endl;
-      double timestamp = atof(stamp_str.c_str());
-      std::cout.precision(18);
-      //std::cout << "--timestamp " << timestamp << std::endl;
-      timestamp = floor(timestamp/10.0);
-      std::cout << "--temporary!" << std::endl;
-      std::cout << "--bracketing needs to happen better" << std::endl;
-      std::cout << "--timestamp " << timestamp << std::endl;
-
-      // TODO(oalexan1): Must run Theia with brackets, two nav cams for each
-      // sci cam! Hopefully it will not fail to find all poses!
-      
-      std::string image_file = dir + "/" + cid_to_filename[it];
-      std::cout << "--image " << image_file << std::endl;
-
-      // TODO(oalexan1): This needs to be done in a better way
-      int cam_type = 0;
-      for (size_t c = 0; c < cam_names.size(); c++) {
-        if (cam_names[c] == cam_name) 
-          cam_type = c;
-      }
-
-      image_maps[cam_type][timestamp].image        = cv::imread(image_file, cv::IMREAD_UNCHANGED);
-      image_maps[cam_type][timestamp].name         = image_file;
-      image_maps[cam_type][timestamp].timestamp    = timestamp;
-      image_maps[cam_type][timestamp].world_to_cam = cid_to_cam_t_global[it];
-
-      // TODO(oalexan1): Read depths here
-      depth_maps[cam_type][timestamp].name         = image_file;
-      depth_maps[cam_type][timestamp].timestamp    = timestamp;
-    }
-
-    dense_map::ImageDataToVectors(ref_cam_type, image_maps,  depth_maps, // in
-                                  ref_timestamps, world_to_ref, image_data, depth_data); // out
-
-    // TODO(oalexan1): Bracketing not necessary and it will fail if there is no rig
-    // constraint!
-
-    // TODO(oalexan1): Must do time interpolation! After bracketing!
-    
-    std::cout << "---must use some median here! " << std::endl;
-    std::cout << "--what if some input cameras have gross errors or are missing?" << std::endl;
-    
-    //     //Eigen::MatrixXd world_to_haz = cid_to_cam_t_global[0].matrix();
-    //     // Eigen::MatrixXd world_to_sci = cid_to_cam_t_global[1].matrix();
-    //     //std::cout << "--haz to sci2 " << world_to_sci * (world_to_haz.inverse()) << std::endl;
-    
-    //     Eigen::MatrixXd world_to_sci = cid_to_cam_t_global[0].matrix();
-    //     Eigen::MatrixXd world_to_nav = cid_to_cam_t_global[1].matrix();
-    
-    //     std::cout << "--nav to sci " << world_to_sci * (world_to_nav.inverse()) << std::endl;
-    //     return 1;
-  }
-
+  else if (FLAGS_nvm_file != "") 
+    dense_map::readDataFromNvm(FLAGS_nvm_file, ref_cam_type, cam_names, // in
+                               ref_timestamps, world_to_ref, image_data, depth_data); // out
   // Build a map for quick access for all the messages we may need
   std::vector<std::string> topics;
   dense_map::StrToMsgMap bag_map;
@@ -2702,7 +2697,6 @@ int main(int argc, char** argv) {
                                    ref_timestamps,  ref_to_cam_timestamp_offsets,  
                                    // Output
                                    ref_to_cam_trans);
-    
     
     // TODO(oalexan1): Having both ref_to_cam_vec and ref_to_cam_trans complicates
     // things
