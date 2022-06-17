@@ -324,7 +324,43 @@ void writeMatchFile(std::string match_file, std::vector<InterestPoint> const& ip
   f.close();
 }
 
+// TODO(oalexan1): Duplicate code
+void Triangulate(bool rm_invalid_xyz, double focal_length,
+                 std::vector<Eigen::Affine3d> const& cid_to_cam_t_global,
+                 std::vector<Eigen::Matrix2Xd> const& cid_to_keypoint_map,
+                 std::vector<std::map<int, int> > * pid_to_cid_fid,
+                 std::vector<Eigen::Vector3d> * pid_to_xyz) {
+  Eigen::Matrix3d k;
+  k << focal_length, 0, 0,
+    0, focal_length, 0,
+    0, 0, 1;
 
+  // Build p matrices for all of the cameras. openMVG::Triangulation
+  // will be holding pointers to all of the cameras.
+  std::vector<openMVG::Mat34> cid_to_p(cid_to_cam_t_global.size());
+  for (size_t cid = 0; cid < cid_to_p.size(); cid++) {
+    openMVG::P_From_KRt(k, cid_to_cam_t_global[cid].linear(),
+                        cid_to_cam_t_global[cid].translation(), &cid_to_p[cid]);
+  }
+
+  pid_to_xyz->resize(pid_to_cid_fid->size());
+  for (int pid = pid_to_cid_fid->size() - 1; pid >= 0; pid--) {
+    openMVG::Triangulation tri;
+    for (std::pair<int, int> const& cid_fid : pid_to_cid_fid->at(pid)) {
+      tri.add(cid_to_p[cid_fid.first],  // they're holding a pointer to this
+              cid_to_keypoint_map[cid_fid.first].col(cid_fid.second));
+    }
+    Eigen::Vector3d solution = tri.compute();
+    if ( rm_invalid_xyz && (std::isnan(solution[0]) || tri.minDepth() < 0) ) {
+      pid_to_xyz->erase(pid_to_xyz->begin() + pid);
+      pid_to_cid_fid->erase(pid_to_cid_fid->begin() + pid);
+    } else {
+      pid_to_xyz->at(pid) = solution;
+    }
+  }
+
+}
+  
 // Triangulate rays emanating from given undistorted and centered pixels
 Eigen::Vector3d TriangulatePair(double focal_length1, double focal_length2,
                                 Eigen::Affine3d const& world_to_cam1,

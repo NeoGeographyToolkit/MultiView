@@ -176,8 +176,16 @@ std::string matchFileName(std::string const& match_dir,
 void writeMatchFile(std::string match_file, std::vector<InterestPoint> const& ip1,
                     std::vector<InterestPoint> const& ip2);
 
+// TODO(oalexan1): Duplicate code
+void Triangulate(bool rm_invalid_xyz, double focal_length,
+                 std::vector<Eigen::Affine3d> const& cid_to_cam_t_global,
+                 std::vector<Eigen::Matrix2Xd> const& cid_to_keypoint_map,
+                 std::vector<std::map<int, int> > * pid_to_cid_fid,
+                 std::vector<Eigen::Vector3d> * pid_to_xyz);
+  
 // Triangulate two rays emanating from given undistorted and centered pixels
-Eigen::Vector3d TriangulatePair(double focal_length1, double focal_length2, Eigen::Affine3d const& world_to_cam1,
+Eigen::Vector3d TriangulatePair(double focal_length1, double focal_length2,
+                                  Eigen::Affine3d const& world_to_cam1,
                                 Eigen::Affine3d const& world_to_cam2, Eigen::Vector2d const& pix1,
                                 Eigen::Vector2d const& pix2);
 

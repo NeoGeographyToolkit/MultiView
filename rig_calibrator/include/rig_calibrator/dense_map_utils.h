@@ -90,6 +90,10 @@ void writeMatrix(Eigen::MatrixXd const& M, std::string const& filename);
 
 void writeCloud(std::vector<float> const& points, size_t point_size, std::string const& filename);
 
+// Two minor and local utility functions
+std::string print_vec(double a);
+std::string print_vec(Eigen::Vector3d a);
+
 // Return the type of an opencv matrix
 std::string matType(cv::Mat const& mat);
 
