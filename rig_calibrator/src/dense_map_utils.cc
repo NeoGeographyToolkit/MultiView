@@ -701,11 +701,12 @@ void genImageAndDepthFileNames(  // Inputs
     image_name = cam_dir + "/" + image_name;
     image_files.push_back(image_name);
 
-    std::string depth_dir = cam_dir + "_depth";
+    // We count having on the depth file having precisely the same
+    // name as the image file, with only a different extension
     std::string depth_name;
     snprintf(buffer, sizeof(buffer), "%10.7f.pc", cams[it].timestamp);
     depth_name = buffer;
-    depth_name = depth_dir + "/" + depth_name;
+    depth_name = cam_dir + "/" + depth_name;
     depth_files.push_back(depth_name);
   }
 }

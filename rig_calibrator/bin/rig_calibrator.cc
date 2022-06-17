@@ -137,6 +137,8 @@
 #include <iostream>
 #include <fstream>
 
+namespace fs = boost::filesystem;
+
 #if HAVE_ASTROBEE
 
 DEFINE_string(ros_bag, "", "A ROS bag with recorded nav_cam, haz_cam intensity, "
@@ -1829,20 +1831,15 @@ void writeImageList(std::string const& out_dir, std::vector<dense_map::cameraIma
   if (!f.is_open()) LOG(FATAL) << "Cannot open file for writing: " << image_list << "\n";
   f.precision(17);
 
-  f << "# image_file sensor_id timestamp depth_file world_to_image\n";
+  f << "# image_file world_to_image_transform\n";
 
   for (size_t it = 0; it < cams.size(); it++) {
-    std::string depth_file = depth_files[it];
-    if (cams[it].depth_cloud.cols == 0 || cams[it].depth_cloud.rows == 0)
-      depth_file = dense_map::NO_DEPTH_FILE;
 
     // Convert an affine transform to a 4x4 matrix
     Eigen::MatrixXd T = world_to_cam[it].matrix();
 
     // Save the rotation and translation of T
-    f << image_files[it] << " " << cams[it].camera_type  << " " <<
-      cams[it].timestamp << " " << depth_file << " "
-      << dense_map::affineToStr(world_to_cam[it]) << "\n";
+    f << image_files[it] << " " << dense_map::affineToStr(world_to_cam[it]) << "\n";
   }
 
   f.close();
@@ -1901,15 +1898,77 @@ void ImageDataToVectors
     }
   }
 }
+
+void readImageEntry(// Inputs
+                    std::string const& image_file,
+                    Eigen::Affine3d const& world_to_cam,
+                    std::vector<std::string> const& cam_names,
+                    // Outputs
+                    std::map<int, std::map<double, dense_map::ImageMessage>> & image_maps,
+                    std::map<int, std::map<double, dense_map::ImageMessage>> & depth_maps) {
   
+  // The cam name is the subdir having the images
+  std::string cam_name =
+    fs::path(image_file).parent_path().filename().string();
+    
+  std::string basename = fs::path(image_file).filename().string();
+  if (basename.empty() || basename[0] < '0' || basename[0] > '9')
+    LOG(FATAL) << "Image name (without directory) must start with digits. Got: "
+               << basename << "\n";
+  double timestamp = atof(basename.c_str());
+
+  // Infer cam type from cam name
+  int cam_type = 0;
+  bool success = false;
+  for (size_t cam_it = 0; cam_it < cam_names.size(); cam_it++) {
+    if (cam_names[cam_it] == cam_name) {
+      cam_type = cam_it;
+      success = true;
+      break;
+    }
+  }
+  if (!success) 
+    LOG(FATAL) << "Could not extract cam_name from path/to/cam_name/image.jpg, "
+               << "given image: " << image_file << "\n";
+    
+  // Aliases
+  std::map<double, ImageMessage> & image_map = image_maps[cam_type];
+  std::map<double, ImageMessage> & depth_map = depth_maps[cam_type];
+
+  if (image_map.find(timestamp) != image_map.end())
+    LOG(FATAL) << "Duplicate timestamp " << std::setprecision(17) << timestamp
+               << " for sensor id " << cam_type << "\n";
+  
+  // Read the image exactly as written, which would be grayscale
+  image_map[timestamp].image        = cv::imread(image_file, cv::IMREAD_UNCHANGED);
+  image_map[timestamp].name         = image_file;
+  image_map[timestamp].timestamp    = timestamp;
+  image_map[timestamp].world_to_cam = world_to_cam;
+
+  // Sanity check
+  if (depth_map.find(timestamp) != depth_map.end())
+    LOG(FATAL) << "Duplicate timestamp " << std::setprecision(17) << timestamp
+               << " for sensor id " << cam_type << "\n";
+
+  // Read the depth data, if present
+  std::string depth_file = fs::path(image_file).replace_extension(".pc").string();
+  if (fs::exists(depth_file)) {
+    dense_map::readXyzImage(depth_file, depth_map[timestamp].image);
+    depth_map[timestamp].name      = depth_file;
+    depth_map[timestamp].timestamp = timestamp;
+  }
+}
+
 // TODO(oalexan1): Move to utils
 // Read the images, depth clouds, and their metadata
 void readDataFromList(// Inputs
-  std::string const& image_list_file, int ref_cam_type,
-  // Outputs
-  std::vector<double>& ref_timestamps, std::vector<Eigen::Affine3d>& world_to_ref,
-  std::vector<std::vector<ImageMessage>>& image_data,
-  std::vector<std::vector<ImageMessage>>& depth_data) {
+                      std::string const& image_list_file, int ref_cam_type,
+                      std::vector<std::string> const& cam_names,
+                      // Outputs
+                      std::vector<double>& ref_timestamps,
+                      std::vector<Eigen::Affine3d>& world_to_ref,
+                      std::vector<std::vector<ImageMessage>>& image_data,
+                      std::vector<std::vector<ImageMessage>>& depth_data) {
   
   // Clear the outputs
   ref_timestamps.clear();
@@ -1931,15 +1990,11 @@ void readDataFromList(// Inputs
   while (getline(f, line)) {
     if (line.empty() || line[0] == '#') continue;
 
-    std::string image_file, depth_file;
-    int cam_type;
-    double timestamp;
+    std::string image_file;
     std::istringstream iss(line);
-    if (!(iss >> image_file >> cam_type >> timestamp >> depth_file))
+    if (!(iss >> image_file))
       LOG(FATAL) << "Cannot parse the image file, sensor id, timestamp, and depth file in: "
                  << image_list_file << "\n";
-
-    if (cam_type < 0) LOG(FATAL) << "The sensor id must be non-negative.\n";
 
     // Read the camera to world transform
     Eigen::VectorXd vals(12);
@@ -1955,32 +2010,8 @@ void readDataFromList(// Inputs
       LOG(FATAL) << "Expecting 12 values for the transform on line:\n" << line << "\n";
 
     Eigen::Affine3d world_to_cam = vecToAffine(vals);
-
-    // Create aliases
-    std::map<double, ImageMessage> & image_map = image_maps[cam_type];
-    std::map<double, ImageMessage> & depth_map = depth_maps[cam_type];
-
-    if (image_map.find(timestamp) != image_map.end())
-      LOG(FATAL) << "Duplicate timestamp " << std::setprecision(17) << timestamp
-                 << " for sensor id " << cam_type << "\n";
-
-    // Read the image exactly as written, which would be grayscale
-    image_map[timestamp].image        = cv::imread(image_file, cv::IMREAD_UNCHANGED);
-    image_map[timestamp].name         = image_file;
-    image_map[timestamp].timestamp    = timestamp;
-    image_map[timestamp].world_to_cam = world_to_cam;
-
-    // Sanity check
-    if (depth_map.find(timestamp) != depth_map.end())
-      LOG(FATAL) << "Duplicate timestamp " << std::setprecision(17) << timestamp
-                 << " for sensor id " << cam_type << "\n";
-
-    // Read the depth data, if present
-    if (depth_file != dense_map::NO_DEPTH_FILE) {
-      dense_map::readXyzImage(depth_file, depth_map[timestamp].image);
-      depth_map[timestamp].name      = depth_file;
-      depth_map[timestamp].timestamp = timestamp;
-    }
+    readImageEntry(image_file, world_to_cam, cam_names,  
+                   image_maps, depth_maps); // out 
   }
 
   // Put in vectors
@@ -2366,45 +2397,18 @@ void readDataFromNvm(// Inputs
   std::map<int, std::map<double, dense_map::ImageMessage>> depth_maps;
   
   for (size_t it = 0; it < cid_to_filename.size(); it++) {
-    
-    // The cam name is the subdir having the images
-    std::string cam_name =
-      boost::filesystem::path(cid_to_filename[it]).parent_path().filename().string();
-    
-    // The timestamp is the image name
-    std::string basename = boost::filesystem::path(cid_to_filename[it]).filename().string();
-    if (basename.empty() || basename[0] < '0' || basename[0] > '9')
-      LOG(FATAL) << "Image name (without directory) must start with digits. Got: "
-                 << basename << "\n";
-    double timestamp = atof(basename.c_str());
 
-    // Infer cam type from cam name
-    int cam_type = 0;
-    bool success = false;
-    for (size_t cam_it = 0; cam_it < cam_names.size(); cam_it++) {
-      if (cam_names[cam_it] == cam_name) {
-        cam_type = cam_it;
-        success = true;
-        break;
-      }
-    }
+    // Aliases
+    auto const& image_file = cid_to_filename[it];
+    auto const& world_to_cam = cid_to_cam_t_global[it];
 
-    if (!success) 
-      LOG(FATAL) << "Could not extract cam_name from path/to/cam_name/image.jpg, "
-                 << "given image: " << cid_to_filename[it] << "\n";
-    
-    image_maps[cam_type][timestamp].image
-      = cv::imread(cid_to_filename[it], cv::IMREAD_UNCHANGED);
-    image_maps[cam_type][timestamp].name         = cid_to_filename[it];
-    image_maps[cam_type][timestamp].timestamp    = timestamp;
-    image_maps[cam_type][timestamp].world_to_cam = cid_to_cam_t_global[it];
-    
-    // TODO(oalexan1): Read depths here
-    depth_maps[cam_type][timestamp].name         = cid_to_filename[it];
-    depth_maps[cam_type][timestamp].timestamp    = timestamp;
+    readImageEntry(image_file, world_to_cam, cam_names,  
+                   image_maps, depth_maps); // out 
   }
 
-  // This entails some book-keeping 
+  // This entails some book-keeping
+  // TODO(oalexan1): Just keep image_maps and depth_maps and change the book-keeping
+  // to use std::map rather than std::vector iterators
   dense_map::ImageDataToVectors(ref_cam_type, image_maps,  depth_maps, // in
                                 ref_timestamps, world_to_ref, image_data, depth_data); // out
 }
@@ -2592,8 +2596,8 @@ int main(int argc, char** argv) {
   std::vector<std::vector<dense_map::ImageMessage>> image_data;
   std::vector<std::vector<dense_map::ImageMessage>> depth_data;
   if (FLAGS_image_list != "")
-    dense_map::readDataFromList(FLAGS_image_list, ref_cam_type, // in
-                                     ref_timestamps, world_to_ref, image_data, depth_data); // out
+    dense_map::readDataFromList(FLAGS_image_list, ref_cam_type, cam_names, // in
+                                ref_timestamps, world_to_ref, image_data, depth_data); // out
   else if (FLAGS_nvm_file != "") 
     dense_map::readDataFromNvm(FLAGS_nvm_file, ref_cam_type, cam_names, // in
                                ref_timestamps, world_to_ref, image_data, depth_data); // out

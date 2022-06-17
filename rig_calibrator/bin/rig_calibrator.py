@@ -90,7 +90,7 @@ def sanity_checks(args):
     if which("export_to_nvm_file") is None:
         raise Exception("Cannot find the 'export_to_nvm_file' program in PATH.")
 
-def process_args(args):
+def processArgs(args):
     """
     Set up the parser and parse the args.
     """
@@ -232,48 +232,43 @@ def parseRigConfig(rig_config_file):
             
     return cameras
 
-# Theia likes its images undistorted and in one directory
-def gen_undist_image_list(work_dir, dist_image_list):
-    undist_dir = work_dir + "/undist"
-    mkdir_p(undist_dir)
-
-    # Wipe any preexisting images to not confuse theia later
-    count = 0
-    for image in glob.glob(undist_dir + "/*.jpg"):
-        if count == 0:
-            print("Wiping old images in: " + undist_dir)
-        count += 1
-        os.remove(image)
-
-    undist_image_list = work_dir + "/undistorted_list.txt"
-    print("Writing: " + undist_image_list)
-
-    count = 10000  # to have the created images show up nicely
-    undist_images = []
-    with open(dist_image_list, "r") as dfh:
-        dist_image_files = dfh.readlines()
-        with open(undist_image_list, "w") as ufh:
-            for image in dist_image_files:
-                base_image = str(count) + ".jpg"
-                undist_images.append(base_image)
-                undist_image = undist_dir + "/" + base_image
-                ufh.write(undist_image + "\n")
-                count += 1
-
-    return undist_image_list, undist_dir, undist_images
-
-
+def imageExtension(images):
+    '''
+    Get the image extensions for all images. Check that there is only one.
+    '''
+    
+    extensions = set()
+    for image in images:
+        path, ext = os.path.splitext(image)
+        print("--add ", ext)
+        extensions.add(ext)
+    if len(extensions) > 1:
+        raise Exception("Input images have a mix of filename extensions. Use just one.")
+    if len(extensions) == 0:
+        raise Exception("The input image set is invalid.")
+    print("--will get ", list(extensions)[0])
+    return list(extensions)[0]
+        
 def genTheiaCalibFile(rig_config, args):
 
     # Parse the images for all cameras
     images = {}
+    extensions = set()
     print("images are ", args.images)
     for image in args.images.split():
         vals = image.split(':')
         cam_id = int(vals[0])
         pattern = vals[1]
         images[cam_id] = glob.glob(pattern)
+        ext = imageExtension(images[cam_id])
+        extensions.add(ext)
         
+    if len(extensions) > 1:
+        raise Exception("Input images have a mix of filename extensions. Use just one.")
+    if len(extensions) == 0:
+        raise Exception("The input image set is invalid.")
+    extension = list(extensions)[0]
+
     print("Work directory: " + args.work_dir)    
     mkdir_p(args.work_dir)
 
@@ -357,7 +352,7 @@ def genTheiaCalibFile(rig_config, args):
         fh.write("]\n")
         fh.write("}\n")
 
-    return (calib_file, sym_image_dir, images, sym_images)
+    return (calib_file, sym_image_dir, images, sym_images, extension)
 
 def put_orig_images_in_nvm(nvm_file, orig_nvm_file, images, sym_images):
     """
@@ -385,11 +380,12 @@ def put_orig_images_in_nvm(nvm_file, orig_nvm_file, images, sym_images):
     
 if __name__ == "__main__":
 
-    args = process_args(sys.argv)
+    args = processArgs(sys.argv)
 
     rig_config = parseRigConfig(args.rig_config)
 
-    (calib_file, sym_image_dir, images, sym_images) = genTheiaCalibFile(rig_config, args)
+    (calib_file, sym_image_dir, images, sym_images, image_extension) \
+                 = genTheiaCalibFile(rig_config, args)
 
     print("Must set: export OIIO_LIBRARY_PATH=$HOME/projects/MultiView/install/lib")
     print("Must remove this dependency,")
@@ -409,9 +405,8 @@ if __name__ == "__main__":
         count += 1
         os.remove(old_matches)
 
-    print("What if inputs are not jpeg?")
     cmd = ["build_reconstruction", "--flagfile", args.theia_flags, "--images",
-           sym_image_dir + "/*jpg", "--calibration_file", calib_file,
+           sym_image_dir + "/*" + image_extension, "--calibration_file", calib_file,
            "--output_reconstruction", reconstruction_file, "--matching_working_directory",
            matching_dir, "--intrinsics_to_optimize", "NONE"]
     run_cmd(cmd)
