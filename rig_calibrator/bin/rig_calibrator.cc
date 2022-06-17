@@ -2430,11 +2430,8 @@ void calc_rig_transforms(int ref_cam_type, int num_cam_types,
   // Wipe the output
   ref_to_cam_trans.resize(num_cam_types);
 
-  std::vector<int> count(num_cam_types, 0);
-  std::vector<Eigen::MatrixXd> accum_ref_to_cam(num_cam_types);
-  for (int cam_type = 0; cam_type < num_cam_types; cam_type++) 
-    accum_ref_to_cam[cam_type] = Eigen::MatrixXd::Zero(4, 4);
-  
+  // Calc all transforms
+  std::map<int, std::vector<Eigen::MatrixXd>> transforms;
   for (size_t cam_it = 0; cam_it < cams.size(); cam_it++) {
     int beg_index = cams[cam_it].beg_ref_index;
     int end_index = cams[cam_it].end_ref_index;
@@ -2442,8 +2439,7 @@ void calc_rig_transforms(int ref_cam_type, int num_cam_types,
     
     if (cam_type == ref_cam_type) {
       // The identity transform, from the ref sensor to itself
-      accum_ref_to_cam[cam_type] = Eigen::MatrixXd::Identity(4, 4);
-      count[cam_type] = 1;
+      transforms[cam_type].push_back(Eigen::MatrixXd::Identity(4, 4));
     } else {
       // We have world_to_ref transform at times bracketing current time,
       // and world_to_cam at current time. Interp world_to_ref
@@ -2458,19 +2454,36 @@ void calc_rig_transforms(int ref_cam_type, int num_cam_types,
       
       Eigen::Affine3d ref_to_cam_aff
         = world_to_cam[cam_it] * (interp_world_to_ref_aff.inverse());
-
+      
       std::cout << "--ref to cam for it " << cam_type << "\n"
                 << ref_to_cam_aff.matrix() << std::endl;
-      accum_ref_to_cam[cam_type] += ref_to_cam_aff.matrix();
-      count[cam_type]++;
+      transforms[cam_type].push_back(ref_to_cam_aff.matrix());
     }
   }
   
-  // Average the transforms, then remove any scale factor from the rotations
-  for (int cam_type = 0; cam_type < num_cam_types; cam_type++) {
-    ref_to_cam_trans[cam_type].matrix() = accum_ref_to_cam[cam_type] / count[cam_type];
+  // Find median, for robustness
+  for (auto it = transforms.begin(); it != transforms.end(); it++) {
+    int cam_type = it->first;
+    auto & transforms = it->second;
+    Eigen::MatrixXd median_trans = Eigen::MatrixXd::Zero(4, 4);
+    for (int col = 0; col < 4; col++) {
+      for (int row = 0; row < 4; row++) {
+        std::vector<double> vals;
+        for (size_t cam_it = 0; cam_it < transforms.size(); cam_it++)
+          vals.push_back(transforms[cam_it](col, row));
+
+        if (vals.empty()) 
+          LOG(FATAL) << "No poses were found for rig sensor with id: " << cam_type << "\n";
+
+        median_trans(col, row) = vals[vals.size()/2];
+      }
+    }
+    ref_to_cam_trans[cam_type].matrix() = median_trans;
     ref_to_cam_trans[cam_type].linear() /= 
       pow(ref_to_cam_trans[cam_type].linear().determinant(), 1.0 / 3.0);
+    
+    std::cout << "--median ref to cam for sensor " << cam_type << "\n"
+              << ref_to_cam_trans[cam_type].matrix() << std::endl;
   }
   
   return;

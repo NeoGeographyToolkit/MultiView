@@ -58,6 +58,8 @@ def run_cmd(cmd):
     """
     Run a command.
     """
+    # TODO(oalexan1): Should the "system" command be used instead?
+    # Then it will print the output of each command.
     print(" ".join(cmd) + "\n")
     process = subprocess.Popen(cmd, stdout=subprocess.PIPE)
     process.wait()
@@ -306,6 +308,8 @@ def genTheiaCalibFile(rig_config, args):
         fh.write('"priors" : [\n')
 
         for cam_id in range(len(rig_config)):
+            print("rig is ", rig_config[cam_id])
+            
             num_images = len(sym_images[cam_id])
             for it in range(num_images):
                 image = os.path.basename(sym_images[cam_id][it])
@@ -313,12 +317,38 @@ def genTheiaCalibFile(rig_config, args):
                 fh.write('"image_name" : "' + image + '",\n')
                 fh.write('"width" : '  + rig_config[cam_id]['image_size'][0] + ",\n")
                 fh.write('"height" : ' + rig_config[cam_id]['image_size'][1] + ",\n")
-                fh.write('"camera_intrinsics_type" : "PINHOLE",\n')
                 fh.write('"focal_length" : ' + rig_config[cam_id]["focal_length"] + ",\n")
                 fh.write('"principal_point" : [' + \
                          rig_config[cam_id]["optical_center"][0] + ", " + \
-                         rig_config[cam_id]["optical_center"][1] + "]\n")
-                
+                         rig_config[cam_id]["optical_center"][1] + "],\n")
+
+                if rig_config[cam_id]['distortion_type'] == 'no_distortion':
+                    fh.write('"camera_intrinsics_type" : "PINHOLE"\n')
+                elif rig_config[cam_id]['distortion_type'] == 'fisheye':
+                    fh.write('"radial_distortion_1" : ' + \
+                             rig_config[cam_id]["distortion_coeffs"][0] + ",\n")
+                    fh.write('"camera_intrinsics_type" : "FOV"\n')
+                elif rig_config[cam_id]['distortion_type'] == 'radtan':
+                    
+                    # Distortion coeffs convention copied from
+                    # camera_params.cc. JSON format from
+                    # calibration_test.json in TheiaSFM.
+                    k1 = rig_config[cam_id]["distortion_coeffs"][0]
+                    k2 = rig_config[cam_id]["distortion_coeffs"][1]
+                    p1 = rig_config[cam_id]["distortion_coeffs"][2]
+                    p2 = rig_config[cam_id]["distortion_coeffs"][3]
+                    k3 = '0'
+                    if len(rig_config[cam_id]["distortion_coeffs"]) == 5:
+                        k3 = rig_config[cam_id]["distortion_coeffs"][4]
+                    fh.write('"radial_distortion_coeffs" : [' + \
+                             k1 + ", " + k2 + ", " + k3 + "],\n")
+                    fh.write('"tangential_distortion_coeffs" : [' + \
+                             p1 + ", " + p2 + "],\n")
+                    fh.write('"camera_intrinsics_type" : "PINHOLE_RADIAL_TANGENTIAL"\n')
+                else:
+                    raise Exception("Unknown distortion type: " + \
+                                    rig_config[cam_id]['distortion_type'])
+
                 if it < num_images - 1 or cam_id < len(rig_config)  - 1:
                     fh.write("}},\n")
                 else:
