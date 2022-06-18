@@ -46,18 +46,57 @@ std::string print_vec(Eigen::Vector3d a) {
   return std::string(st);
 }
 
-// A  function to split a string like 'optical_center focal_length' into
-// its two constituents.
-void parse_intrinsics_to_float(std::string const& intrinsics_to_float,
-                               std::set<std::string>& intrinsics_to_float_set) {
-  intrinsics_to_float_set.clear();
+// A function to parse a string like
+// 'cam1:focal_length,optical_center,distortion cam2:focal_length' and
+// extract the intrinsics to float. Separators can be space, comma,
+// colon.
+void parse_intrinsics_to_float(std::string const& intrinsics_to_float_str,
+                               std::vector<std::string> const& cam_names,
+                               std::vector<std::set<std::string>>& intrinsics_to_float) {
+  // Wipe the output
+  intrinsics_to_float.clear();
+
+  // Replace all separators with spaces
+  std::string sep = ":, \t\r\n";
+
+  std::string input_str = intrinsics_to_float_str; // so we can edit it
+  for (size_t it = 0; it < sep.size(); it++) 
+    std::replace(input_str.begin(), input_str.end(), sep[it], ' ');
+
+  std::istringstream iss(input_str);
+  std::string curr_cam = "";
   std::string val;
-  std::istringstream is(intrinsics_to_float);
-  while (is >> val) {
+  
+  // Temporary map of sets for collection. This will ensure variable order
+  // of inputs is supported.
+  std::map<std::string, std::set<std::string>> local_map;
+  while (iss >> val) {
+    // See if this is a camera name
+    bool have_cam_name = false;
+    for (size_t it = 0; it < cam_names.size(); it++) {
+      if (val == cam_names[it]) {
+        curr_cam = val;
+        have_cam_name = true;
+        break;
+      }
+    }
+
+    if (have_cam_name) // recorded the camera name
+      continue;
+    
     if (val != "focal_length" && val != "optical_center" && val != "distortion")
-      LOG(FATAL) << "Unexpected intrinsic name: " << val << std::endl;
-    intrinsics_to_float_set.insert(val);
+      LOG(FATAL) << "Unexpected value when parsing intrinsics to float: " << val << "\n";
+
+    if (curr_cam == "") 
+      LOG(FATAL) << "Incorrectly set option for floating intrinsics.\n";
+
+    local_map[curr_cam].insert(val);
   }
+
+  // Export this
+  intrinsics_to_float.resize(cam_names.size());
+  for (size_t it = 0; it < cam_names.size(); it++)
+    intrinsics_to_float[it] = local_map[cam_names[it]];
 }
 
 // A  function to split a string like 'haz_cam sci_cam depth_to_image' into

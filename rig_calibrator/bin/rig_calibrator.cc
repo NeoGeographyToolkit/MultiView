@@ -178,24 +178,15 @@ DEFINE_double(robust_threshold, 3.0,
 DEFINE_int32(num_iterations, 20, "How many solver iterations to perform in calibration.");
 
 DEFINE_double(bracket_len, 0.6,
-              "Lookup sci and haz cam images only between consecutive nav cam images "
+              "Lookup non-reference cam images only between consecutive ref cam images "
               "whose distance in time is no more than this (in seconds), after adjusting "
-              "for the timestamp offset between these cameras. It is assumed the robot "
+              "for the timestamp offset between these cameras. It is assumed the rig "
               "moves slowly and uniformly during this time. A large value here will "
-              "make the refiner compute a poor solution but a small value will prevent "
-              "enough sci_cam images being bracketed.");
+              "make the calibrator compute a poor solution but a small value may prevent "
+              "enough images being bracketed.");
 
-DEFINE_string(nav_cam_intrinsics_to_float, "",
-              "Refine given nav_cam intrinsics. Specify as a quoted list. "
-              "For example: 'focal_length optical_center distortion'.");
-
-DEFINE_string(haz_cam_intrinsics_to_float, "",
-              "Refine given haz_cam intrinsics. Specify as a quoted list. "
-              "For example: 'focal_length optical_center distortion'.");
-
-DEFINE_string(sci_cam_intrinsics_to_float, "",
-              "Refine given sci_cam intrinsics. Specify as a quoted list. "
-              "For example: 'focal_length optical_center distortion'.");
+DEFINE_string(intrinsics_to_float, "", "Specify which intrinsics to float for each sensor. "
+              "Example: 'cam1:focal_length,optical_center,distortion cam2:focal_length'.");
 
 DEFINE_string(extrinsics_to_float, "haz_cam sci_cam depth_to_image",
               "Specify the cameras whose extrinsics, relative to nav_cam, to optimize. Also "
@@ -2198,6 +2189,10 @@ void readConfigVals(std::ifstream & f, std::string const& tag, int desired_num_v
   throw std::runtime_error("Could not read value for: " + tag);
 }
 
+// TODO(oalexan1): Eliminate the sensor id. Put the ref cam the first
+// in the list.
+// TODO(oalexan1): Adjust accordingly the Python logic too.
+  
 // TODO(oalexan1): Move to utils
 
 // Read a rig configuration. Check if the transforms among the sensors
@@ -2981,7 +2976,6 @@ Eigen::Affine3d registerTransforms(std::string const& hugin_file, std::string co
 
   return registration_trans;
 }
-  
 }  // namespace dense_map
 
 int main(int argc, char** argv) {
@@ -3030,9 +3024,6 @@ int main(int argc, char** argv) {
       }
     }
   }
-
-  // Save this in case we need to restore the original parameters
-  std::vector<camera::CameraParameters> orig_cam_params = cam_params;
 
   // Optionally load the mesh
   mve::TriangleMesh::Ptr mesh;
@@ -3212,15 +3203,10 @@ int main(int argc, char** argv) {
   std::vector<double> identity_vec(dense_map::NUM_RIGID_PARAMS);
   dense_map::rigid_transform_to_array(identity, &identity_vec[0]);
 
-  // Which intrinsics from which cameras to float
-  std::cout << "---num cam types " << num_cam_types << std::endl;
-  std::cout << "--fix here!" << std::endl;
-  std::vector<std::set<std::string>> intrinsics_to_float(num_cam_types);
-  if (num_cam_types == 3) {
-    dense_map::parse_intrinsics_to_float(FLAGS_nav_cam_intrinsics_to_float, intrinsics_to_float[0]);
-    dense_map::parse_intrinsics_to_float(FLAGS_haz_cam_intrinsics_to_float, intrinsics_to_float[1]);
-    dense_map::parse_intrinsics_to_float(FLAGS_sci_cam_intrinsics_to_float, intrinsics_to_float[2]);
-  }
+  // Which intrinsics from which cameras to float. Indexed by cam_type.
+  std::vector<std::set<std::string>> intrinsics_to_float;
+  dense_map::parse_intrinsics_to_float(FLAGS_intrinsics_to_float, cam_names,
+                                       intrinsics_to_float);
   
   std::string depth_to_image_name = "depth_to_image";
   std::set<std::string> extrinsics_to_float;
@@ -3678,14 +3664,6 @@ int main(int argc, char** argv) {
       cam_params[it].SetDistortion(distortions[it]);
     }
 
-    // If the nav cam did not get optimized, go back to the solution
-    // with two focal lengths, rather than the one with one focal length
-    // solved by this solver (as the average of the two). The two focal
-    // lengths are very similar, but it is not worth modifying the
-    // camera model we don't plan to optimize.
-    if (FLAGS_nav_cam_intrinsics_to_float == "" || FLAGS_num_iterations == 0)
-      cam_params[ref_cam_type] = orig_cam_params[ref_cam_type];
-
     // Copy back the optimized extrinsics, whether it was optimized or fixed
     for (int cam_type = 0; cam_type < num_cam_types; cam_type++)
       dense_map::array_to_rigid_transform
@@ -3735,7 +3713,7 @@ int main(int argc, char** argv) {
   sparse_map->cid_to_cam_t_global_ = world_to_ref;
 
   bool map_changed = (FLAGS_num_iterations > 0 &&
-                      (FLAGS_float_sparse_map || FLAGS_nav_cam_intrinsics_to_float != ""));
+                      (FLAGS_float_sparse_map || FLAGS_intrinsics_to_float != ""));
   if (map_changed) {
     // Rebuild the map. This does not change the poses.
     std::cout << "Either the sparse map intrinsics or cameras got modified. "

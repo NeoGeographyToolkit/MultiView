@@ -53,10 +53,13 @@ const std::string FISHEYE_DISTORTION = "fisheye";
 const std::string RADTAN_DISTORTION  = "radtan";
 const std::string NO_DISTORION       = "no_distortion";
 
-// A  function to split a string like 'optical_center focal_length' into
-// its two constituents.
-void parse_intrinsics_to_float(std::string const& intrinsics_to_float,
-                                 std::set<std::string>& intrinsics_to_float_set);
+// A function to parse a string like
+// 'cam1:focal_length,optical_center,distortion cam2:focal_length' and
+// extract the intrinsics to float. Separators can be space, comma,
+// colon.
+void parse_intrinsics_to_float(std::string const& intrinsics_to_float_str,
+                               std::vector<std::string> const& cam_names,
+                               std::vector<std::set<std::string>>& intrinsics_to_float);
 
 // A  function to split a string like 'haz_cam sci_cam' into
 // its two constituents and validate against the list of known cameras.
