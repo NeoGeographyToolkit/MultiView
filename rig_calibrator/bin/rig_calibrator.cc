@@ -1092,7 +1092,7 @@ void parameterValidation() {
 
   if (FLAGS_use_initial_rig_transforms && FLAGS_no_extrinsics)
     LOG(FATAL) << "Cannot use initial rig transforms if not modeling the rig.\n";
-  
+
 #if !HAVE_ASTROBEE
   if (FLAGS_rig_config == "")
     LOG(FATAL) << "Must specify the initial rig configuration via --rig_config.\n";
@@ -1964,6 +1964,7 @@ void readImageEntry(// Inputs
                << " for sensor id " << cam_type << "\n";
   
   // Read the image exactly as written, which would be grayscale
+  std::cout << "Reading: " << image_file << std::endl;
   image_map[timestamp].image        = cv::imread(image_file, cv::IMREAD_UNCHANGED);
   image_map[timestamp].name         = image_file;
   image_map[timestamp].timestamp    = timestamp;
@@ -1977,6 +1978,7 @@ void readImageEntry(// Inputs
   // Read the depth data, if present
   std::string depth_file = fs::path(image_file).replace_extension(".pc").string();
   if (fs::exists(depth_file)) {
+    std::cout << "Reading: " << depth_file << std::endl;
     dense_map::readXyzImage(depth_file, depth_map[timestamp].image);
     depth_map[timestamp].name      = depth_file;
     depth_map[timestamp].timestamp = timestamp;
@@ -2499,9 +2501,6 @@ void calc_rig_using_word_to_cam(int ref_cam_type, int num_cam_types,
       
       Eigen::Affine3d ref_to_cam_aff
         = world_to_cam[cam_it] * (interp_world_to_ref_aff.inverse());
-      
-      std::cout << "--ref to cam for it " << cam_type << "\n"
-                << ref_to_cam_aff.matrix() << std::endl;
       transforms[cam_type].push_back(ref_to_cam_aff.matrix());
     }
   }
@@ -3088,13 +3087,13 @@ int main(int argc, char** argv) {
   std::vector<std::string> ref_image_files;
   if (FLAGS_image_list != "")
     dense_map::readDataFromList(FLAGS_image_list, ref_cam_type, cam_names, // in
-                                ref_timestamps, world_to_ref, ref_image_files, 
+                                ref_timestamps, world_to_ref, ref_image_files,
                                 image_data, depth_data); // out
   else if (FLAGS_nvm_file != "") 
     dense_map::readDataFromNvm(FLAGS_nvm_file, ref_cam_type, cam_names, // in
-                               ref_timestamps, world_to_ref,
-                               ref_image_files, image_data, depth_data); // out
-  
+                               ref_timestamps, world_to_ref, ref_image_files,
+                               image_data, depth_data); // out
+
   // Build a map for quick access for all the messages we may need
   std::vector<std::string> topics;
   dense_map::StrToMsgMap bag_map;
