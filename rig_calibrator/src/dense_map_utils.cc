@@ -46,6 +46,13 @@ std::string print_vec(Eigen::Vector3d a) {
   return std::string(st);
 }
 
+// A little function to replace separators with space  
+void replace_separators_with_space(std::string & str) {
+  std::string sep = ":, \t\r\n";
+  for (size_t it = 0; it < sep.size(); it++) 
+    std::replace(str.begin(), str.end(), sep[it], ' ');
+}
+  
 // A function to parse a string like
 // 'cam1:focal_length,optical_center,distortion cam2:focal_length' and
 // extract the intrinsics to float. Separators can be space, comma,
@@ -60,8 +67,7 @@ void parse_intrinsics_to_float(std::string const& intrinsics_to_float_str,
   std::string sep = ":, \t\r\n";
 
   std::string input_str = intrinsics_to_float_str; // so we can edit it
-  for (size_t it = 0; it < sep.size(); it++) 
-    std::replace(input_str.begin(), input_str.end(), sep[it], ' ');
+  replace_separators_with_space(input_str);
 
   std::istringstream iss(input_str);
   std::string curr_cam = "";
@@ -99,39 +105,64 @@ void parse_intrinsics_to_float(std::string const& intrinsics_to_float_str,
     intrinsics_to_float[it] = local_map[cam_names[it]];
 }
 
-// A  function to split a string like 'haz_cam sci_cam depth_to_image' into
+// A  function to split a string like 'haz_cam sci_cam' into
 // its two constituents and validate against the list of known cameras.
-void parse_extrinsics_to_float(std::vector<std::string> const& cam_names,
-                               std::string const& ref_cam_name,
-                               std::string const& depth_to_image_name,
-                               std::string const& extrinsics_to_float,
-                               std::set<std::string>& extrinsics_to_float_set) {
-  extrinsics_to_float_set.clear();
-  std::string val;
-  std::istringstream is(extrinsics_to_float);
-  while (is >> val) {
-    extrinsics_to_float_set.insert(val);
+void parse_depth_to_image_transforms_to_float(std::vector<std::string> const& cam_names,
+                                              std::string const&
+                                              depth_to_image_transforms_to_float_str,
+                                              std::set<std::string>&
+                                              depth_to_image_transforms_to_float) {
+  // Wipe the output
+  depth_to_image_transforms_to_float.clear();
 
-    // Sanity check
-    bool known_cam = false;
+  std::string input_str = depth_to_image_transforms_to_float_str; // so we can edit it
+  replace_separators_with_space(input_str);
+  
+  std::istringstream iss(input_str);
+  std::string curr_cam = "";
+  std::string val;
+  
+  while (iss >> val) {
+    bool have_cam_name = false;
     for (size_t it = 0; it < cam_names.size(); it++) {
       if (val == cam_names[it]) {
-        known_cam = true;
+        have_cam_name = true;
         break;
       }
     }
-    if (val == depth_to_image_name) known_cam = true;
-
-    if (!known_cam)
-      LOG(FATAL) << "Unknown camera: " << val << "\n";
+    
+    if (!have_cam_name) 
+      LOG(FATAL) << "Error: A specified sensor name is not among the known sensors.\n";
+    
+    std::cout << "--zzz will float rig transform to sensor " << val << std::endl;
+    depth_to_image_transforms_to_float.insert(val);
   }
 
-  if (extrinsics_to_float_set.find(ref_cam_name) != extrinsics_to_float_set.end())
-    LOG(FATAL) << "There exists no extrinsics transform from " << ref_cam_name << " to itself.\n";
+  return;
+}  
+  
+// A  function to split a string like 'haz_cam sci_cam' into
+// its two constituents and validate against the list of known cameras.
+// Do not allow to float the transform from ref cam to itself, as that
+// is the identity.
+void parse_rig_transforms_to_float(std::vector<std::string> const& cam_names,
+                                   int ref_cam_type,
+                                   std::string const& rig_transforms_to_float_str,
+                                   std::set<std::string>& rig_transforms_to_float) {
+
+  // Reuse earlier logic
+  parse_depth_to_image_transforms_to_float(cam_names, 
+                                           rig_transforms_to_float_str,  
+                                           rig_transforms_to_float);
+
+  // Additional sanity check
+  for (auto it = rig_transforms_to_float.begin(); it != rig_transforms_to_float.end(); it++)
+    if (*it == cam_names[ref_cam_type]) 
+      LOG(FATAL) << "Cannot float the rig transform from reference camera to itself.\n";
 
   return;
 }
-
+  
 // Extract a rigid transform to an array of length NUM_RIGID_PARAMS
 void rigid_transform_to_array(Eigen::Affine3d const& aff, double* arr) {
   for (size_t it = 0; it < 3; it++) arr[it] = aff.translation()[it];

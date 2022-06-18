@@ -63,11 +63,20 @@ void parse_intrinsics_to_float(std::string const& intrinsics_to_float_str,
 
 // A  function to split a string like 'haz_cam sci_cam' into
 // its two constituents and validate against the list of known cameras.
-void parse_extrinsics_to_float(std::vector<std::string> const& cam_names,
-                               std::string const& ref_cam_name,
-                               std::string const& depth_to_image_name,
-                               std::string const& extrinsics_to_float,
-                               std::set<std::string>& extrinsics_to_float_set);
+void parse_depth_to_image_transforms_to_float(std::vector<std::string> const& cam_names,
+                                              std::string const&
+                                              depth_to_image_transforms_to_float_str,
+                                              std::set<std::string>&
+                                              depth_to_image_transforms_to_float);
+
+// A  function to split a string like 'haz_cam sci_cam' into
+// its two constituents and validate against the list of known cameras.
+// Do not allow to float the transform from ref cam to itself, as that
+// is the identity.
+void parse_rig_transforms_to_float(std::vector<std::string> const& cam_names,
+                                   int ref_cam_type,
+                                   std::string const& rig_transforms_to_float_str,
+                                   std::set<std::string>& rig_transforms_to_float);
 
 // Extract a rigid transform to an array of length NUM_RIGID_PARAMS
 void rigid_transform_to_array(Eigen::Affine3d const& aff, double* arr);

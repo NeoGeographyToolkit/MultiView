@@ -188,16 +188,18 @@ DEFINE_double(bracket_len, 0.6,
 DEFINE_string(intrinsics_to_float, "", "Specify which intrinsics to float for each sensor. "
               "Example: 'cam1:focal_length,optical_center,distortion cam2:focal_length'.");
 
-DEFINE_string(extrinsics_to_float, "haz_cam sci_cam depth_to_image",
-              "Specify the cameras whose extrinsics, relative to nav_cam, to optimize. Also "
-              "consider if to float the haz_cam depth_to_image transform.");
+DEFINE_string(rig_transforms_to_float, "",
+              "Specify the names of sensors whose transforms to float, relative to the ref sensor. Use quotes around this string if it has spaces. Also can use comma as separator.");
+
+DEFINE_string(depth_to_image_transforms_to_float, "",
+              "Specify for which sensors to float the depth-to-image transform (if depth data exists).");
 
 DEFINE_bool(float_scale, false,
             "If to optimize the scale of the clouds, part of haz_cam depth_to_image transform "
             "(use it if the sparse map is kept fixed, or else rescaling and registration "
             "of the map and extrinsics is needed). This parameter should not be used with "
             "--affine_depth_to_image when the transform is affine, rather than rigid and a scale."
-            "See also --extrinsics_to_float.");
+            "See also --depth_to_image_transforms_to_float.");
 
 DEFINE_bool(float_sparse_map, false,
             "Optimize the sparse map. This should be avoided as it can invalidate the scales "
@@ -3000,16 +3002,16 @@ int main(int argc, char** argv) {
   std::vector<Eigen::Affine3d>          ref_to_cam_trans;
   std::vector<double>                   ref_to_cam_timestamp_offsets;
 
-  bool have_rig_transforms = FLAGS_use_initial_rig_transforms;
+  bool use_initial_rig_transforms = FLAGS_use_initial_rig_transforms; // this may change
   if (FLAGS_rig_config != "")  // Read a plain text config file for n sensors
-    dense_map::readRigConfig(FLAGS_rig_config, have_rig_transforms, ref_cam_type, cam_names,
+    dense_map::readRigConfig(FLAGS_rig_config, use_initial_rig_transforms, ref_cam_type, cam_names,
                              cam_params, ref_to_cam_trans, depth_to_image,
                              ref_to_cam_timestamp_offsets);
   else  // Read a lua-based config file for an Astrobee robot with 3 sensors
-    dense_map::readLuaConfig(have_rig_transforms, ref_cam_type, cam_names, cam_params,
+    dense_map::readLuaConfig(use_initial_rig_transforms, ref_cam_type, cam_names, cam_params,
                              ref_to_cam_trans, depth_to_image, ref_to_cam_timestamp_offsets);
 
-  std::cout << "--have initial rig transform " << have_rig_transforms << std::endl;
+  std::cout << "--have initial rig transform " << use_initial_rig_transforms << std::endl;
   
   int num_cam_types = cam_params.size();
 
@@ -3106,10 +3108,6 @@ int main(int argc, char** argv) {
   dense_map::indexMessages(view, bag_map);
 #endif
 
-  for (size_t it = 0; it < ref_timestamps.size(); it++) {
-    std::cout.precision(18);
-    std::cout << "--image " << ref_timestamps[it] << ' ' << ref_image_files[it] << std::endl;
-  }
   // Keep here the images, timestamps, and bracketing information
   std::vector<dense_map::cameraImage> cams;
   //  The range of ref_to_cam_timestamp_offsets[cam_type] before
@@ -3135,7 +3133,7 @@ int main(int argc, char** argv) {
   // without world_to_cam_vec, on input which was not computed yet.
 
   // TODO(oalexan1): Don't use this logic if we have no rig
-  if (have_rig_transforms) {
+  if (use_initial_rig_transforms) {
     // Using the rig transforms in ref_to_cam_vec and transforms from
     // world to each ref cam in world_to_ref, calculate world_to_cam,
     // the transforms from the world to each camera
@@ -3208,17 +3206,14 @@ int main(int argc, char** argv) {
   dense_map::parse_intrinsics_to_float(FLAGS_intrinsics_to_float, cam_names,
                                        intrinsics_to_float);
   
-  std::string depth_to_image_name = "depth_to_image";
-  std::set<std::string> extrinsics_to_float;
-  dense_map::parse_extrinsics_to_float(cam_names, cam_names[ref_cam_type], depth_to_image_name,
-                                       FLAGS_extrinsics_to_float, extrinsics_to_float);
+  std::set<std::string> rig_transforms_to_float;
+  dense_map::parse_rig_transforms_to_float(cam_names, ref_cam_type,
+                                           FLAGS_rig_transforms_to_float, rig_transforms_to_float);
   
-  std::cout << "--num extrinsics to float " << extrinsics_to_float.size() << std::endl;
-  
-  if (!FLAGS_affine_depth_to_image && FLAGS_float_scale &&
-      extrinsics_to_float.find(depth_to_image_name) == extrinsics_to_float.end())
-    LOG(FATAL) << "Cannot float the scale of depth_to_image_transform unless this "
-               << "this is allowed as part of --extrinsics_to_float.\n";
+  std::set<std::string> depth_to_image_transforms_to_float;
+  dense_map::parse_depth_to_image_transforms_to_float(cam_names, 
+                                                      FLAGS_depth_to_image_transforms_to_float,
+                                                      depth_to_image_transforms_to_float);
 
   // Set up the variable blocks to optimize for BracketedDepthError
   int num_depth_params = dense_map::NUM_RIGID_PARAMS;
@@ -3493,7 +3488,7 @@ int main(int argc, char** argv) {
         }
         // ref_to_cam is kept fixed at the identity if the cam is the ref type or
         // no extrinsics
-        if (extrinsics_to_float.find(cam_names[cam_type]) == extrinsics_to_float.end() ||
+        if (rig_transforms_to_float.find(cam_names[cam_type]) == rig_transforms_to_float.end() ||
             cam_type == ref_cam_type || FLAGS_no_extrinsics) {
           problem.SetParameterBlockConstant(ref_to_cam_ptr);
         }
@@ -3535,10 +3530,9 @@ int main(int argc, char** argv) {
             problem.SetParameterBlockConstant(&depth_to_image_scales[cam_type]);
           }
 
-          if (extrinsics_to_float.find(depth_to_image_name) == extrinsics_to_float.end()) {
-            problem.SetParameterBlockConstant(
-              &depth_to_image_vec[num_depth_params * cam_type]);
-          }
+          if (depth_to_image_transforms_to_float.find(cam_names[cam_type])
+              == depth_to_image_transforms_to_float.end())
+            problem.SetParameterBlockConstant(&depth_to_image_vec[num_depth_params * cam_type]);
         }
 
         // Add the depth to mesh constraint
@@ -3582,9 +3576,9 @@ int main(int argc, char** argv) {
           if (!FLAGS_float_scale || FLAGS_affine_depth_to_image)
             problem.SetParameterBlockConstant(&depth_to_image_scales[cam_type]);
 
-          if (extrinsics_to_float.find(depth_to_image_name) == extrinsics_to_float.end())
-            problem.SetParameterBlockConstant
-              (&depth_to_image_vec[num_depth_params * cam_type]);
+          if (depth_to_image_transforms_to_float.find(cam_names[cam_type])
+              == depth_to_image_transforms_to_float.end())
+            problem.SetParameterBlockConstant(&depth_to_image_vec[num_depth_params * cam_type]);
         }
       }  // end iterating over all cid for given pid
 
