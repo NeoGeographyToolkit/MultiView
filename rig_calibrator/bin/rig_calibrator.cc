@@ -886,9 +886,8 @@ void meshProjectCameras(std::vector<std::string> const& cam_names,
   }
 }
 
-// Compute the transforms from the world to every camera, using pose interpolation
-// if necessary.
-void calc_world_to_cam_transforms(  // Inputs
+// Compute the transforms from the world to every camera, based on the rig transforms
+void calc_world_to_cam_using_rig(// Inputs
                                   std::vector<dense_map::cameraImage> const& cams,
                                   std::vector<double> const& world_to_ref_vec,
                                   std::vector<double> const& ref_timestamps,
@@ -918,11 +917,42 @@ void calc_world_to_cam_transforms(  // Inputs
   return;
 }
 
+// A version of the above with the data stored differently
+void calc_world_to_cam_using_rig(// Inputs
+                                  std::vector<dense_map::cameraImage> const& cams,
+                                  std::vector<Eigen::Affine3d> const& world_to_ref,
+                                  std::vector<double> const& ref_timestamps,
+                                  std::vector<Eigen::Affine3d> const& ref_to_cam,
+                                  std::vector<double> const& ref_to_cam_timestamp_offsets,
+                                  // Output
+                                  std::vector<Eigen::Affine3d>& world_to_cam) {
+
+  int num_cam_types = ref_to_cam.size();
+  std::vector<double> ref_to_cam_vec(num_cam_types * dense_map::NUM_RIGID_PARAMS);
+  for (int cam_type = 0; cam_type < num_cam_types; cam_type++)
+    dense_map::rigid_transform_to_array
+      (ref_to_cam[cam_type], &ref_to_cam_vec[dense_map::NUM_RIGID_PARAMS * cam_type]);
+
+  int num_ref_cams = world_to_ref.size();
+  if (world_to_ref.size() != ref_timestamps.size())
+    LOG(FATAL) << "Must have as many ref cam timestamps as ref cameras.\n";
+  std::vector<double> world_to_ref_vec(num_ref_cams * dense_map::NUM_RIGID_PARAMS);
+  for (int cid = 0; cid < num_ref_cams; cid++)
+    dense_map::rigid_transform_to_array(world_to_ref[cid],
+                                        &world_to_ref_vec[dense_map::NUM_RIGID_PARAMS * cid]);
+
+  calc_world_to_cam_using_rig(// Inputs
+                              cams, world_to_ref_vec, ref_timestamps, ref_to_cam_vec,  
+                              ref_to_cam_timestamp_offsets,  
+                              // Output
+                              world_to_cam);
+}
+  
 // Calculate world_to_cam transforms from their representation in a
 // vector, rather than using reference cameras, extrinsics and
 // timestamp interpolation. Only for use with --no_extrinsics, when
 // each camera varies independently.
-void calc_world_to_cam_no_extrinsics(  // Inputs
+void calc_world_to_cam_no_rig(  // Inputs
   std::vector<dense_map::cameraImage> const& cams, std::vector<double> const& world_to_cam_vec,
   // Output
   std::vector<Eigen::Affine3d>& world_to_cam) {
@@ -936,7 +966,7 @@ void calc_world_to_cam_no_extrinsics(  // Inputs
 
 // Use one of the two implementations above. Care is needed as when there are no extrinsics,
 // each camera is on its own, so the input is in world_to_cam_vec and not in world_to_ref_vec
-void calc_world_to_cam_transforms(  // Inputs
+void calc_world_to_cam_rig_or_not(  // Inputs
   bool no_extrinsics, std::vector<dense_map::cameraImage> const& cams,
   std::vector<double> const& world_to_ref_vec, std::vector<double> const& ref_timestamps,
   std::vector<double> const& ref_to_cam_vec, std::vector<double> const& world_to_cam_vec,
@@ -944,13 +974,13 @@ void calc_world_to_cam_transforms(  // Inputs
   // Output
   std::vector<Eigen::Affine3d>& world_to_cam) {
   if (!no_extrinsics)
-    calc_world_to_cam_transforms(  // Inputs
+    calc_world_to_cam_using_rig(  // Inputs
                                  cams, world_to_ref_vec, ref_timestamps, ref_to_cam_vec,
                                  ref_to_cam_timestamp_offsets,
                                  // Output
                                  world_to_cam);
   else
-    calc_world_to_cam_no_extrinsics(  // Inputs
+    calc_world_to_cam_no_rig(  // Inputs
       cams, world_to_cam_vec,
       // Output
       world_to_cam);
@@ -1138,7 +1168,6 @@ void lookupImagesAndBrackets(  // Inputs
   std::vector<std::string> const& depth_topics, StrToMsgMap const& bag_map,
   std::vector<std::vector<ImageMessage>> const& image_data,
   std::vector<std::vector<ImageMessage>> const& depth_data,
-  std::vector<std::set<double>> const& cam_timestamps_to_use,
   std::vector<double> const& ref_to_cam_timestamp_offsets,
   // Outputs
   std::vector<dense_map::cameraImage>& cams, std::vector<double>& min_timestamp_offset,
@@ -1305,15 +1334,6 @@ void lookupImagesAndBrackets(  // Inputs
         cam.image         = best_image;
 
         success = true;
-      }
-
-      // See if to skip this timestamp
-      if (!cam_timestamps_to_use[cam_type].empty() &&
-          cam_timestamps_to_use[cam_type].find(cam.timestamp) ==
-          cam_timestamps_to_use[cam_type].end()) {
-        std::cout << std::setprecision(17) << "For " << cam_names[cam_type]
-                  << " skipping timestamp: " << cam.timestamp << std::endl;
-        continue;
       }
 
       if (!success) continue;
@@ -2431,9 +2451,9 @@ void readDataFromNvm(// Inputs
 // Note that strictly speaking the transforms in world_to_ref_vec are among
 // those in world_to_cam, but we don't have a way of looking them up in that
 // vector.
-void calc_rig_transforms(int ref_cam_type, int num_cam_types,
+void calc_rig_using_word_to_cam(int ref_cam_type, int num_cam_types,
                          std::vector<dense_map::cameraImage> const& cams,
-                         std::vector<double>                 const& world_to_ref_vec,
+                         std::vector<Eigen::Affine3d>        const& world_to_ref,
                          std::vector<Eigen::Affine3d>        const& world_to_cam,
                          std::vector<double>                 const& ref_timestamps,
                          std::vector<double>                 const& ref_to_cam_timestamp_offsets,
@@ -2443,6 +2463,14 @@ void calc_rig_transforms(int ref_cam_type, int num_cam_types,
   // Sanity check
   if (cams.size() != world_to_cam.size()) 
     LOG(FATAL) << "There must be as many world to cam transforms as metadata sets for them.\n";
+
+  int num_ref_cams = world_to_ref.size();
+  if (world_to_ref.size() != ref_timestamps.size())
+    LOG(FATAL) << "Must have as many ref cam timestamps as ref cameras.\n";
+  std::vector<double> world_to_ref_vec(num_ref_cams * dense_map::NUM_RIGID_PARAMS);
+  for (int cid = 0; cid < num_ref_cams; cid++)
+    dense_map::rigid_transform_to_array(world_to_ref[cid],
+                                        &world_to_ref_vec[dense_map::NUM_RIGID_PARAMS * cid]);
   
   // Wipe the output
   ref_to_cam_trans.resize(num_cam_types);
@@ -2713,24 +2741,35 @@ void ParseXYZ(std::string const& xyz_file,
   }
 }
 
-// Apply a given transform to the specified xyz points, and adjust accordingly the cameras
-// for consistency. We assume that the transform is of the form
-// A(x) = scale * rotation * x + translation
-void TransformCamerasAndPoints(Eigen::Affine3d const& A,
-                               std::vector<Eigen::Affine3d> *cid_to_cam_t,
-                               std::vector<Eigen::Vector3d> *xyz) {
-  for (size_t pid = 0; pid < (*xyz).size(); pid++)
-    (*xyz)[pid] = A * (*xyz)[pid];
-
+// Apply a given transform to the given set of cameras.
+// We assume that the transform is of the form
+// T(x) = scale * rotation * x + translation
+void TransformCameras(Eigen::Affine3d const& T, std::vector<Eigen::Affine3d> &world_to_cam) {
+  
   // Inverse of rotation component
-  double scale = pow(A.linear().determinant(), 1.0/3.0);
-  Eigen::MatrixXd Ainv = (A.linear()/scale).inverse();
+  double scale = pow(T.linear().determinant(), 1.0 / 3.0);
+  Eigen::MatrixXd Tinv = (T.linear()/scale).inverse();
 
-  for (size_t cid = 0; cid < (*cid_to_cam_t).size(); cid++) {
-    (*cid_to_cam_t)[cid].linear() = (*cid_to_cam_t)[cid].linear()*Ainv;
-    (*cid_to_cam_t)[cid].translation() = scale*(*cid_to_cam_t)[cid].translation() -
-      (*cid_to_cam_t)[cid].linear()*A.translation();
+  for (size_t cid = 0; cid < world_to_cam.size(); cid++) {
+    world_to_cam[cid].linear() = world_to_cam[cid].linear()*Tinv;
+    world_to_cam[cid].translation() = scale*world_to_cam[cid].translation() -
+      world_to_cam[cid].linear()*T.translation();
   }
+}
+
+// Apply same transform as above to points
+void TransformPoints(Eigen::Affine3d const& T, std::vector<Eigen::Vector3d> *xyz) {
+  for (size_t pid = 0; pid < (*xyz).size(); pid++)
+    (*xyz)[pid] = T * (*xyz)[pid];
+}
+
+// Apply a registration transform to a rig. The only thing that
+// changes is scale, as the rig transforms are between coordinate
+// systems of various cameras.
+void TransformRig(Eigen::Affine3d const& T, std::vector<Eigen::Affine3d> & ref_to_cam_trans) {
+  double scale = pow(T.linear().determinant(), 1.0 / 3.0);
+  for (size_t cam_type = 0; cam_type < ref_to_cam_trans.size(); cam_type++) 
+    ref_to_cam_trans[cam_type].translation() *= scale;
 }
   
 // Register a map to world coordinates from user-supplied data, or simply
@@ -2738,12 +2777,11 @@ void TransformCamerasAndPoints(Eigen::Affine3d const& A,
 // It is assumed all images are from the reference camera
 // TODO(oalexan1): This needs to be modularized.
 
-double registerTransforms(std::string const& hugin_file, std::string const& xyz_file,
-                      camera::CameraParameters const& ref_cam_params,
-                      std::vector<std::string> const& cid_to_filename,
-                      std::vector<Eigen::Affine3d>  & cid_to_cam_t_global,
-                      std::vector<Eigen::Vector3d> & map_pid_to_xyz) { 
-    
+Eigen::Affine3d registerTransforms(std::string const& hugin_file, std::string const& xyz_file,
+                                  camera::CameraParameters const& ref_cam_params,
+                                  std::vector<std::string> const& cid_to_filename,
+                                  std::vector<Eigen::Affine3d>  & world_to_cam_trans) { 
+  
   // Get the interest points in the images, and their positions in
   // the world coordinate system, as supplied by a user.
   // Parse and concatenate that information from multiple files.
@@ -2859,7 +2897,6 @@ double registerTransforms(std::string const& hugin_file, std::string const& xyz_
       ref_cam_params.Convert<camera::DISTORTED, camera::UNDISTORTED_C>
         (user_cid_to_keypoint_map[cid].col(i), &output);
       user_cid_to_keypoint_map[cid].col(i) = output;
-      std::cout << "--undistorted " << output.transpose() << std::endl;
     }
   }
 
@@ -2869,27 +2906,21 @@ double registerTransforms(std::string const& hugin_file, std::string const& xyz_
   bool rm_invalid_xyz = false;  // there should be nothing to remove hopefully
   Triangulate(rm_invalid_xyz,
               ref_cam_params.GetFocalLength(),
-              cid_to_cam_t_global,
+              world_to_cam_trans,
               user_cid_to_keypoint_map,
               &user_pid_to_cid_fid,
               &unreg_pid_to_xyz);
 
-  std::cout << "--focal length " << ref_cam_params.GetFocalLength() << std::endl;
-  for (size_t it = 0; it < cid_to_cam_t_global.size(); it++) {
-    std::cout << "--transform:\n" << cid_to_cam_t_global[it].matrix() << std::endl;
-  }
-  
   double mean_err = 0;
   for (int i = 0; i < user_xyz.cols(); i++) {
     Eigen::Vector3d a = unreg_pid_to_xyz[i];
     Eigen::Vector3d b = user_xyz.col(i);
-    std::cout << "--user point " << b.transpose() << std::endl;
-    std::cout << "---triag point " << a.transpose() << std::endl;
     mean_err += (a-b).norm();
   }
   mean_err /= user_xyz.cols();
   std::cout << "Mean absolute error before registration: " << mean_err << " meters" << std::endl;
-  std::cout << "Un-transformed computed xyz -- measured xyz -- error diff -- error norm (meters)" << std::endl;
+  std::cout << "Un-transformed computed xyz -- measured xyz -- error diff -- error norm (meters)"
+            << std::endl;
 
   for (int i = 0; i < user_xyz.cols(); i++) {
     Eigen::Vector3d a = unreg_pid_to_xyz[i];
@@ -2909,35 +2940,33 @@ double registerTransforms(std::string const& hugin_file, std::string const& xyz_
   for (int i = 0; i < np; i++)
     in.col(i) = unreg_pid_to_xyz[i];
 
-  Eigen::Affine3d world_trans;  
-  Find3DAffineTransform(in, user_xyz, &world_trans);
+  Eigen::Affine3d registration_trans;  
+  Find3DAffineTransform(in, user_xyz, &registration_trans);
 
   // Transform the map to the world coordinate system
-  TransformCamerasAndPoints(world_trans,
-                            &cid_to_cam_t_global,
-                            &map_pid_to_xyz);
+  TransformCameras(registration_trans, world_to_cam_trans);
   
   mean_err = 0.0;
   for (int i = 0; i < user_xyz.cols(); i++)
-    mean_err += (world_trans*in.col(i) - user_xyz.col(i)).norm();
+    mean_err += (registration_trans*in.col(i) - user_xyz.col(i)).norm();
   mean_err /= user_xyz.cols();
 
   // We don't use LOG(INFO) below, as it does not play well with
   // Eigen.
-  double scale = pow(world_trans.linear().determinant(), 1.0 / 3.0);
-  std::cout << "Transform to world coordinates." << std::endl;
-  std::cout << "Rotation:\n" << world_trans.linear() / scale << std::endl;
+  double scale = pow(registration_trans.linear().determinant(), 1.0 / 3.0);
+  std::cout << "Registration transform (to measured world coordinates)." << std::endl;
+  std::cout << "Rotation:\n" << registration_trans.linear() / scale << std::endl;
   std::cout << "Scale:\n" << scale << std::endl;
-  std::cout << "Translation:\n" << world_trans.translation().transpose()
+  std::cout << "Translation:\n" << registration_trans.translation().transpose()
             << std::endl;
 
-  std::cout << "Mean absolute error after registration and before final bundle adjustment: "
+  std::cout << "Mean absolute error after registration: "
             << mean_err << " meters" << std::endl;
 
   std::cout << "Transformed computed xyz -- measured xyz -- "
             << "error diff - error norm (meters)" << std::endl;
   for (int i = 0; i < user_xyz.cols(); i++) {
-    Eigen::Vector3d a = world_trans*in.col(i);
+    Eigen::Vector3d a = registration_trans*in.col(i);
     Eigen::Vector3d b = user_xyz.col(i);
     int id1 = user_ip(0, i);
     int id2 = user_ip(1, i);
@@ -2950,7 +2979,8 @@ double registerTransforms(std::string const& hugin_file, std::string const& xyz_
               << images[id2] << std::endl;
   }
 
-  return scale;
+
+  return registration_trans;
 }
   
 }  // namespace dense_map
@@ -3096,67 +3126,35 @@ int main(int argc, char** argv) {
   //  getting out of the bracket.
   std::vector<double> min_timestamp_offset, max_timestamp_offset;
 
-  // If desired to process only specific timestamps
-  std::set<double> sci_cam_timestamps_to_use;
-  if (FLAGS_sci_cam_timestamps != "") {
-    std::ifstream ifs(FLAGS_sci_cam_timestamps.c_str());
-    double val;
-    while (ifs >> val) sci_cam_timestamps_to_use.insert(val);
-  }
-  // Put all timestamps to use in a vector, in the same order as the cameras
-  std::cout << "---problem here!" << std::endl;
-  std::vector<std::set<double>> cam_timestamps_to_use = {std::set<double>(),
-                                                         std::set<double>(),
-                                                         sci_cam_timestamps_to_use};
-
   // Select the images to use and bracket them using the ref cam
-  // TODO(oalexan1): This should be used without the rig
-  // constraint. Then need to find out from Theia which images to match.
+  // TODO(oalexan1): This should not be used without the rig
+  // constraint. In that case we need to find from Theia which images to match.
   dense_map::lookupImagesAndBrackets(  // Inputs
     ref_cam_type, FLAGS_bracket_len, FLAGS_timestamp_offsets_max_change,
     FLAGS_max_haz_cam_image_to_depth_timestamp_diff, cam_names, cam_params,
     ref_timestamps, image_topics, depth_topics,
     bag_map, image_data, depth_data,
-    cam_timestamps_to_use,
     ref_to_cam_timestamp_offsets,
     // Outputs
     cams, min_timestamp_offset, max_timestamp_offset);
 
-  // Put transforms of the reference cameras in a vector. We will optimize them.
-  // TODO(oalexan1): Eliminate world_to_ref. Use only world_to_ref_vec.
-  int num_ref_cams = world_to_ref.size();
-  if (world_to_ref.size() != ref_timestamps.size())
-    LOG(FATAL) << "Must have as many ref cam timestamps as ref cameras.\n";
-  std::vector<double> world_to_ref_vec(num_ref_cams * dense_map::NUM_RIGID_PARAMS);
-  for (int cid = 0; cid < num_ref_cams; cid++)
-    dense_map::rigid_transform_to_array(world_to_ref[cid],
-                                        &world_to_ref_vec[dense_map::NUM_RIGID_PARAMS * cid]);
-  
   // If we have initial rig transforms, compute the transform from the
   // world to every camera based on the rig transforms and ref_to_cam
-  // transforms. It assumes that world_to_ref_vec and ref_to_cam_vec
-  // are up-to-date. Use the version of calc_world_to_cam_transforms
+  // transforms. It assumes that world_to_ref and ref_to_cam
+  // are up-to-date. Use the version of calc_world_to_cam_using_rig
   // without world_to_cam_vec, on input which was not computed yet.
 
-  std::vector<double> ref_to_cam_vec(num_cam_types * dense_map::NUM_RIGID_PARAMS);
+  // TODO(oalexan1): Don't use this logic if we have no rig
   if (have_rig_transforms) {
-
-    // Put the extrinsics in arrays, so we can optimize them
-    for (int cam_type = 0; cam_type < num_cam_types; cam_type++)
-      dense_map::rigid_transform_to_array
-        (ref_to_cam_trans[cam_type],
-         &ref_to_cam_vec[dense_map::NUM_RIGID_PARAMS * cam_type]);
-
     // Using the rig transforms in ref_to_cam_vec and transforms from
-    // world to each ref cam in world_to_ref_vec, calculate world_to_cam,
+    // world to each ref cam in world_to_ref, calculate world_to_cam,
     // the transforms from the world to each camera
-    dense_map::calc_world_to_cam_transforms(// Inputs
-                                            cams, world_to_ref_vec, ref_timestamps, ref_to_cam_vec,
-                                            ref_to_cam_timestamp_offsets,
-                                            // Output
-                                            world_to_cam);
+    dense_map::calc_world_to_cam_using_rig(// Inputs
+                                           cams, world_to_ref, ref_timestamps, ref_to_cam_trans,
+                                           ref_to_cam_timestamp_offsets,
+                                           // Output
+                                           world_to_cam);
   } else {
-
     // Parse the transform from the world to each cam, which were known on input
     world_to_cam.resize(cams.size());
     std::vector<int> start_pos(num_cam_types, 0);  // to help advance in time
@@ -3173,31 +3171,41 @@ int main(int argc, char** argv) {
 
     // Using the transforms from the world to each camera, compute
     // the rig transforms
-    dense_map::calc_rig_transforms(ref_cam_type, num_cam_types,  
-                                   cams, world_to_ref_vec, world_to_cam,  
-                                   ref_timestamps,  ref_to_cam_timestamp_offsets,  
-                                   // Output
-                                   ref_to_cam_trans);
-    
-    // TODO(oalexan1): Having both ref_to_cam_vec and ref_to_cam_trans complicates
-    // things
-    for (int cam_type = 0; cam_type < num_cam_types; cam_type++) {
-      dense_map::rigid_transform_to_array
-        (ref_to_cam_trans[cam_type],
-         &ref_to_cam_vec[dense_map::NUM_RIGID_PARAMS * cam_type]);
-    }
+    dense_map::calc_rig_using_word_to_cam(ref_cam_type, num_cam_types,  
+                                          cams, world_to_ref, world_to_cam,  
+                                          ref_timestamps,  ref_to_cam_timestamp_offsets,  
+                                          // Output
+                                          ref_to_cam_trans);
   }
 
-  // TODO(oalexan1): This is temporary! Need to apply the transform to everything!
-  if (FLAGS_hugin_file != "" && FLAGS_xyz_file != "") {
-    std::vector<Eigen::Vector3d> map_pid_to_xyz;
-    dense_map::registerTransforms(FLAGS_hugin_file, FLAGS_xyz_file,  
-                                  cam_params[ref_cam_type],  
-                                  ref_image_files,  
-                                  world_to_ref,  
-                                  map_pid_to_xyz);
-    exit(0);
+  // TODO(oalexan1): Not clear what to do about depth_to_image.
+  if (FLAGS_registration  && (FLAGS_hugin_file != "" && FLAGS_xyz_file != "")) {
+    Eigen::Affine3d registration_trans
+      = dense_map::registerTransforms(FLAGS_hugin_file, FLAGS_xyz_file,  
+                                      cam_params[ref_cam_type],  
+                                      ref_image_files,  
+                                      world_to_ref);
+    // The above transformed world_to_ref. Also transform world_to_cam.
+    dense_map::TransformCameras(registration_trans, world_to_cam);
+    dense_map::TransformRig(registration_trans, ref_to_cam_trans); // this uses different logic
   }
+
+  // Put the rig transforms in arrays, so we can optimize them
+  std::vector<double> ref_to_cam_vec(num_cam_types * dense_map::NUM_RIGID_PARAMS);
+  for (int cam_type = 0; cam_type < num_cam_types; cam_type++)
+    dense_map::rigid_transform_to_array
+      (ref_to_cam_trans[cam_type],
+       &ref_to_cam_vec[dense_map::NUM_RIGID_PARAMS * cam_type]);
+
+  // Put transforms of the reference cameras in a vector so we can optimize them.
+  // TODO(oalexan1): Eliminate world_to_ref. Use only world_to_ref_vec.
+  int num_ref_cams = world_to_ref.size();
+  if (world_to_ref.size() != ref_timestamps.size())
+    LOG(FATAL) << "Must have as many ref cam timestamps as ref cameras.\n";
+  std::vector<double> world_to_ref_vec(num_ref_cams * dense_map::NUM_RIGID_PARAMS);
+  for (int cid = 0; cid < num_ref_cams; cid++)
+    dense_map::rigid_transform_to_array(world_to_ref[cid],
+                                        &world_to_ref_vec[dense_map::NUM_RIGID_PARAMS * cid]);
   
   // Need the identity transform for when the cam is the ref cam, and
   // have to have a placeholder for the right bracketing cam which won't be used.
@@ -3331,7 +3339,7 @@ int main(int argc, char** argv) {
     // given the current state of optimization
     // TODO(oalexan1): The call below is likely not necessary since this function
     // is already called earlier, and also whenever a pass finishes, see below.
-    dense_map::calc_world_to_cam_transforms(  // Inputs
+    dense_map::calc_world_to_cam_rig_or_not(  // Inputs
       FLAGS_no_extrinsics, cams, world_to_ref_vec, ref_timestamps, ref_to_cam_vec, world_to_cam_vec,
       ref_to_cam_timestamp_offsets,
       // Output
@@ -3701,7 +3709,7 @@ int main(int argc, char** argv) {
     dense_map::evalResiduals("after opt", residual_names, residual_scales, problem, residuals);
 
     // Must have up-to-date world_to_cam and residuals to flag the outliers
-    dense_map::calc_world_to_cam_transforms(  // Inputs
+    dense_map::calc_world_to_cam_rig_or_not(  // Inputs
       FLAGS_no_extrinsics, cams, world_to_ref_vec, ref_timestamps, ref_to_cam_vec, world_to_cam_vec,
       ref_to_cam_timestamp_offsets,
       // Output
@@ -3784,7 +3792,7 @@ int main(int argc, char** argv) {
 #endif
 
   // Update the transforms from the world to every camera
-  dense_map::calc_world_to_cam_transforms(  // Inputs
+  dense_map::calc_world_to_cam_rig_or_not(  // Inputs
     FLAGS_no_extrinsics, cams, world_to_ref_vec, ref_timestamps, ref_to_cam_vec, world_to_cam_vec,
     ref_to_cam_timestamp_offsets,
     // Output
@@ -3797,7 +3805,7 @@ int main(int argc, char** argv) {
       LOG(FATAL) << "Cannot project camera images onto a mesh if a mesh was not provided.\n";
 
     // TODO(oalexan1): Why the call below works without dense_map:: prepended to it?
-    // TODO(oalexan1): This call to calc_world_to_cam_transforms is likely not
+    // TODO(oalexan1): This call to calc_world_to_cam_rig_or_not is likely not
     // necessary since world_to_cam has been updated by now.
     dense_map::meshProjectCameras(cam_names, cam_params, cams, world_to_cam, mesh, bvh_tree,
                                   ref_cam_type,

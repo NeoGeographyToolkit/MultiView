@@ -37,8 +37,7 @@ Then the software can be built (on Linux) as follows::
       -DCMAKE_INSTALL_PREFIX=$(pwd)/../install                     \
       -DCMAKE_C_COMPILER=$toolsPath/bin/x86_64-conda-linux-gnu-gcc \
       -DCMAKE_CXX_COMPILER=$toolsPath/bin/x86_64-conda-linux-gnu-c++
-    make -j 20
-    make install
+    make -j 20 && make install
 
 The resulting tools will be installed in MultiView/install.
 
