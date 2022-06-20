@@ -17,15 +17,13 @@
  * under the License.
  */
 
-// TODO(oalexan1): Replace --float_sparse_map with something else
 // TODO(oalexan1): Modularize this code!
-// Remove all mentions of nav_cam, sci_cam, haz_cam.
 
 // The algorithm:
 
 // We assume our camera rig has n camera types. Each can be image or
-// depth + image. Just one camera must be the reference camera. In
-// this code that will be nav_cam.
+// depth + image. One camera must be the reference camera. It is used
+// to bracket other cameras in time.
 
 // We assume we know the precise time every camera image is acquired.
 // Every non-ref camera will be bracketed by two ref cameras very
@@ -137,6 +135,10 @@
 #include <iostream>
 #include <fstream>
 
+// TODO(oalexan1): Move this out
+#include <pcl/io/ply_io.h>
+#include <pcl/io/pcd_io.h>
+  
 namespace fs = boost::filesystem;
 
 #if HAVE_ASTROBEE
@@ -166,9 +168,9 @@ DEFINE_string(sci_cam_topic, "/hw/cam_sci/compressed", "The sci cam topic in the
 DEFINE_int32(num_overlaps, 10, "How many images (of all camera types) close and forward in "
              "time to match to given image.");
 
-DEFINE_double(max_haz_cam_image_to_depth_timestamp_diff, 0.2,
-              "Use a haz cam depth cloud only if it is within this distance in time "
-              "from the nearest haz cam intensity image.");
+DEFINE_double(max_image_to_depth_timestamp_diff, 0.2,
+              "Use a depth cloud only if it is within this distance in time "
+              "from the nearest image with the same camera. Measured in seconds.");
 
 DEFINE_double(robust_threshold, 3.0,
               "Residual pixel errors and 3D point residuals (the latter multiplied "
@@ -189,43 +191,34 @@ DEFINE_string(intrinsics_to_float, "", "Specify which intrinsics to float for ea
               "Example: 'cam1:focal_length,optical_center,distortion cam2:focal_length'.");
 
 DEFINE_string(rig_transforms_to_float, "",
-              "Specify the names of sensors whose transforms to float, relative to the ref sensor. Use quotes around this string if it has spaces. Also can use comma as separator.");
+              "Specify the names of sensors whose transforms to float, relative to the ref sensor. Use quotes around this string if it has spaces. Also can use comma as separator. Example: 'cam1 cam2'.");
+
+// TODO(oalexan1): With the rig constraint on, only ref cam poses can float on their own,
+// as the others are tied to it.
+DEFINE_string(camera_poses_to_float, "",
+              "Specify the cameras of which sensor types can have their poses floated. Note that allowing the cameras for all sensors types to float can invalidate the registration and scale (while making the overall configuration more internally consistent). Hence, one may need to use an external mesh as a constraint, or otherwise subsequent registration may be needed. Example: 'cam1 cam3'.");
 
 DEFINE_string(depth_to_image_transforms_to_float, "",
-              "Specify for which sensors to float the depth-to-image transform (if depth data exists).");
+              "Specify for which sensors to float the depth-to-image transform "
+              "(if depth data exists). Example: 'cam1 cam3'.");
 
 DEFINE_bool(float_scale, false,
-            "If to optimize the scale of the clouds, part of haz_cam depth_to_image transform "
-            "(use it if the sparse map is kept fixed, or else rescaling and registration "
-            "of the map and extrinsics is needed). This parameter should not be used with "
-            "--affine_depth_to_image when the transform is affine, rather than rigid and a scale."
-            "See also --depth_to_image_transforms_to_float.");
-
-DEFINE_bool(float_sparse_map, false,
-            "Optimize the sparse map. This should be avoided as it can invalidate the scales "
-            "of the extrinsics and the registration. It should at least be used with big mesh "
-            "weights to attenuate those effects. See also: --registration.");
+            "If to optimize the scale of the clouds, part of depth_to_image transform "
+            "If kept fixed, the configuration of cameras should adjust to respect the given "
+            "scale. This parameter should not be used with --affine_depth_to_image when the "
+            "transform is affine, rather than rigid and a scale.");
 
 DEFINE_bool(float_timestamp_offsets, false,
-            "If to optimize the timestamp offsets among the cameras.");
+            "If to optimize the timestamp offsets among the cameras. This is experimental.");
 
-// TODO(oalexan1): This must be enabled for all sensor with a per-sensor exclusion
-// distance.
-DEFINE_int32(nav_cam_num_exclude_boundary_pixels, 0,
-             "Flag as outliers nav cam pixels closer than this to the boundary, and ignore "
-             "that boundary region when texturing with the --out_texture_dir option. "
-             "This may improve the calibration accuracy, especially if switching from fisheye "
-             "to radtan distortion for nav_cam. See also the geometry_mapper "
-             "--undistorted_crop_wins option.");
+DEFINE_int32(num_exclude_boundary_pixels, 0,
+             "Flag as outliers pixels closer than this to image boundary, and ignore "
+             "that boundary region when texturing using the optimized cameras with "
+             "the --out_texture_dir option. This is very experimental.");
 
 DEFINE_double(timestamp_offsets_max_change, 1.0,
               "If floating the timestamp offsets, do not let them change by more than this "
               "(measured in seconds). Existing image bracketing acts as an additional constraint.");
-
-DEFINE_double(nav_cam_to_sci_cam_offset_override_value,
-              std::numeric_limits<double>::quiet_NaN(),
-              "Override the value of nav_cam_to_sci_cam_timestamp_offset from the robot config "
-              "file with this value.");
 
 DEFINE_double(depth_tri_weight, 1000.0,
               "The weight to give to the constraint that depth measurements agree with "
@@ -248,7 +241,7 @@ DEFINE_bool(affine_depth_to_image, false, "Assume that the depth_to_image_transf
             "for each depth + image camera is an arbitrary affine transform rather than a "
             "rotation times a scale.");
 
-DEFINE_int32(refiner_num_passes, 2, "How many passes of optimization to do. Outliers will be "
+DEFINE_int32(calibrator_num_passes, 2, "How many passes of optimization to do. Outliers will be "
              "removed after every pass. Each pass will start with the previously optimized "
              "solution as an initial guess. Mesh intersections (if applicable) and ray "
              "triangulation will be recomputed before each pass.");
@@ -280,13 +273,14 @@ DEFINE_double(max_ray_dist, 100.0, "The maximum search distance from a starting 
 
 DEFINE_bool(registration, false,
             "If true, and registration control points for the sparse map exist and are specified "
-            "by --hugin_file and --xyz_file, re-register the sparse map at the end. All the "
-            "extrinsics, including depth_to_image_transform, will be scaled accordingly."
-            "This is not needed if the nav_cam intrinsics and the sparse map do not change.");
+            "by --hugin_file and --xyz_file, register all camera poses and the rig transforms "
+            "before starting the optimization. For now, the depth_to_image transforms do not "
+            "change as result of this, which may be a problem. To apply the registration only, "
+            "use zero iterations.");
 
-DEFINE_string(hugin_file, "", "The path to the hugin .pto file used for sparse map registration.");
+DEFINE_string(hugin_file, "", "The path to the hugin .pto file used for registration.");
 
-DEFINE_string(xyz_file, "", "The path to the xyz file used for sparse map registration.");
+DEFINE_string(xyz_file, "", "The path to the xyz file used for registration.");
 
 DEFINE_double(parameter_tolerance, 1e-12, "Stop when the optimization variables change by "
               "less than this.");
@@ -295,17 +289,11 @@ DEFINE_int32(num_opt_threads, 16, "How many threads to use in the optimization."
 
 DEFINE_int32(num_match_threads, 8, "How many threads to use in feature detection/matching. "
              "A large number can use a lot of memory.");
-DEFINE_string(sci_cam_timestamps, "",
-              "Use only these sci cam timestamps. Must be a file with one timestamp per line.");
 
-DEFINE_bool(no_extrinsics, false,
-            "Do not model the extrinsics between cameras. Hence the pose of any "
-            "camera of any type may vary on its own with no restriction that the cameras "
-            "be on a rig. Model however depth_to_image_transform. See also "
-            "--float_nonref_cameras.");
-DEFINE_bool(float_nonref_cameras, false, "To use in conjunction with --no_extrinsics "
-            "to float non-reference camera poses. Use --float_sparse map to float the "
-            "reference cameras.");
+DEFINE_bool(no_rig, false,
+            "Do not assumes the cameras are on a rig. Hence the pose of any "
+            "camera of any sensor type may vary on its own and not being tied to other sensor "
+            "types. See also --camera_poses_to_float.");
 
 DEFINE_string(out_dir, "",
               "Save in this directory the camera intrinsics and extrinsics. "
@@ -334,6 +322,10 @@ DEFINE_bool(use_initial_rig_transforms, false,
 DEFINE_bool(save_matches, false,
             "Save the interest point matches. Stereo Pipeline's viewer can be used for "
             "visualizing these. Implies that --out_dir is set.");
+
+DEFINE_bool(export_to_voxblox, false,
+            "Save the depth clouds and optimized transforms needed to create a mesh with voxblox "
+            "(if depth clouds exist).");
 
 DEFINE_bool(verbose, false,
             "Print a lot of verbose information about how matching goes.");
@@ -808,7 +800,7 @@ bool timestampLess(cameraImage i, cameraImage j) {
   return (i.ref_timestamp < j.ref_timestamp);
 }
 
-// Find the haz cam depth measurement. Use nearest neighbor interpolation
+// Find the depth measurement. Use nearest neighbor interpolation
 // to look into the depth cloud.
 bool depthValue(  // Inputs
                 cv::Mat const& depth_cloud, Eigen::Vector2d const& dist_ip,
@@ -848,8 +840,7 @@ void meshProjectCameras(std::vector<std::string> const& cam_names,
                         std::vector<Eigen::Affine3d> const& world_to_cam,
                         mve::TriangleMesh::Ptr const& mesh,
                         std::shared_ptr<BVHTree> const& bvh_tree,
-                        int ref_camera_type,
-                        int nav_cam_num_exclude_boundary_pixels,
+                        int num_exclude_boundary_pixels,
                         std::string const& out_dir) {
   if (cam_names.size() != cam_params.size())
     LOG(FATAL) << "There must be as many camera names as sets of camera parameters.\n";
@@ -863,10 +854,6 @@ void meshProjectCameras(std::vector<std::string> const& cam_names,
   for (size_t cid = 0; cid < cam_images.size(); cid++) {
     double timestamp = cam_images[cid].timestamp;
     int cam_type = cam_images[cid].camera_type;
-
-    int num_exclude_boundary_pixels = 0;
-    if (cam_type == ref_camera_type)
-      num_exclude_boundary_pixels = nav_cam_num_exclude_boundary_pixels;
 
     // Must use the 10.7f format for the timestamp as everywhere else in the code
     snprintf(filename_buffer, sizeof(filename_buffer), "%s/%10.7f_%s",
@@ -943,9 +930,9 @@ void calc_world_to_cam_using_rig(// Inputs
   
 // Calculate world_to_cam transforms from their representation in a
 // vector, rather than using reference cameras, extrinsics and
-// timestamp interpolation. Only for use with --no_extrinsics, when
+// timestamp interpolation. Only for use with --no_rig, when
 // each camera varies independently.
-void calc_world_to_cam_no_rig(  // Inputs
+void calc_world_to_cam_no_rig(// Inputs
   std::vector<dense_map::cameraImage> const& cams, std::vector<double> const& world_to_cam_vec,
   // Output
   std::vector<Eigen::Affine3d>& world_to_cam) {
@@ -959,21 +946,21 @@ void calc_world_to_cam_no_rig(  // Inputs
 
 // Use one of the two implementations above. Care is needed as when there are no extrinsics,
 // each camera is on its own, so the input is in world_to_cam_vec and not in world_to_ref_vec
-void calc_world_to_cam_rig_or_not(  // Inputs
-  bool no_extrinsics, std::vector<dense_map::cameraImage> const& cams,
+void calc_world_to_cam_rig_or_not(// Inputs
+  bool no_rig, std::vector<dense_map::cameraImage> const& cams,
   std::vector<double> const& world_to_ref_vec, std::vector<double> const& ref_timestamps,
   std::vector<double> const& ref_to_cam_vec, std::vector<double> const& world_to_cam_vec,
   std::vector<double> const& ref_to_cam_timestamp_offsets,
   // Output
   std::vector<Eigen::Affine3d>& world_to_cam) {
-  if (!no_extrinsics)
-    calc_world_to_cam_using_rig(  // Inputs
+  if (!no_rig)
+    calc_world_to_cam_using_rig(// Inputs
                                  cams, world_to_ref_vec, ref_timestamps, ref_to_cam_vec,
                                  ref_to_cam_timestamp_offsets,
                                  // Output
                                  world_to_cam);
   else
-    calc_world_to_cam_no_rig(  // Inputs
+    calc_world_to_cam_no_rig(// Inputs
       cams, world_to_cam_vec,
       // Output
       world_to_cam);
@@ -1061,8 +1048,8 @@ void parameterValidation() {
   if (FLAGS_depth_mesh_weight < 0.0)
     LOG(FATAL) << "The depth mesh weight must non-negative.\n";
 
-  if (FLAGS_nav_cam_num_exclude_boundary_pixels < 0)
-    LOG(FATAL) << "Must have a non-negative value for --nav_cam_num_exclude_boundary_pixels.\n";
+  if (FLAGS_num_exclude_boundary_pixels < 0)
+    LOG(FATAL) << "Must have a non-negative value for --num_exclude_boundary_pixels.\n";
 
   if (FLAGS_registration && (FLAGS_xyz_file.empty() || FLAGS_hugin_file.empty()))
     LOG(FATAL) << "In order to register the map, the hugin and xyz file must be specified.";
@@ -1071,11 +1058,8 @@ void parameterValidation() {
     LOG(FATAL) << "The options --float_scale and --affine_depth_to_image should not be used "
                << "together. If the latter is used, the scale is always floated.\n";
 
-  if (FLAGS_float_nonref_cameras && !FLAGS_no_extrinsics)
-    LOG(FATAL) << "The option --float_nonref_cameras must be used only with --no_extrinsics.\n";
-
-  if (FLAGS_no_extrinsics && FLAGS_float_timestamp_offsets)
-      LOG(FATAL) << "Cannot float timestamps with option --no_extrinsics.\n";
+  if (FLAGS_no_rig && FLAGS_float_timestamp_offsets)
+      LOG(FATAL) << "Cannot float timestamps with option --no_rig.\n";
 
   if (FLAGS_save_images_and_depth_clouds && FLAGS_out_dir == "")
     LOG(FATAL) << "Cannot save images and clouds if no output directory was provided.\n";
@@ -1083,7 +1067,10 @@ void parameterValidation() {
   if (FLAGS_save_matches && FLAGS_out_dir == "")
     LOG(FATAL) << "Cannot save matches if no output directory was provided.\n";
 
-  if (FLAGS_use_initial_rig_transforms && FLAGS_no_extrinsics)
+  if (FLAGS_export_to_voxblox && FLAGS_out_dir == "")
+    LOG(FATAL) << "Cannot save matches if no output directory was provided.\n";
+
+  if (FLAGS_use_initial_rig_transforms && FLAGS_no_rig)
     LOG(FATAL) << "Cannot use initial rig transforms if not modeling the rig.\n";
 
 #if !HAVE_ASTROBEE
@@ -1154,7 +1141,7 @@ typedef std::map<std::string, std::vector<rosbag::MessageInstance>> StrToMsgMap;
 // It needs to be broken up, with the bracketing being in its own function.  
 void lookupImagesAndBrackets(  // Inputs
   int ref_cam_type, double bracket_len, double timestamp_offsets_max_change,
-  double max_haz_cam_image_to_depth_timestamp_diff,
+  double max_image_to_depth_timestamp_diff,
   std::vector<std::string> const& cam_names,
   std::vector<camera::CameraParameters> const& cam_params,
   std::vector<double> const& ref_timestamps, std::vector<std::string> const& image_topics,
@@ -1359,7 +1346,7 @@ void lookupImagesAndBrackets(  // Inputs
       else if (depth_topics[cam_type] != "")                     // Read from bag
         dense_map::lookupCloud(cam.timestamp,  // start looking from this time forward
                                mapVal(bag_map, depth_topics[cam_type]),
-                               max_haz_cam_image_to_depth_timestamp_diff,
+                               max_image_to_depth_timestamp_diff,
                                // Outputs
                                cam.depth_cloud,
                                cloud_start_positions[cam_type],  // this will move forward
@@ -1541,7 +1528,7 @@ void meshTriangulations(  // Inputs
 }
 
 void flagOutlierByExclusionDist(  // Inputs
-  int ref_cam_type, int nav_cam_num_exclude_boundary_pixels,
+  int ref_cam_type, int num_exclude_boundary_pixels,
   std::vector<camera::CameraParameters> const& cam_params,
   std::vector<dense_map::cameraImage> const& cams,
   std::vector<std::map<int, int>> const& pid_to_cid_fid,
@@ -1561,17 +1548,13 @@ void flagOutlierByExclusionDist(  // Inputs
       // Initially there are inliers only
       pid_cid_fid_inlier[pid][cid][fid] = 1;
 
-      if (cams[cid].camera_type == ref_cam_type) {
-        // Flag as outliers pixels at the nav_cam boundary, if desired. This
-        // is especially important when the nav_cam uses the radtan
-        // model instead of fisheye.
-        Eigen::Vector2d dist_ip(keypoint_vec[cid][fid].first, keypoint_vec[cid][fid].second);
-        Eigen::Vector2i dist_size = cam_params[cams[cid].camera_type].GetDistortedSize();
-        int excl = nav_cam_num_exclude_boundary_pixels;
-        if (dist_ip.x() < excl || dist_ip.x() > dist_size[0] - 1 - excl ||
-            dist_ip.y() < excl || dist_ip.y() > dist_size[1] - 1 - excl) {
-          dense_map::setMapValue(pid_cid_fid_inlier, pid, cid, fid, 0);
-        }
+      // Flag as outliers pixels at the image boundary.
+      Eigen::Vector2d dist_ip(keypoint_vec[cid][fid].first, keypoint_vec[cid][fid].second);
+      Eigen::Vector2i dist_size = cam_params[cams[cid].camera_type].GetDistortedSize();
+      int excl = num_exclude_boundary_pixels;
+      if (dist_ip.x() < excl || dist_ip.x() > dist_size[0] - 1 - excl ||
+          dist_ip.y() < excl || dist_ip.y() > dist_size[1] - 1 - excl) {
+        dense_map::setMapValue(pid_cid_fid_inlier, pid, cid, fid, 0);
       }
     }
   }
@@ -1782,8 +1765,112 @@ void saveInlinerMatchPairs(  // Inputs
   }
 }
 
+// Save the depth clouds and optimized transforms needed to create a mesh with voxblox "
+// (if depth clouds exist).;
+void exportToVoxblox(std::vector<std::string> const& cam_names,
+                     std::vector<dense_map::cameraImage> const& cam_images,
+                     std::vector<Eigen::Affine3d> const& world_to_cam,
+                     std::string const& out_dir) {
+
+  if (cam_images.size() != world_to_cam.size())
+    LOG(FATAL) << "There must be as many camera images as camera poses.\n";
+  if (out_dir.empty())
+    LOG(FATAL) << "The output directory is empty.\n";
+
+  std::string voxblox_dir = out_dir + "/voxblox";
+  dense_map::createDir(voxblox_dir);
+
+  char timestamp_buffer[1000];
+
+  // Must take a pass for each camera type, and then visit
+  // all images while ignoring those of a different type. There are very
+  // few camera types, so this is not unreasonable.
+
+  for (size_t cam_type = 0; cam_type < cam_names.size(); cam_type++) {
+
+    std::string voxblox_subdir = voxblox_dir + "/" + cam_names[cam_type];
+    dense_map::createDir(voxblox_subdir);
+
+    std::string index_file = voxblox_subdir + "/index.txt";
+    std::cout << "Writing: " << index_file << std::endl;
+    std::ofstream ofs(index_file.c_str());
+
+    for (size_t cid = 0; cid < cam_images.size(); cid++) {
+
+      if (cam_images[cid].camera_type != cam_type) 
+        continue;
+
+      int depth_cols = cam_images[cid].depth_cloud.cols;
+      int depth_rows = cam_images[cid].depth_cloud.rows;
+      
+      if (depth_cols == 0 || depth_rows == 0)
+        continue; // skip empty clouds
+
+      // Sanity check
+      if (depth_cols != cam_images[cid].image.cols || 
+          depth_rows != cam_images[cid].image.rows)
+        LOG(FATAL) << "Found a depth cloud and corresponding image with mismatching dimensions.\n";
+        
+      // Must use the 10.7f format for the timestamp as everywhere else in the code,
+      // as it is in double precision.
+      double timestamp = cam_images[cid].timestamp;
+      snprintf(timestamp_buffer, sizeof(timestamp_buffer), "%10.7f", timestamp);
+
+      // Sanity check
+      if (cam_images[cid].image.channels() != 1) 
+        LOG(FATAL) << "Expecting a grayscale input image.\n";
+      
+      // Form a pcl point cloud. Add the first band of the image as an intensity
+      // Later will reduce its dimensions as we will skip invalid pixels.
+      // Use fields as expected by voxblox.
+      // TODO(oalexan1): Make this a subroutine
+      pcl::PointCloud<pcl::PointNormal> pc;
+      pc.width = std::int64_t(depth_cols) * std::int64_t(depth_rows); // int64 to avoid overflow
+      pc.height = 1;
+      pc.points.resize(pc.width * pc.height);
+      int count = 0;
+      for (int row = 0; row < depth_rows; row++) {
+        for (int col = 0; col < depth_cols; col++) {
+          cv::Vec3f xyz = cam_images[cid].depth_cloud.at<cv::Vec3f>(row, col);
+          if (xyz == cv::Vec3f(0, 0, 0)) // skip invalid points
+            continue;
+
+          pc.points[count].x         = xyz[0];
+          pc.points[count].y         = xyz[1];
+          pc.points[count].z         = xyz[2];
+          pc.points[count].normal_x  = cam_images[cid].image.at<uchar>(row, col); // intensity
+          pc.points[count].normal_y  = 1.0; // weight
+          pc.points[count].normal_y  = 1.0; // intersection err
+          pc.points[count].normal_y  = 0.0; // ensure initialization
+          
+          count++;
+        }
+      }
+      // Shrink the cloud as invalid data was skipped
+      if (count > pc.width) 
+        LOG(FATAL) << "Book-keeping error in processing point clouds.\n";
+      pc.width = count;
+      pc.height = 1;
+      pc.points.resize(pc.width * pc.height);
+
+      // Save the transform
+      std::string transform_file = voxblox_subdir + "/" + timestamp_buffer + "_cam2world.txt";
+      std::cout << "Writing: " << transform_file << std::endl;
+      ofs << transform_file << "\n"; // save its name in the index
+      dense_map::writeMatrix(world_to_cam[cid].inverse().matrix(), transform_file);
+
+      // Save the pcd file
+      std::string cloud_file = voxblox_subdir + "/" + timestamp_buffer + ".pcd";
+      std::cout << "Writing: " << cloud_file << std::endl;
+      ofs << cloud_file << "\n"; // save its name in the index
+      pcl::io::savePCDFileBinary(cloud_file, pc); // writing binary is much faster than ascii
+    }
+  }
+  
+}
+  
 // TODO(oalexan1): Move this to utils
-// Save an affine transform represented as a matrix to a file.
+// Save an affine transform represented as a matrix to a string.
 std::string affineToStr(Eigen::Affine3d const& M) {
   Eigen::MatrixXd T = M.matrix();
   std::ostringstream os;
@@ -1956,9 +2043,10 @@ void readImageEntry(// Inputs
     LOG(FATAL) << "Duplicate timestamp " << std::setprecision(17) << timestamp
                << " for sensor id " << cam_type << "\n";
   
-  // Read the image exactly as written, which would be grayscale
+  // Read the image as grayscale
+  // TODO(oalexan1): How about color? But need grayscale for feature matching
   std::cout << "Reading: " << image_file << std::endl;
-  image_map[timestamp].image        = cv::imread(image_file, cv::IMREAD_UNCHANGED);
+  image_map[timestamp].image        = cv::imread(image_file, cv::IMREAD_GRAYSCALE);
   image_map[timestamp].name         = image_file;
   image_map[timestamp].timestamp    = timestamp;
   image_map[timestamp].world_to_cam = world_to_cam;
@@ -3015,18 +3103,6 @@ int main(int argc, char** argv) {
   
   int num_cam_types = cam_params.size();
 
-  // Optionally override the timestamp offset
-  if (!std::isnan(FLAGS_nav_cam_to_sci_cam_offset_override_value)) {
-    for (size_t it = 0; it < cam_names.size(); it++) {
-      if (cam_names[it] == "sci_cam") {
-        double new_val = FLAGS_nav_cam_to_sci_cam_offset_override_value;
-        std::cout << "Overriding the value " << ref_to_cam_timestamp_offsets[it]
-                  << " of nav_cam_to_sci_cam_timestamp_offset with: " << new_val << std::endl;
-        ref_to_cam_timestamp_offsets[it] = new_val;
-      }
-    }
-  }
-
   // Optionally load the mesh
   mve::TriangleMesh::Ptr mesh;
   std::shared_ptr<mve::MeshInfo> mesh_info;
@@ -3119,7 +3195,7 @@ int main(int argc, char** argv) {
   // constraint. In that case we need to find from Theia which images to match.
   dense_map::lookupImagesAndBrackets(  // Inputs
     ref_cam_type, FLAGS_bracket_len, FLAGS_timestamp_offsets_max_change,
-    FLAGS_max_haz_cam_image_to_depth_timestamp_diff, cam_names, cam_params,
+    FLAGS_max_image_to_depth_timestamp_diff, cam_names, cam_params,
     ref_timestamps, image_topics, depth_topics,
     bag_map, image_data, depth_data,
     ref_to_cam_timestamp_offsets,
@@ -3210,11 +3286,16 @@ int main(int argc, char** argv) {
   dense_map::parse_rig_transforms_to_float(cam_names, ref_cam_type,
                                            FLAGS_rig_transforms_to_float, rig_transforms_to_float);
   
-  std::set<std::string> depth_to_image_transforms_to_float;
-  dense_map::parse_depth_to_image_transforms_to_float(cam_names, 
-                                                      FLAGS_depth_to_image_transforms_to_float,
-                                                      depth_to_image_transforms_to_float);
+  std::set<std::string> camera_poses_to_float;
+  dense_map::parse_camera_names(cam_names, 
+                                FLAGS_camera_poses_to_float,
+                                camera_poses_to_float);
 
+  std::set<std::string> depth_to_image_transforms_to_float;
+  dense_map::parse_camera_names(cam_names, 
+                                FLAGS_depth_to_image_transforms_to_float,
+                                depth_to_image_transforms_to_float);
+  
   // Set up the variable blocks to optimize for BracketedDepthError
   int num_depth_params = dense_map::NUM_RIGID_PARAMS;
   if (FLAGS_affine_depth_to_image) num_depth_params = dense_map::NUM_AFFINE_PARAMS;
@@ -3259,7 +3340,7 @@ int main(int argc, char** argv) {
   // world_to_cam as initial guesses. Use world_to_cam_vec as storage
   // for the camera poses to optimize.
   std::vector<double> world_to_cam_vec;
-  if (FLAGS_no_extrinsics) {
+  if (FLAGS_no_rig) {
     world_to_cam_vec.resize(cams.size() * dense_map::NUM_RIGID_PARAMS);
     for (size_t cid = 0; cid < cams.size(); cid++)
       dense_map::rigid_transform_to_array(world_to_cam[cid],
@@ -3301,8 +3382,10 @@ int main(int argc, char** argv) {
   // pixel is an inlier. Originally all pixels are inliers. Once an
   // inlier becomes an outlier, it never becomes an inlier again.
   std::vector<std::map<int, std::map<int, int>>> pid_cid_fid_inlier;
+  // TODO(oalexan1): Must initialize all points as inliers outside this function,
+  // as now this function resets those.
   dense_map::flagOutlierByExclusionDist(  // Inputs
-    ref_cam_type, FLAGS_nav_cam_num_exclude_boundary_pixels, cam_params, cams, pid_to_cid_fid,
+    ref_cam_type, FLAGS_num_exclude_boundary_pixels, cam_params, cams, pid_to_cid_fid,
     keypoint_vec,
     // Outputs
     pid_cid_fid_inlier);
@@ -3312,15 +3395,15 @@ int main(int argc, char** argv) {
   std::vector<Eigen::Vector3d> pid_mesh_xyz;
   Eigen::Vector3d bad_xyz(1.0e+100, 1.0e+100, 1.0e+100);  // use this to flag invalid xyz
 
-  for (int pass = 0; pass < FLAGS_refiner_num_passes; pass++) {
-    std::cout << "\nOptimization pass " << pass + 1 << " / " << FLAGS_refiner_num_passes << "\n";
+  for (int pass = 0; pass < FLAGS_calibrator_num_passes; pass++) {
+    std::cout << "\nOptimization pass " << pass + 1 << " / " << FLAGS_calibrator_num_passes << "\n";
 
     // The transforms from the world to all cameras must be updated
     // given the current state of optimization
     // TODO(oalexan1): The call below is likely not necessary since this function
     // is already called earlier, and also whenever a pass finishes, see below.
     dense_map::calc_world_to_cam_rig_or_not(  // Inputs
-      FLAGS_no_extrinsics, cams, world_to_ref_vec, ref_timestamps, ref_to_cam_vec, world_to_cam_vec,
+      FLAGS_no_rig, cams, world_to_ref_vec, ref_timestamps, ref_to_cam_vec, world_to_cam_vec,
       ref_to_cam_timestamp_offsets,
       // Output
       world_to_cam);
@@ -3371,7 +3454,7 @@ int main(int argc, char** argv) {
         // definition is spelled out below.
         double *beg_cam_ptr = NULL, *end_cam_ptr = NULL, *ref_to_cam_ptr = NULL;
 
-        if (!FLAGS_no_extrinsics) {
+        if (!FLAGS_no_rig) {
           // Default behavior, model extrinsics, use timestamps
           int beg_ref_index = cams[cid].beg_ref_index;
           int end_ref_index = cams[cid].end_ref_index;
@@ -3394,7 +3477,7 @@ int main(int argc, char** argv) {
           cam_timestamp = cams[cid].timestamp;  // uses current camera's clock
 
         } else {
-          // No extrinsics. Then, beg_cam_ptr is just current camera,
+          // No rig. Then, beg_cam_ptr is just current camera,
           // not the ref bracket, end_cam_ptr is the identity and
           // fixed. The beg and end timestamps are declared to be
           // same, which will be used in calc_world_to_cam_trans() to
@@ -3409,7 +3492,7 @@ int main(int argc, char** argv) {
         }
 
         // Transform from reference camera to given camera. Won't be used when
-        // FLAGS_no_extrinsics is true or when the cam is of ref type.
+        // FLAGS_no_rig is true or when the cam is of ref type.
         ref_to_cam_ptr = &ref_to_cam_vec[dense_map::NUM_RIGID_PARAMS * cam_type];
 
         Eigen::Vector2d dist_ip(keypoint_vec[cid][fid].first, keypoint_vec[cid][fid].second);
@@ -3457,26 +3540,25 @@ int main(int argc, char** argv) {
         // should not be optimized. Same for the ref_to_cam_vec and
         // ref_to_cam_timestamp_offsets, etc., as can be seen further
         // down.
-        if (!FLAGS_no_extrinsics) {
+        if (!FLAGS_no_rig) {
           // See if to float the ref cameras
-          if (!FLAGS_float_sparse_map)
+          if (camera_poses_to_float.find(cam_names[ref_cam_type]) == camera_poses_to_float.end())
             problem.SetParameterBlockConstant(beg_cam_ptr);
         } else {
-          // There are no extrinsics. Then beg_cam_ptr refers to camera
+          // There is no rig. Then beg_cam_ptr refers to camera
           // for cams[cid], and not to its ref bracketing cam.
-          // Use --float_sparse_map to float it if it is a ref cam,
-          // and --float_nonref_cameras if it is not a ref cam.
-          if ((cam_type == ref_cam_type && !FLAGS_float_sparse_map) ||
-              (cam_type != ref_cam_type && !FLAGS_float_nonref_cameras))
+          // See if the user wants it floated.
+          if (camera_poses_to_float.find(cam_names[cam_type]) == camera_poses_to_float.end())
             problem.SetParameterBlockConstant(beg_cam_ptr);
         }
 
         // The end cam floats only if told to, and if it brackets
         // a given non-ref cam.
-        if (!FLAGS_float_sparse_map || cam_type == ref_cam_type || FLAGS_no_extrinsics)
+        if (camera_poses_to_float.find(cam_names[ref_cam_type]) == camera_poses_to_float.end() ||
+            cam_type == ref_cam_type || FLAGS_no_rig)
           problem.SetParameterBlockConstant(end_cam_ptr);
-
-        if (!FLAGS_float_timestamp_offsets || cam_type == ref_cam_type || FLAGS_no_extrinsics) {
+        
+        if (!FLAGS_float_timestamp_offsets || cam_type == ref_cam_type || FLAGS_no_rig) {
           // Either we don't float timestamp offsets at all, or the cam is the ref type,
           // or with no extrinsics, when it can't float anyway.
           problem.SetParameterBlockConstant(&ref_to_cam_timestamp_offsets[cam_type]);
@@ -3487,9 +3569,9 @@ int main(int argc, char** argv) {
                                          max_timestamp_offset[cam_type]);
         }
         // ref_to_cam is kept fixed at the identity if the cam is the ref type or
-        // no extrinsics
+        // no rig
         if (rig_transforms_to_float.find(cam_names[cam_type]) == rig_transforms_to_float.end() ||
-            cam_type == ref_cam_type || FLAGS_no_extrinsics) {
+            cam_type == ref_cam_type || FLAGS_no_rig) {
           problem.SetParameterBlockConstant(ref_to_cam_ptr);
         }
 
@@ -3629,7 +3711,7 @@ int main(int argc, char** argv) {
     // The optimization is done. Right away copy the optimized states
     // to where they belong to keep all data in sync.
 
-    if (!FLAGS_no_extrinsics) {
+    if (!FLAGS_no_rig) {
       // Copy back the reference transforms
       for (int cid = 0; cid < num_ref_cams; cid++)
         dense_map::array_to_rigid_transform
@@ -3681,7 +3763,7 @@ int main(int argc, char** argv) {
 
     // Must have up-to-date world_to_cam and residuals to flag the outliers
     dense_map::calc_world_to_cam_rig_or_not(  // Inputs
-      FLAGS_no_extrinsics, cams, world_to_ref_vec, ref_timestamps, ref_to_cam_vec, world_to_cam_vec,
+      FLAGS_no_rig, cams, world_to_ref_vec, ref_timestamps, ref_to_cam_vec, world_to_cam_vec,
       ref_to_cam_timestamp_offsets,
       // Output
       world_to_cam);
@@ -3707,7 +3789,7 @@ int main(int argc, char** argv) {
   sparse_map->cid_to_cam_t_global_ = world_to_ref;
 
   bool map_changed = (FLAGS_num_iterations > 0 &&
-                      (FLAGS_float_sparse_map || FLAGS_intrinsics_to_float != ""));
+                      (FLAGS_camera_poses_to_float != "" || FLAGS_intrinsics_to_float != ""));
   if (map_changed) {
     // Rebuild the map. This does not change the poses.
     std::cout << "Either the sparse map intrinsics or cameras got modified. "
@@ -3764,7 +3846,7 @@ int main(int argc, char** argv) {
 
   // Update the transforms from the world to every camera
   dense_map::calc_world_to_cam_rig_or_not(  // Inputs
-    FLAGS_no_extrinsics, cams, world_to_ref_vec, ref_timestamps, ref_to_cam_vec, world_to_cam_vec,
+    FLAGS_no_rig, cams, world_to_ref_vec, ref_timestamps, ref_to_cam_vec, world_to_cam_vec,
     ref_to_cam_timestamp_offsets,
     // Output
     world_to_cam);
@@ -3779,19 +3861,21 @@ int main(int argc, char** argv) {
     // TODO(oalexan1): This call to calc_world_to_cam_rig_or_not is likely not
     // necessary since world_to_cam has been updated by now.
     dense_map::meshProjectCameras(cam_names, cam_params, cams, world_to_cam, mesh, bvh_tree,
-                                  ref_cam_type,
-                                  FLAGS_nav_cam_num_exclude_boundary_pixels,
+                                  FLAGS_num_exclude_boundary_pixels,
                                   FLAGS_out_texture_dir);
   }
 
   if (FLAGS_save_images_and_depth_clouds) {
     dense_map::writeImageList(FLAGS_out_dir, cams, image_files, depth_files, world_to_cam);
 
-    bool model_rig = (!FLAGS_no_extrinsics);
+    bool model_rig = (!FLAGS_no_rig);
     dense_map::writeRigConfig(FLAGS_out_dir, model_rig, ref_cam_type, cam_names,
                               cam_params, ref_to_cam_trans, depth_to_image,
                               ref_to_cam_timestamp_offsets);
   }
+
+  if (FLAGS_export_to_voxblox)
+    exportToVoxblox(cam_names, cams, world_to_cam, FLAGS_out_dir);
 
   return 0;
 } // NOLINT // TODO(oalexan1): Remove this, after making the code more modular

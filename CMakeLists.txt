@@ -148,6 +148,7 @@ if (PCL_FOUND)
 else (PCL_FOUND)
    message(FATAL_ERROR "Can't find PCL.")
 endif (PCL_FOUND)
+include_directories("${PCL_COMMON_INCLUDE_DIR}")
 
 # Build voxblox, which provides the voxblox_mesh tool for fusing point clouds into meshes
 add_subdirectory(voxblox)

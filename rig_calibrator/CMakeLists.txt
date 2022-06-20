@@ -10,7 +10,7 @@ target_link_libraries(rig_calibrator
     texture_reconstruction ${TEXRECON_LIBRARIES} ${OpenCV_LIBRARIES} ${CERES_LIBRARIES}
     ${JPEG_LIBRARIES} ${PNG_LIBRARIES} ${TIFF_LIBRARIES}
     TBB::tbb TBB::tbbmalloc mve mve_util
-    gflags glog Boost::filesystem)
+    gflags glog Boost::filesystem pcl_common pcl_io_ply pcl_io)
 
 # Set RPATHS for the library
 # TODO(oalexan1): Note sure about the robustness of the logic below but it seems to work

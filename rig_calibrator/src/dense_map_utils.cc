@@ -18,8 +18,6 @@
  */
 
 #include <glog/logging.h>
-//#include <ff_common/thread.h>
-//#include <ff_common/utils.h>
 
 #include <rig_calibrator/system_utils.h>
 #include <rig_calibrator/dense_map_utils.h>
@@ -107,7 +105,7 @@ void parse_intrinsics_to_float(std::string const& intrinsics_to_float_str,
 
 // A  function to split a string like 'haz_cam sci_cam' into
 // its two constituents and validate against the list of known cameras.
-void parse_depth_to_image_transforms_to_float(std::vector<std::string> const& cam_names,
+void parse_camera_names(std::vector<std::string> const& cam_names,
                                               std::string const&
                                               depth_to_image_transforms_to_float_str,
                                               std::set<std::string>&
@@ -134,7 +132,6 @@ void parse_depth_to_image_transforms_to_float(std::vector<std::string> const& ca
     if (!have_cam_name) 
       LOG(FATAL) << "Error: A specified sensor name is not among the known sensors.\n";
     
-    std::cout << "--zzz will float rig transform to sensor " << val << std::endl;
     depth_to_image_transforms_to_float.insert(val);
   }
 
@@ -151,9 +148,9 @@ void parse_rig_transforms_to_float(std::vector<std::string> const& cam_names,
                                    std::set<std::string>& rig_transforms_to_float) {
 
   // Reuse earlier logic
-  parse_depth_to_image_transforms_to_float(cam_names, 
-                                           rig_transforms_to_float_str,  
-                                           rig_transforms_to_float);
+  parse_camera_names(cam_names, 
+                     rig_transforms_to_float_str,  
+                     rig_transforms_to_float);
 
   // Additional sanity check
   for (auto it = rig_transforms_to_float.begin(); it != rig_transforms_to_float.end(); it++)
