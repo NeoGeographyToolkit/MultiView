@@ -316,7 +316,7 @@ DEFINE_string(image_list, "",
               "with the --save_images_and_depth_clouds option.");
 
 DEFINE_bool(use_initial_rig_transforms, false,
-            "Use the transforms among the sensors of the rig specified via --rig-config."
+            "Use the transforms among the sensors of the rig specified via --rig_config."
             "Otherwise derive it from the poses of individual cameras.");
 
 DEFINE_bool(save_matches, false,

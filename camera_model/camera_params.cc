@@ -295,7 +295,7 @@ void camera::CameraParameters::DistortCentered(Eigen::Vector2d const& undistorte
     *distorted_c = distorted_c->cwiseProduct(focal_length_) +
       (optical_offset_ - distorted_half_size_);
   } else {
-    LOG(ERROR) << "Unknown distortion vector size!";
+    LOG(ERROR) << "Unknown distortion vector size.";
   }
 }
 

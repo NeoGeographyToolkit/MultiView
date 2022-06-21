@@ -67,7 +67,7 @@ def run_cmd(cmd):
         print("Failed execution of: " + " ".join(cmd))
         sys.exit(1)
 
-def sanity_checks(args):
+def sanityChecks(args):
 
     if args.rig_config == "":
         raise Exception("The path to the rig configuration file was not specified.")
@@ -81,16 +81,10 @@ def sanity_checks(args):
     if not os.path.exists(args.theia_flags):
         raise Exception("Cannot find the Theia flags file: " + args.theia_flags)
 
-    if args.work_dir == "":
-        raise Exception("The path to the work directory was not specified.")
+    if args.out_dir == "":
+        raise Exception("The path to the output directory was not specified.")
 
-    if which("build_reconstruction") is None:
-        raise Exception("Cannot find the 'build_reconstruction' program in PATH.")
-
-    if which("export_to_nvm_file") is None:
-        raise Exception("Cannot find the 'export_to_nvm_file' program in PATH.")
-
-def processArgs(args):
+def processArgs(args, base_dir):
     """
     Set up the parser and parse the args.
     """
@@ -108,17 +102,21 @@ def processArgs(args):
     parser.add_argument("--theia_flags", dest="theia_flags",
                         default="", help="The flags to pass to Theia.")
 
-    parser.add_argument("--work_dir", dest="work_dir", default="",
-                        help="A temporary work directory to be deleted by the user later.")
+    parser.add_argument("--out_dir", dest="out_dir", default="",
+                        help="The output directory (only the 'reconstruction_final.nvm' file in it is needed afterwards).")
     
     args = parser.parse_args()
 
+    # Set the Theia path if missing
+    if args.theia_flags == "":
+        args.theia_flags = base_dir + "/share/theia_flags.txt"
+    
     # Print the help message if called with no arguments
     if num_input_args <= 1:
         parser.print_help()
         sys.exit(1)
 
-    sanity_checks(args)
+    sanityChecks(args)
     
     return args
 
@@ -164,38 +162,29 @@ def parseRigConfig(rig_config_file):
     
     with open(rig_config_file, "r") as handle:
 
-        (vals, handle) = readConfigVals(handle, 'ref_sensor_id:', 1)
-        ref_sensor_id = vals[0]
+        (vals, handle) = readConfigVals(handle, 'ref_sensor_name:', 1)
+        ref_sensor_name = vals[0]
 
         while True:
             camera = {}
             
-            (vals, handle) = readConfigVals(handle, 'sensor_id:', 1)
+            (vals, handle) = readConfigVals(handle, 'sensor_name:', 1)
             if len(vals) == 0:
                 break # end of file
-            camera["sensor_id"] = vals[0]
-            #print("sensor id ", camera["sensor_id"])
-
-            (vals, handle) = readConfigVals(handle, "sensor_name:", 1)
             camera["sensor_name"] = vals[0]
-            #print("sensor name ", camera["sensor_name"])
 
             (vals, handle) = readConfigVals(handle, "focal_length:", 1)
             camera["focal_length"] = vals[0]
-            #print("focal_length ", camera["focal_length"])
 
             (vals, handle) = readConfigVals(handle, "optical_center:", 2)
             camera["optical_center"] = vals
-            #print("optical_center ", camera["optical_center"])
 
             (vals, handle) = readConfigVals(handle, "distortion_coeffs:", -1) # var length
             camera["distortion_coeffs"] = vals
-            #print("distortion_coeffs ", camera["distortion_coeffs"])
             if (len(vals) != 0 and len(vals) != 1 and len(vals) != 4 and len(vals) != 5):
                 raise Exception("Expecting 0, 1, 4, or 5 distortion coefficients")
 
             (vals, handle) = readConfigVals(handle, "distortion_type:", 1)
-            #print("vals is ", vals)
             if len(camera["distortion_coeffs"]) == 0 and vals[0] != "no_distortion":
                 raise Exception("When there are no distortion coefficients, distortion type " + \
                                 "must be: no_distortion")
@@ -210,26 +199,21 @@ def parseRigConfig(rig_config_file):
 
             (vals, handle) = readConfigVals(handle, "image_size:", 2)
             camera["image_size"] = vals
-            #print("image_size ", camera["image_size"])
             
             (vals, handle) = readConfigVals(handle, "undistorted_image_size:", 2)
             camera["undistorted_image_size"] = vals
-            #print("undistorted_image_size ", camera["undistorted_image_size"])
 
             (vals, handle) = readConfigVals(handle, "ref_to_sensor_transform:", -1)
             camera["ref_to_sensor_transform"] = vals
-            #print("ref_to_sensor_transform ", camera["ref_to_sensor_transform"])
             
             (vals, handle) = readConfigVals(handle, "depth_to_image_transform:", -1)
             camera["depth_to_image_transform"] = vals
-            #print("depth_to_image_transform ", camera["depth_to_image_transform"])
 
             (vals, handle) = readConfigVals(handle, "ref_to_sensor_timestamp_offset:", 1)
             camera["ref_to_sensor_timestamp_offset"] = vals[0]
-            #print("ref_to_sensor_timestamp_offset ", camera["ref_to_sensor_timestamp_offset"])
 
             cameras.append(camera)
-            
+
     return cameras
 
 def imageExtension(images):
@@ -240,13 +224,11 @@ def imageExtension(images):
     extensions = set()
     for image in images:
         path, ext = os.path.splitext(image)
-        print("--add ", ext)
         extensions.add(ext)
     if len(extensions) > 1:
         raise Exception("Input images have a mix of filename extensions. Use just one.")
     if len(extensions) == 0:
         raise Exception("The input image set is invalid.")
-    print("--will get ", list(extensions)[0])
     return list(extensions)[0]
         
 def genTheiaCalibFile(rig_config, args):
@@ -254,13 +236,10 @@ def genTheiaCalibFile(rig_config, args):
     # Parse the images for all cameras
     images = {}
     extensions = set()
-    print("images are ", args.images)
-    for image in args.images.split():
-        vals = image.split(':')
-        cam_id = int(vals[0])
-        pattern = vals[1]
-        images[cam_id] = glob.glob(pattern)
-        ext = imageExtension(images[cam_id])
+    for image_wildcard in args.images.split():
+        sensor_name = os.path.basename(os.path.dirname(image_wildcard))
+        images[sensor_name] = glob.glob(image_wildcard)
+        ext = imageExtension(images[sensor_name])
         extensions.add(ext)
         
     if len(extensions) > 1:
@@ -269,11 +248,11 @@ def genTheiaCalibFile(rig_config, args):
         raise Exception("The input image set is invalid.")
     extension = list(extensions)[0]
 
-    print("Work directory: " + args.work_dir)    
-    mkdir_p(args.work_dir)
+    print("Output directory: " + args.out_dir)    
+    mkdir_p(args.out_dir)
 
     # Remove old images in sym_image_dir
-    sym_image_dir = args.work_dir + "/images"
+    sym_image_dir = args.out_dir + "/images"
     old_images = glob.glob(sym_image_dir + "/*")
     if len(old_images) > 0:
         print("Removing old images from " + sym_image_dir)
@@ -284,57 +263,57 @@ def genTheiaCalibFile(rig_config, args):
     print("Creating sym links to the input images in: " + sym_image_dir)
     mkdir_p(sym_image_dir)
     sym_images = {}
-    for cam_id in range(len(rig_config)):
-        sym_images[cam_id] = []
-        num_images = len(images[cam_id])
+    for sensor_id in range(len(rig_config)):
+        sensor_name = rig_config[sensor_id]['sensor_name']
+        sym_images[sensor_name] = []
+        num_images = len(images[sensor_name])
         for it in range(num_images):
-            image = images[cam_id][it]
+            image = images[sensor_name][it]
             src_file = os.path.relpath(image, sym_image_dir)
             cam_type = os.path.basename(os.path.dirname(image))
             dst_file = sym_image_dir + "/" + cam_type + "_" + os.path.basename(image)
             
-            sym_images[cam_id].append(dst_file)
+            sym_images[sensor_name].append(dst_file)
             os.symlink(src_file, dst_file)
     
-    calib_file = args.work_dir + "/" + "theia_calibration.json"
+    calib_file = args.out_dir + "/" + "theia_calibration.json"
     print("Writing Theia calibration file: " + calib_file)
     with open(calib_file, "w") as fh:
         fh.write("{\n")
         fh.write('"priors" : [\n')
 
-        for cam_id in range(len(rig_config)):
-            print("rig is ", rig_config[cam_id])
-            
-            num_images = len(sym_images[cam_id])
+        for sensor_id in range(len(rig_config)):
+            sensor_name = rig_config[sensor_id]['sensor_name']
+            num_images = len(sym_images[sensor_name])
             for it in range(num_images):
-                image = os.path.basename(sym_images[cam_id][it])
+                image = os.path.basename(sym_images[sensor_name][it])
                 fh.write('{"CameraIntrinsicsPrior" : {\n')
                 fh.write('"image_name" : "' + image + '",\n')
-                fh.write('"width" : '  + rig_config[cam_id]['image_size'][0] + ",\n")
-                fh.write('"height" : ' + rig_config[cam_id]['image_size'][1] + ",\n")
-                fh.write('"focal_length" : ' + rig_config[cam_id]["focal_length"] + ",\n")
+                fh.write('"width" : '  + rig_config[sensor_id]['image_size'][0] + ",\n")
+                fh.write('"height" : ' + rig_config[sensor_id]['image_size'][1] + ",\n")
+                fh.write('"focal_length" : ' + rig_config[sensor_id]["focal_length"] + ",\n")
                 fh.write('"principal_point" : [' + \
-                         rig_config[cam_id]["optical_center"][0] + ", " + \
-                         rig_config[cam_id]["optical_center"][1] + "],\n")
+                         rig_config[sensor_id]["optical_center"][0] + ", " + \
+                         rig_config[sensor_id]["optical_center"][1] + "],\n")
 
-                if rig_config[cam_id]['distortion_type'] == 'no_distortion':
+                if rig_config[sensor_id]['distortion_type'] == 'no_distortion':
                     fh.write('"camera_intrinsics_type" : "PINHOLE"\n')
-                elif rig_config[cam_id]['distortion_type'] == 'fisheye':
+                elif rig_config[sensor_id]['distortion_type'] == 'fisheye':
                     fh.write('"radial_distortion_1" : ' + \
-                             rig_config[cam_id]["distortion_coeffs"][0] + ",\n")
+                             rig_config[sensor_id]["distortion_coeffs"][0] + ",\n")
                     fh.write('"camera_intrinsics_type" : "FOV"\n')
-                elif rig_config[cam_id]['distortion_type'] == 'radtan':
+                elif rig_config[sensor_id]['distortion_type'] == 'radtan':
                     
                     # Distortion coeffs convention copied from
                     # camera_params.cc. JSON format from
                     # calibration_test.json in TheiaSFM.
-                    k1 = rig_config[cam_id]["distortion_coeffs"][0]
-                    k2 = rig_config[cam_id]["distortion_coeffs"][1]
-                    p1 = rig_config[cam_id]["distortion_coeffs"][2]
-                    p2 = rig_config[cam_id]["distortion_coeffs"][3]
+                    k1 = rig_config[sensor_id]["distortion_coeffs"][0]
+                    k2 = rig_config[sensor_id]["distortion_coeffs"][1]
+                    p1 = rig_config[sensor_id]["distortion_coeffs"][2]
+                    p2 = rig_config[sensor_id]["distortion_coeffs"][3]
                     k3 = '0'
-                    if len(rig_config[cam_id]["distortion_coeffs"]) == 5:
-                        k3 = rig_config[cam_id]["distortion_coeffs"][4]
+                    if len(rig_config[sensor_id]["distortion_coeffs"]) == 5:
+                        k3 = rig_config[sensor_id]["distortion_coeffs"][4]
                     fh.write('"radial_distortion_coeffs" : [' + \
                              k1 + ", " + k2 + ", " + k3 + "],\n")
                     fh.write('"tangential_distortion_coeffs" : [' + \
@@ -342,9 +321,9 @@ def genTheiaCalibFile(rig_config, args):
                     fh.write('"camera_intrinsics_type" : "PINHOLE_RADIAL_TANGENTIAL"\n')
                 else:
                     raise Exception("Unknown distortion type: " + \
-                                    rig_config[cam_id]['distortion_type'])
+                                    rig_config[sensor_id]['distortion_type'])
 
-                if it < num_images - 1 or cam_id < len(rig_config)  - 1:
+                if it < num_images - 1 or sensor_id < len(rig_config)  - 1:
                     fh.write("}},\n")
                 else:
                     fh.write("}}\n")
@@ -354,7 +333,7 @@ def genTheiaCalibFile(rig_config, args):
 
     return (calib_file, sym_image_dir, images, sym_images, extension)
 
-def put_orig_images_in_nvm(nvm_file, orig_nvm_file, images, sym_images):
+def put_orig_images_in_nvm(nvm_file, final_nvm_file, images, sym_images):
     """
     Theia saves images without full path. Go back to original image names.
     """
@@ -374,24 +353,25 @@ def put_orig_images_in_nvm(nvm_file, orig_nvm_file, images, sym_images):
             vals[0] = image_dict[vals[0]]
             lines[it] = " ".join(vals) + "\n"
 
-    print("Writing nvm file with original image names: " + orig_nvm_file)
-    with open(orig_nvm_file, 'w') as fh:
+    print("Writing nvm file with original image names: " + final_nvm_file)
+    with open(final_nvm_file, 'w') as fh:
         fh.writelines(lines)
     
 if __name__ == "__main__":
 
-    args = processArgs(sys.argv)
+    # Set the path to OpenIO. This will not be needed when this dependency is removed
+    base_dir = os.path.dirname(os.path.dirname(os.path.abspath(sys.argv[0])))
+    os.environ['OIIO_LIBRARY_PATH'] = base_dir + "/lib"
+
+    args = processArgs(sys.argv, base_dir)
 
     rig_config = parseRigConfig(args.rig_config)
 
     (calib_file, sym_image_dir, images, sym_images, image_extension) \
                  = genTheiaCalibFile(rig_config, args)
 
-    print("Must set: export OIIO_LIBRARY_PATH=$HOME/projects/MultiView/install/lib")
-    print("Must remove this dependency,")
-    
-    reconstruction_file = args.work_dir + "/reconstruction"
-    matching_dir = args.work_dir + "/matches"
+    reconstruction_file = args.out_dir + "/reconstruction"
+    matching_dir = args.out_dir + "/matches"
 
     # Wipe old data
     for old_reconstruction in glob.glob(reconstruction_file + "*"):
@@ -405,17 +385,17 @@ if __name__ == "__main__":
         count += 1
         os.remove(old_matches)
 
-    cmd = ["build_reconstruction", "--flagfile", args.theia_flags, "--images",
+    cmd = [base_dir + "/bin/build_reconstruction", "--flagfile", args.theia_flags, "--images",
            sym_image_dir + "/*" + image_extension, "--calibration_file", calib_file,
            "--output_reconstruction", reconstruction_file, "--matching_working_directory",
            matching_dir, "--intrinsics_to_optimize", "NONE"]
     run_cmd(cmd)
     
     nvm_file = reconstruction_file + ".nvm"
-    cmd = ["export_to_nvm_file", "-input_reconstruction_file",  reconstruction_file + "-0",
-           "-output_nvm_file", nvm_file]
+    cmd = [base_dir + "/bin/export_to_nvm_file", "-input_reconstruction_file",
+           reconstruction_file + "-0", "-output_nvm_file", nvm_file]
     run_cmd(cmd)
 
-    orig_nvm_file = reconstruction_file + "_orig.nvm"
-    put_orig_images_in_nvm(nvm_file, orig_nvm_file, images, sym_images)
+    final_nvm_file = reconstruction_file + "_final.nvm"
+    put_orig_images_in_nvm(nvm_file, final_nvm_file, images, sym_images)
     
