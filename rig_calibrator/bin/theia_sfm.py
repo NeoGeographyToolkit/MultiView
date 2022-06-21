@@ -97,16 +97,21 @@ def processArgs(args, base_dir):
                         help = "Rig configuration file.")
 
     parser.add_argument("--images",  dest="images", default="",
-                        help = "Images (format tbd).")
+                        help = "Images, as individual wildcards. Example: 'dir/cam1/*tif dir/cam2/*tif.")
 
     parser.add_argument("--theia_flags", dest="theia_flags",
                         default="", help="The flags to pass to Theia.")
 
     parser.add_argument("--out_dir", dest="out_dir", default="",
-                        help="The output directory (only the 'reconstruction_final.nvm' file in it is needed afterwards).")
+                        help="The output directory (only the 'cameras.nvm' file in it is needed afterwards).")
     
     args = parser.parse_args()
 
+    # Remove continuation lines in the string (those are convenient
+    # for readability in docs)
+    args.images = args.images.replace('\\', '')
+    args.images = args.images.replace('\n', ' ')
+    
     # Set the Theia path if missing
     if args.theia_flags == "":
         args.theia_flags = base_dir + "/share/theia_flags.txt"
@@ -130,13 +135,16 @@ def readConfigVals(handle, tag, num_vals):
     while True:
 
         line = handle.readline()
-        if len(line) == 0:
-            # Last line
-            break
+        
+        # Wipe everything after pound but keep the newline,
+        # as otherwise this will be treated as the last line
+        match = re.match("^(.*?)\#.*?\n", line)
+        if match:
+            line = match.group(1) + "\n"
 
-        if line[0] == '#':
-            # Ignore comments
-            continue
+        if len(line) == 0:
+            # Last line, lacks a newline
+            break
 
         line = line.rstrip() # wipe newlne
         if len(line) == 0:
@@ -396,6 +404,6 @@ if __name__ == "__main__":
            reconstruction_file + "-0", "-output_nvm_file", nvm_file]
     run_cmd(cmd)
 
-    final_nvm_file = reconstruction_file + "_final.nvm"
+    final_nvm_file = args.out_dir + "/cameras.nvm"
     put_orig_images_in_nvm(nvm_file, final_nvm_file, images, sym_images)
     
