@@ -203,7 +203,7 @@ DEFINE_string(depth_to_image_transforms_to_float, "",
               "(if depth data exists). Example: 'cam1 cam3'.");
 
 DEFINE_bool(float_scale, false,
-            "If to optimize the scale of the clouds, part of depth_to_image transform "
+            "If to optimize the scale of the clouds, part of depth-to-image transform. "
             "If kept fixed, the configuration of cameras should adjust to respect the given "
             "scale. This parameter should not be used with --affine_depth_to_image when the "
             "transform is affine, rather than rigid and a scale.");
@@ -237,7 +237,7 @@ DEFINE_double(depth_mesh_weight, 0.0,
               "A larger value will give more weight to the constraint that the depth clouds "
               "stay close to the mesh. Not suggested by default.");
 
-DEFINE_bool(affine_depth_to_image, false, "Assume that the depth_to_image_transform "
+DEFINE_bool(affine_depth_to_image, false, "Assume that the depth-to-image transform "
             "for each depth + image camera is an arbitrary affine transform rather than a "
             "rotation times a scale.");
 
@@ -274,7 +274,7 @@ DEFINE_double(max_ray_dist, 100.0, "The maximum search distance from a starting 
 DEFINE_bool(registration, false,
             "If true, and registration control points for the sparse map exist and are specified "
             "by --hugin_file and --xyz_file, register all camera poses and the rig transforms "
-            "before starting the optimization. For now, the depth_to_image transforms do not "
+            "before starting the optimization. For now, the depth-to-image transforms do not "
             "change as result of this, which may be a problem. To apply the registration only, "
             "use zero iterations.");
 
@@ -303,9 +303,7 @@ DEFINE_bool(save_images_and_depth_clouds, false,
             "Save the images and point clouds used in processing. Implies that --out_dir is set.");
 
 DEFINE_string(rig_config, "",
-              "Read the rig configuration from this plain text file rather than from "
-              "robot's lua-based config file. The same format is used as for when this tool "
-              "saves the outputs with the --save_images_and_depth_clouds option.");
+              "Read the rig configuration from this file.");
 
 DEFINE_string(nvm_file, "",
               "Read images and camera poses from an nvm file, as exported by Theia.");
@@ -316,7 +314,7 @@ DEFINE_string(image_list, "",
               "with the --save_images_and_depth_clouds option.");
 
 DEFINE_bool(use_initial_rig_transforms, false,
-            "Use the transforms among the sensors of the rig specified via --rig_config."
+            "Use the transforms among the sensors of the rig specified via --rig_config. "
             "Otherwise derive it from the poses of individual cameras.");
 
 DEFINE_bool(save_matches, false,
@@ -1073,6 +1071,9 @@ void parameterValidation() {
   if (FLAGS_use_initial_rig_transforms && FLAGS_no_rig)
     LOG(FATAL) << "Cannot use initial rig transforms if not modeling the rig.\n";
 
+  if (FLAGS_out_texture_dir != "" && FLAGS_mesh == "")
+      LOG(FATAL) << "Cannot project camera images onto a mesh if a mesh was not provided.\n";
+
 #if !HAVE_ASTROBEE
   if (FLAGS_rig_config == "")
     LOG(FATAL) << "Must specify the initial rig configuration via --rig_config.\n";
@@ -1171,9 +1172,9 @@ void lookupImagesAndBrackets(  // Inputs
   // Populate the data for each camera image
   for (int beg_ref_it = 0; beg_ref_it < num_ref_cams; beg_ref_it++) {
     if (ref_cam_type != 0)
-      LOG(FATAL) << "It is assumed that the ref cam type is 0.";
+      LOG(FATAL) << "It is assumed that the ref sensor id is 0.";
 
-    bool save_grayscale = true;                       // for matching we will need grayscale
+    bool save_grayscale = true; // for matching we will need grayscale
 
     // For when we have last ref timestamp and last other cam timestamp and they are equal
     int end_ref_it = beg_ref_it + 1;
@@ -2152,11 +2153,10 @@ void writeRigConfig(std::string const& out_dir, bool model_rig, int ref_cam_type
   if (!f.is_open()) LOG(FATAL) << "Cannot open file for writing: " << rig_config << "\n";
   f.precision(17);
 
-  f << "ref_sensor_id: " << ref_cam_type << "\n";
+  f << "ref_sensor_name: " << cam_names[ref_cam_type] << "\n";
 
   for (size_t cam_type = ref_cam_type; cam_type < cam_params.size(); cam_type++) {
     f << "\n";
-    f << "sensor_id: "    << cam_type << "\n";
     f << "sensor_name: "  << cam_names[cam_type] << "\n";
     f << "focal_length: " << cam_params[cam_type].GetFocalLength() << "\n";
 
@@ -2223,6 +2223,23 @@ void readConfigVals(std::ifstream & f, std::string const& tag, int desired_num_v
   std::vector<double> local_vals;  // std::vector has push_back()
   std::string line;
   while (getline(f, line)) {
+
+    // Remove everything after any point sign
+    bool have_comment = (line.find('#') != line.npos);
+    if (have_comment) {
+      std::string new_line;
+      for (size_t c = 0; c < line.size(); c++) {
+        if (line[c] == '#') 
+          break; // got to the pound sign
+        
+        new_line += line[c];
+      }
+
+      line = new_line;
+    }
+    
+    // Here must remove anything after the pound sign
+    
     if (line.empty() || line[0] == '#') continue;
 
     std::istringstream iss(line);
@@ -2233,6 +2250,9 @@ void readConfigVals(std::ifstream & f, std::string const& tag, int desired_num_v
       local_vals.push_back(val);
     }
 
+    if (token == "") 
+      continue; // likely just whitespace is present on the line
+    
     if (token != tag) throw std::runtime_error("Could not read value for: " + tag);
 
     // Copy to Eigen::VectorXd
@@ -2312,28 +2332,28 @@ void readRigConfig(std::string const& rig_config, bool have_rig_transforms, int 
     Eigen::VectorXd vals;
     std::vector<std::string> str_vals;
 
-    readConfigVals(f, "ref_sensor_id:", 1, vals);
-    ref_cam_type = vals[0];
-    if (ref_cam_type != 0) LOG(FATAL) << "The reference sensor id must be 0.\n";
-
+    readConfigVals(f, "ref_sensor_name:", 1, str_vals);
+    std::string ref_sensor_name = str_vals[0];
+  
     // Read each sensor
     int sensor_it = -1;
     while (1) {
       sensor_it++;
 
       try {
-        readConfigVals(f, "sensor_id:", 1, vals);
+        readConfigVals(f, "sensor_name:", 1, str_vals);
       } catch(...) {
         // Likely no more sensors
         return;
       }
-      int sensor_id = vals[0];
-      if (sensor_id != sensor_it) LOG(FATAL) << "Expecting to read sensor id: "
-                                             << sensor_it << "\n";
-
-      readConfigVals(f, "sensor_name:", 1, str_vals);
       std::string sensor_name = str_vals[0];
       cam_names.push_back(sensor_name);
+
+      // This check would save a lot of clever coding
+      if ((sensor_it == 0 && sensor_name != ref_sensor_name) ||  
+          (sensor_it != 0 && sensor_name == ref_sensor_name))
+        LOG(FATAL) << "The reference sensor must be the first sensor specified in the "
+                   << "rig configuration.\n";  
 
       readConfigVals(f, "focal_length:", 1, vals);
       Eigen::Vector2d focal_length(vals[0], vals[0]);
@@ -2610,9 +2630,6 @@ void calc_rig_using_word_to_cam(int ref_cam_type, int num_cam_types,
     ref_to_cam_trans[cam_type].matrix() = median_trans;
     ref_to_cam_trans[cam_type].linear() /= 
       pow(ref_to_cam_trans[cam_type].linear().determinant(), 1.0 / 3.0);
-    
-    std::cout << "--median ref to cam for sensor " << cam_type << "\n"
-              << ref_to_cam_trans[cam_type].matrix() << std::endl;
   }
   
   return;
@@ -3099,8 +3116,6 @@ int main(int argc, char** argv) {
     dense_map::readLuaConfig(use_initial_rig_transforms, ref_cam_type, cam_names, cam_params,
                              ref_to_cam_trans, depth_to_image, ref_to_cam_timestamp_offsets);
 
-  std::cout << "--have initial rig transform " << use_initial_rig_transforms << std::endl;
-  
   int num_cam_types = cam_params.size();
 
   // Optionally load the mesh
@@ -3851,19 +3866,13 @@ int main(int argc, char** argv) {
     // Output
     world_to_cam);
 
-  if (FLAGS_out_texture_dir != "") {
-    // Project each image onto the mesh
-
-    if (FLAGS_mesh == "")
-      LOG(FATAL) << "Cannot project camera images onto a mesh if a mesh was not provided.\n";
-
-    // TODO(oalexan1): Why the call below works without dense_map:: prepended to it?
-    // TODO(oalexan1): This call to calc_world_to_cam_rig_or_not is likely not
-    // necessary since world_to_cam has been updated by now.
+  // TODO(oalexan1): Why the call below works without dense_map:: prepended to it?
+  // TODO(oalexan1): This call to calc_world_to_cam_rig_or_not is likely not
+  // necessary since world_to_cam has been updated by now.
+  if (FLAGS_out_texture_dir != "")
     dense_map::meshProjectCameras(cam_names, cam_params, cams, world_to_cam, mesh, bvh_tree,
                                   FLAGS_num_exclude_boundary_pixels,
                                   FLAGS_out_texture_dir);
-  }
 
   if (FLAGS_save_images_and_depth_clouds) {
     dense_map::writeImageList(FLAGS_out_dir, cams, image_files, depth_files, world_to_cam);
