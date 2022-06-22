@@ -18,6 +18,8 @@ set(CMAKE_MODULE_PATH "${MULTIVIEW_DEPS_DIR}/lib/cmake/Ceres;${CMAKE_MODULE_PATH
 # Where to search for include files
 include_directories("${MULTIVIEW_DEPS_DIR}/include")
 
+set(CMAKE_INSTALL_LIBDIR "lib") # install in lib and not lib64
+
 # Image libs
 find_package(PNG REQUIRED)
 find_package(JPEG REQUIRED)
