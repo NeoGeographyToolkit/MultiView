@@ -8,7 +8,7 @@ robot with 3 front-facing cameras to scan and navigate the
 International Space Station. The current version is self-contained
 and does not depend on ROS or other parts of ISAAC.
 
-The key dependencies are the [Ceres Solver](http://ceres-solver.org/)
+The key dependencies are [Ceres Solver](http://ceres-solver.org/)
 for solving the calibration problem,
 [VoxBlox](https://github.com/ethz-asl/voxblox) for fusing point clouds
 into a mesh, and [MVS
@@ -42,7 +42,7 @@ Otherwise, after cloning it, run:
 # Build
 
 The dependencies for this package can be fetched with conda with the
-command::
+command:
 
     conda env create -f MultiView/conda/linux_deps_env.yaml
 
