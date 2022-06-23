@@ -1,32 +1,54 @@
-# MultiView
+This software provides a collection of tools for calibration of a rig
+of *N* image and/or depth+image cameras, fusion of point clouds into a
+mesh, and seamless texturing of those meshes with the input images. 
 
-This will be a collection of tools for calibration of a camera rig with image and depth+image sensors, creation of meshes from stereo and depth data, and seamless texturing.
+The software was originally developed as part of the [NASA
+ISAAC](https://github.com/nasa/isaac#readme) project, which uses a
+robot with 3 front-facing cameras to scan and navigate the
+International Space Station. The current version is self-contained
+and does not depend on ROS or other parts of ISAAC.
+
+The key dependencies are the [Ceres Solver](http://ceres-solver.org/)
+for solving the calibration problem,
+[VoxBlox](https://github.com/ethz-asl/voxblox) for fusing point clouds
+into a mesh, and [MVS
+Texturing](https://github.com/nmoehrle/mvs-texturing) for creation of
+textured meshes. Most of the original work in this package went
+towards the creation of the calibration logic and ensuring that all
+components work together to create high-fidelity results (this is
+still being worked on).
+
+These tools are shipped as part of the [NASA Ames
+Stereo Pipeline](https://github.com/NeoGeographyToolkit/StereoPipeline/releases) (only with the Linux build for the moment).
+
+# Documentation
+
+ * [rig calibrator](https://stereopipeline.readthedocs.io/en/latest/tools/rig_calibrator.html)
+ * [voxblox mesh creation](https://stereopipeline.readthedocs.io/en/latest/tools/voxblox_mesh.html)
+ * [mesh texturing](https://stereopipeline.readthedocs.io/en/latest/tools/texrecon.html)
 
 # Fetching the code
 
 This package depends on other repositories, which are included as
 submodules, and those may have their own dependencies. Hence, this
-repo should be cloned as::
+repo should be cloned recursively, as:
 
     git clone --recursive git@github.com:oleg-alexandrov/MultiView.git
 
-Otherwise, after cloning it, run::
+Otherwise, after cloning it, run:
 
     git submodule update --init --recursive
 
 # Build
 
-Change to that repository::
-
-    cd MultiView
-
 The dependencies for this package can be fetched with conda with the
 command::
 
-    conda env create -f conda/linux_deps_env.yaml
+    conda env create -f MultiView/conda/linux_deps_env.yaml
 
-Then the software can be built (on Linux) as follows::
-
+Then the software can be built (on Linux) as follows:
+    
+    cd MultiView
     mkdir build
     cd build
     conda activate rig_calibrator
@@ -40,4 +62,3 @@ Then the software can be built (on Linux) as follows::
     make -j 20 && make install
 
 The resulting tools will be installed in MultiView/install.
-
