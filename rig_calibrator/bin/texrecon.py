@@ -42,7 +42,7 @@ def process_args(args):
                         default="", help= "Read images and camera poses from this list.")
 
     parser.add_argument("--mesh", dest="mesh",
-                        default="", help="The mesh to use for texturing.")
+                        default="", help="The mesh to use for texturing, in .ply format.")
     
     parser.add_argument("--out_dir", dest="out_dir",
                         default="", help="The directory where to write the textured mesh " + \
@@ -51,9 +51,9 @@ def process_args(args):
     # Note how the percent sign below is escaped, by writing: %%
     parser.add_argument("--undistorted_crop_win", dest="undistorted_crop_win", default = "",
                         help = "The dimensions of the central image region to keep after "   + \
-                        "undistorting an image and before texturing. Normally 85%% - 90%% "  + \
-                        "of distorted (actual) image dimensions would do. "                  + \
-                        "This would need revisiting. Suggested for the Astrobee images: "    + \
+                        "undistorting an image and before uisng it in texturing. Normally "  + \
+                        "85%% - 90%% of distorted (actual) image dimensions would do. "      + \
+                        "This would need revisiting. Suggested the Astrobee images: "        + \
                         "sci_cam: '1250 1000' nav_cam: '1100 776'. haz_cam: '250 200'.")
     
     args = parser.parse_args()
