@@ -22,6 +22,7 @@
 #include <rig_calibrator/system_utils.h>
 #include <rig_calibrator/dense_map_utils.h>
 #include <rig_calibrator/camera_image.h>
+#include <rig_calibrator/transform_utils.h>
 
 #include <boost/filesystem.hpp>
 
@@ -854,6 +855,403 @@ bool lookupImage(double desired_time, std::vector<ImageMessage> const& msgs,
     }
   }
   return false;
+}
+
+// Convert a string of space-separated numbers to a vector
+void strToVec(std::string const& str, std::vector<double> & vec) {
+
+  vec.clear();
+  std::istringstream iss(str);
+  double val = 0.0;
+  while (iss >> val)
+    vec.push_back(val);
+}
+
+// Read the images, depth clouds, and their metadata
+// Save the properties of images. Use space as separator.
+void writeImageList(std::string const& out_dir, std::vector<dense_map::cameraImage> const& cams,
+                    std::vector<std::string> const& image_files,
+                    std::vector<std::string> const& depth_files,
+                    std::vector<Eigen::Affine3d> const& world_to_cam) {
+  dense_map::createDir(out_dir);
+  std::string image_list = out_dir + "/images.txt";
+  std::cout << "Writing: " << image_list << std::endl;
+
+  std::ofstream f;
+  f.open(image_list.c_str(), std::ios::binary | std::ios::out);
+  if (!f.is_open()) LOG(FATAL) << "Cannot open file for writing: " << image_list << "\n";
+  f.precision(17);
+
+  f << "# image_file world_to_image_transform\n";
+
+  for (size_t it = 0; it < cams.size(); it++) {
+
+    // Convert an affine transform to a 4x4 matrix
+    Eigen::MatrixXd T = world_to_cam[it].matrix();
+
+    // Save the rotation and translation of T
+    f << image_files[it] << " " << dense_map::affineToStr(world_to_cam[it]) << "\n";
+  }
+
+  f.close();
+}
+
+// Save the optimized rig configuration
+void writeRigConfig(std::string const& out_dir, bool model_rig, int ref_cam_type,
+                    std::vector<std::string> const& cam_names,
+                    std::vector<camera::CameraParameters> const& cam_params,
+                    std::vector<Eigen::Affine3d> const& ref_to_cam_trans,
+                    std::vector<Eigen::Affine3d> const& depth_to_image,
+                    std::vector<double> const& ref_to_cam_timestamp_offsets) {
+  if (ref_cam_type != 0)
+    LOG(FATAL) << "The reference camera id must be always 0.\n";
+
+  dense_map::createDir(out_dir);
+  std::string rig_config = out_dir + "/rig_config.txt";
+  std::cout << "Writing: " << rig_config << std::endl;
+
+  std::ofstream f;
+  f.open(rig_config.c_str(), std::ios::binary | std::ios::out);
+  if (!f.is_open()) LOG(FATAL) << "Cannot open file for writing: " << rig_config << "\n";
+  f.precision(17);
+
+  f << "ref_sensor_name: " << cam_names[ref_cam_type] << "\n";
+
+  for (size_t cam_type = ref_cam_type; cam_type < cam_params.size(); cam_type++) {
+    f << "\n";
+    f << "sensor_name: "  << cam_names[cam_type] << "\n";
+    f << "focal_length: " << cam_params[cam_type].GetFocalLength() << "\n";
+
+    Eigen::Vector2d c = cam_params[cam_type].GetOpticalOffset();
+    f << "optical_center: " << c[0] << " " << c[1] << "\n";
+
+    Eigen::VectorXd D = cam_params[cam_type].GetDistortion();
+
+    f << "distortion_coeffs: ";
+    for (int d = 0; d < D.size(); d++) {
+      f << D[d];
+      if (d + 1 < D.size()) f << " ";
+    }
+    f << "\n";
+
+    if (D.size() == 0) f << "distortion_type: " << dense_map::NO_DISTORION << "\n";
+    else if (D.size() == 1)
+      f << "distortion_type: " << dense_map::FISHEYE_DISTORTION << "\n";
+    else if (D.size() >= 4 && D.size() <= 5)
+      f << "distortion_type: " << dense_map::RADTAN_DISTORTION << "\n";
+    else
+      LOG(FATAL) << "Expecting 0, 1, 4, or 5 distortion coefficients. Got: " << D.size() << ".\n";
+
+    Eigen::Vector2i image_size = cam_params[cam_type].GetDistortedSize();
+    f << "image_size: " << image_size[0] << ' ' << image_size[1] << "\n";
+
+    Eigen::Vector2i undist_size = cam_params[cam_type].GetUndistortedSize();
+    f << "undistorted_image_size: " << undist_size[0] << ' ' << undist_size[1] << "\n";
+
+    // This is very important. When we don't assume a rig,
+    // the transform among the sensors should be invalid.
+    Eigen::Affine3d Zero;
+    Zero.matrix() = 0 * Zero.matrix();
+    Eigen::Affine3d T;
+
+    if (model_rig)
+      T = ref_to_cam_trans[cam_type];
+    else
+      T = Zero;
+
+    f << "ref_to_sensor_transform: "
+      << dense_map::affineToStr(T)
+      << "\n";
+
+    f << "depth_to_image_transform: "
+      << dense_map::affineToStr(depth_to_image[cam_type]) << "\n";
+
+    f << "ref_to_sensor_timestamp_offset: " << ref_to_cam_timestamp_offsets[cam_type] << "\n";
+  }
+
+  f.close();
+}
+
+// Read real values after given tag. Ignore comments, so any line starting
+// with #, and empty lines. If desired_num_vals >=0, validate that we
+// read the desired number.
+void readConfigVals(std::ifstream & f, std::string const& tag, int desired_num_vals,
+                    Eigen::VectorXd & vals) {
+  // Clear the output
+  vals.resize(0);
+
+  std::vector<double> local_vals;  // std::vector has push_back()
+  std::string line;
+  while (getline(f, line)) {
+
+    // Remove everything after any point sign
+    bool have_comment = (line.find('#') != line.npos);
+    if (have_comment) {
+      std::string new_line;
+      for (size_t c = 0; c < line.size(); c++) {
+        if (line[c] == '#') 
+          break; // got to the pound sign
+        
+        new_line += line[c];
+      }
+
+      line = new_line;
+    }
+    
+    // Here must remove anything after the pound sign
+    
+    if (line.empty() || line[0] == '#') continue;
+
+    std::istringstream iss(line);
+    std::string token;
+    iss >> token;
+    double val = 0.0;
+    while (iss >> val) {
+      local_vals.push_back(val);
+    }
+
+    if (token == "") 
+      continue; // likely just whitespace is present on the line
+    
+    if (token != tag) throw std::runtime_error("Could not read value for: " + tag);
+
+    // Copy to Eigen::VectorXd
+    vals.resize(local_vals.size());
+    for (int it = 0; it < vals.size(); it++) vals[it] = local_vals[it];
+
+    if (desired_num_vals >= 0 && vals.size() != desired_num_vals)
+      throw std::runtime_error("Read an incorrect number of values for: " + tag);
+
+    return;
+  }
+
+  throw std::runtime_error("Could not read value for: " + tag);
+}
+  
+// Read strings separated by spaces after given tag. Ignore comments, so any line starting
+// with #, and empty lines. If desired_num_vals >=0, validate that we
+// read the desired number.
+void readConfigVals(std::ifstream & f, std::string const& tag, int desired_num_vals,
+                    std::vector<std::string> & vals) {
+  // Clear the output
+  vals.resize(0);
+
+  std::string line;
+  while (getline(f, line)) {
+    if (line.empty() || line[0] == '#') continue;
+
+    std::istringstream iss(line);
+    std::string token;
+    iss >> token;
+    std::string val;
+    while (iss >> val)
+      vals.push_back(val);
+
+    if (token != tag) throw std::runtime_error("Could not read value for: " + tag);
+
+    if (desired_num_vals >= 0 && vals.size() != desired_num_vals)
+      throw std::runtime_error("Read an incorrect number of values for: " + tag);
+
+    return;
+  }
+
+  throw std::runtime_error("Could not read value for: " + tag);
+}
+
+// Read a rig configuration. Check if the transforms among the sensors
+// on the rig is not 0, in that case will use it.
+void readRigConfig(std::string const& rig_config, bool have_rig_transforms, int & ref_cam_type,
+                   std::vector<std::string> & cam_names,
+                   std::vector<camera::CameraParameters> & cam_params,
+                   std::vector<Eigen::Affine3d> & ref_to_cam_trans,
+                   std::vector<Eigen::Affine3d> & depth_to_image,
+                   std::vector<double> & ref_to_cam_timestamp_offsets) {
+  try {
+    // Initialize the outputs
+    ref_cam_type = 0;
+    cam_names.clear();
+    cam_params.clear();
+    ref_to_cam_trans.clear();
+    depth_to_image.clear();
+    ref_to_cam_timestamp_offsets.clear();
+
+    // Open the file
+    std::cout << "Reading: " << rig_config << std::endl;
+    std::ifstream f;
+    f.open(rig_config.c_str(), std::ios::binary | std::ios::in);
+    if (!f.is_open()) LOG(FATAL) << "Cannot open file for reading: " << rig_config << "\n";
+
+    // Read the ref sensor id
+    Eigen::VectorXd vals;
+    std::vector<std::string> str_vals;
+
+    readConfigVals(f, "ref_sensor_name:", 1, str_vals);
+    std::string ref_sensor_name = str_vals[0];
+  
+    // Read each sensor
+    int sensor_it = -1;
+    while (1) {
+      sensor_it++;
+
+      try {
+        readConfigVals(f, "sensor_name:", 1, str_vals);
+      } catch(...) {
+        // Likely no more sensors
+        return;
+      }
+      std::string sensor_name = str_vals[0];
+      cam_names.push_back(sensor_name);
+
+      // This check would save a lot of clever coding
+      if ((sensor_it == 0 && sensor_name != ref_sensor_name) ||  
+          (sensor_it != 0 && sensor_name == ref_sensor_name))
+        LOG(FATAL) << "The reference sensor must be the first sensor specified in the "
+                   << "rig configuration.\n";  
+
+      readConfigVals(f, "focal_length:", 1, vals);
+      Eigen::Vector2d focal_length(vals[0], vals[0]);
+
+      readConfigVals(f, "optical_center:", 2, vals);
+      Eigen::Vector2d optical_center(vals[0], vals[1]);
+
+      readConfigVals(f, "distortion_coeffs:", -1, vals);
+      if (vals.size() != 0 && vals.size() != 1 && vals.size() != 4 && vals.size() != 5)
+        LOG(FATAL) << "Expecting 0, 1, 4, or 5 distortion coefficients.\n";
+      Eigen::VectorXd distortion = vals;
+      
+      readConfigVals(f, "distortion_type:", 1, str_vals);
+      if (distortion.size() == 0 && str_vals[0] != dense_map::NO_DISTORION)
+        LOG(FATAL) << "When there are no distortion coefficients, distortion type must be: "
+                   << dense_map::NO_DISTORION << "\n";
+      if (distortion.size() == 1 && str_vals[0] != dense_map::FISHEYE_DISTORTION)
+        LOG(FATAL) << "When there is 1 distortion coefficient, distortion type must be: "
+                   << dense_map::FISHEYE_DISTORTION << "\n";
+      if ((distortion.size() == 4 || distortion.size() == 5) &&
+          str_vals[0] != dense_map::RADTAN_DISTORTION)
+        LOG(FATAL) << "When there is 1 distortion coefficient, distortion type must be: "
+                   << dense_map::RADTAN_DISTORTION << "\n";
+
+      readConfigVals(f, "image_size:", 2, vals);
+      Eigen::Vector2i image_size(vals[0], vals[1]);
+
+      readConfigVals(f, "undistorted_image_size:", 2, vals);
+      Eigen::Vector2i undistorted_image_size(vals[0], vals[1]);
+
+      camera::CameraParameters params(image_size, focal_length, optical_center, distortion);
+      params.SetUndistortedSize(undistorted_image_size);
+      cam_params.push_back(params);
+
+      readConfigVals(f, "ref_to_sensor_transform:", 12, vals);
+      ref_to_cam_trans.push_back(vecToAffine(vals));
+
+      // Sanity check
+      if (have_rig_transforms &&
+          ref_to_cam_trans.back().matrix() == 0 * ref_to_cam_trans.back().matrix()) {
+        LOG(FATAL) << "Failed to read valid transforms among the sensors on the rig\n";
+      }
+
+      readConfigVals(f, "depth_to_image_transform:", 12, vals);
+      depth_to_image.push_back(vecToAffine(vals));
+
+      readConfigVals(f, "ref_to_sensor_timestamp_offset:", 1, vals);
+      double timestamp_offset = vals[0];
+      ref_to_cam_timestamp_offsets.push_back(timestamp_offset);
+    }
+
+    // Sanity check
+    if (have_rig_transforms) {
+      if (ref_to_cam_trans[0].matrix() != Eigen::Affine3d::Identity().matrix())
+        LOG(FATAL) << "The transform from the reference sensor to itself must be the identity.\n";
+    }
+  } catch(std::exception const& e) {
+    LOG(FATAL) << e.what() << "\n";
+  }
+
+  return;
+}
+
+// Reads the NVM control network format.
+void ReadNVM(std::string const& input_filename,
+             std::vector<Eigen::Matrix2Xd> * cid_to_keypoint_map,
+             std::vector<std::string> * cid_to_filename,
+             std::vector<std::map<int, int> > * pid_to_cid_fid,
+             std::vector<Eigen::Vector3d> * pid_to_xyz,
+             std::vector<Eigen::Affine3d> *
+             cid_to_cam_t_global) {
+  std::ifstream f(input_filename, std::ios::in);
+  std::string token;
+  std::getline(f, token);
+  
+  // Assert that we start with our NVM token
+  if (token.compare(0, 6, "NVM_V3") != 0) {
+    LOG(FATAL) << "File doesn't start with NVM token";
+  }
+
+  // Read the number of cameras
+  ptrdiff_t number_of_cid;
+  f >> number_of_cid;
+  if (number_of_cid < 1) {
+    LOG(FATAL) << "NVM file is missing cameras";
+  }
+
+  // Resize all our structures to support the number of cameras we now expect
+  cid_to_keypoint_map->resize(number_of_cid);
+  cid_to_filename->resize(number_of_cid);
+  cid_to_cam_t_global->resize(number_of_cid);
+  for (ptrdiff_t cid = 0; cid < number_of_cid; cid++) {
+    // Clear keypoints from map. We'll read these in shortly
+    cid_to_keypoint_map->at(cid).resize(Eigen::NoChange_t(), 2);
+
+    // Read the line that contains camera information
+    double focal, dist1, dist2;
+    Eigen::Quaterniond q;
+    Eigen::Vector3d c;
+    f >> token >> focal;
+    f >> q.w() >> q.x() >> q.y() >> q.z();
+    f >> c[0] >> c[1] >> c[2] >> dist1 >> dist2;
+    cid_to_filename->at(cid) = token;
+
+    // Solve for t, which is part of the affine transform
+    Eigen::Matrix3d r = q.matrix();
+    cid_to_cam_t_global->at(cid).linear() = r;
+    cid_to_cam_t_global->at(cid).translation() = -r * c;
+  }
+
+  // Read the number of points
+  ptrdiff_t number_of_pid;
+  f >> number_of_pid;
+  if (number_of_pid < 1) {
+    LOG(FATAL) << "The NVM file has no triangulated points.";
+  }
+
+  // Read the point
+  pid_to_cid_fid->resize(number_of_pid);
+  pid_to_xyz->resize(number_of_pid);
+  Eigen::Vector3d xyz;
+  Eigen::Vector3i color;
+  Eigen::Vector2d pt;
+  ptrdiff_t cid, fid;
+  for (ptrdiff_t pid = 0; pid < number_of_pid; pid++) {
+    pid_to_cid_fid->at(pid).clear();
+
+    ptrdiff_t number_of_measures;
+    f >> xyz[0] >> xyz[1] >> xyz[2] >>
+      color[0] >> color[1] >> color[2] >> number_of_measures;
+    pid_to_xyz->at(pid) = xyz;
+    for (ptrdiff_t m = 0; m < number_of_measures; m++) {
+      f >> cid >> fid >> pt[0] >> pt[1];
+
+      pid_to_cid_fid->at(pid)[cid] = fid;
+
+      if (cid_to_keypoint_map->at(cid).cols() <= fid) {
+        cid_to_keypoint_map->at(cid).conservativeResize(Eigen::NoChange_t(), fid + 1);
+      }
+      cid_to_keypoint_map->at(cid).col(fid) = pt;
+    }
+
+    if (!f.good())
+      LOG(FATAL) << "Unable to correctly read PID: " << pid;
+  }
 }
 
 }  // end namespace dense_map

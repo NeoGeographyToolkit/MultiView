@@ -253,6 +253,41 @@ struct ImageMessage {
 bool lookupImage(double desired_time, std::vector<ImageMessage> const& msgs,
                  cv::Mat& image, int& beg_pos, double& found_time);
 
+// Convert a string of space-separated numbers to a vector
+void strToVec(std::string const& str, std::vector<double> & vec);
+  
+// Read the images, depth clouds, and their metadata
+// Save the properties of images. Use space as separator.
+void writeImageList(std::string const& out_dir, std::vector<dense_map::cameraImage> const& cams,
+                    std::vector<std::string> const& image_files,
+                    std::vector<std::string> const& depth_files,
+                    std::vector<Eigen::Affine3d> const& world_to_cam);
+
+// Save the optimized rig configuration
+void writeRigConfig(std::string const& out_dir, bool model_rig, int ref_cam_type,
+                    std::vector<std::string> const& cam_names,
+                    std::vector<camera::CameraParameters> const& cam_params,
+                    std::vector<Eigen::Affine3d> const& ref_to_cam_trans,
+                    std::vector<Eigen::Affine3d> const& depth_to_image,
+                    std::vector<double> const& ref_to_cam_timestamp_offsets);
+  
+// Read a rig configuration. Check if the transforms among the sensors
+// on the rig is not 0, in that case will use it.
+void readRigConfig(std::string const& rig_config, bool have_rig_transforms, int & ref_cam_type,
+                   std::vector<std::string> & cam_names,
+                   std::vector<camera::CameraParameters> & cam_params,
+                   std::vector<Eigen::Affine3d> & ref_to_cam_trans,
+                   std::vector<Eigen::Affine3d> & depth_to_image,
+                   std::vector<double> & ref_to_cam_timestamp_offsets);
+  
+void ReadNVM(std::string const& input_filename,
+             std::vector<Eigen::Matrix2Xd> * cid_to_keypoint_map,
+             std::vector<std::string> * cid_to_filename,
+             std::vector<std::map<int, int> > * pid_to_cid_fid,
+             std::vector<Eigen::Vector3d> * pid_to_xyz,
+             std::vector<Eigen::Affine3d> *
+             cid_to_cam_t_global);
+  
 }  // namespace dense_map
 
 #endif  // DENSE_MAP_UTILS_H_
