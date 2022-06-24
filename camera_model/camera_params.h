@@ -19,7 +19,8 @@
 #ifndef RIG_CALIBRATOR_CAMERA_PARAMS_H
 #define RIG_CALIBRATOR_CAMERA_PARAMS_H
 
-//#include <config_reader/config_reader.h>
+#include <camera_model/rpc_distortion.h>
+
 #include <Eigen/Core>
 
 #include <string>
@@ -118,6 +119,8 @@ namespace camera {
     void SetDistortion(Eigen::VectorXd const& distortion);
     const Eigen::VectorXd& GetDistortion() const;
 
+    dense_map::RPCLensDistortion m_rpc;
+    
     // Comparison operator
     friend bool operator== (CameraParameters const& A, CameraParameters const& B) {
       return (A.crop_offset_            == B.crop_offset_            &&
@@ -130,6 +133,7 @@ namespace camera {
               A.distortion_precalc1_    == B.distortion_precalc1_    &&
               A.distortion_precalc2_    == B.distortion_precalc2_    &&
               A.distortion_precalc3_    == B.distortion_precalc3_);
+
     }
 
    private:

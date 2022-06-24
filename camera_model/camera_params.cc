@@ -17,6 +17,7 @@
  */
 
 #include <camera_model/camera_params.h>
+#include <camera_model/rpc_distortion.h>
 
 #include <Eigen/Dense>
 #include <gflags/gflags.h>
@@ -212,6 +213,9 @@ const Eigen::Vector2d& camera::CameraParameters::GetFocalVector() const {
 }
 
 void camera::CameraParameters::SetDistortion(Eigen::VectorXd const& distortion) {
+
+  m_rpc = dense_map::RPCLensDistortion(); // reset this
+  
   distortion_coeffs_ = distortion;
 
   // Ensure variables are initialized
@@ -237,7 +241,14 @@ void camera::CameraParameters::SetDistortion(Eigen::VectorXd const& distortion) 
     // There doesn't seem like there are any precalculations we can use.
     break;
   default:
-    LOG(FATAL) << "Recieved irregular distortion vector size. Size = " << distortion_coeffs_.size();
+    // Try to do RPC
+    try { 
+      m_rpc.set_dist_undist_params(distortion_coeffs_);
+    } catch(std::exception const& e) {
+      LOG(FATAL) << "Recieved irregular distortion vector size. Size = "
+                 << distortion_coeffs_.size() << "\n"
+                 << "Additional message: " << e.what() << "\n";
+    }
   }
 }
 
@@ -295,7 +306,9 @@ void camera::CameraParameters::DistortCentered(Eigen::Vector2d const& undistorte
     *distorted_c = distorted_c->cwiseProduct(focal_length_) +
       (optical_offset_ - distorted_half_size_);
   } else {
-    LOG(ERROR) << "Unknown distortion vector size.";
+    // If we got so far, we validated that RPC distortion should work
+    *distorted_c = m_rpc.distort_centered(undistorted_c);
+    //LOG(ERROR) << "Unknown distortion vector size.";
   }
 }
 
@@ -334,7 +347,9 @@ void camera::CameraParameters::UndistortCentered(Eigen::Vector2d const& distorte
     cv::undistortPoints(src, dst, dist_int_mat, cvdist, cv::Mat(), undist_int_mat);
     *undistorted_c = dst_map - undistorted_half_size_;
   } else {
-    LOG(ERROR) << "Unknown distortion vector size!";
+    // If we got so far, we validated that RPC distortion should work
+    *undistorted_c = m_rpc.undistort_centered(distorted_c);
+    //LOG(ERROR) << "Unknown distortion vector size.";
   }
 }
 
