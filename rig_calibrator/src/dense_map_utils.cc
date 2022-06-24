@@ -131,7 +131,8 @@ void parse_camera_names(std::vector<std::string> const& cam_names,
     }
     
     if (!have_cam_name) 
-      LOG(FATAL) << "Error: A specified sensor name is not among the known sensors.\n";
+      LOG(FATAL) << "Error: A specified sensor name is not among the known sensors. "
+                 << "Offending camera: " << val << "\n";
     
     depth_to_image_transforms_to_float.insert(val);
   }
@@ -874,7 +875,7 @@ void writeImageList(std::string const& out_dir, std::vector<dense_map::cameraIma
                     std::vector<std::string> const& depth_files,
                     std::vector<Eigen::Affine3d> const& world_to_cam) {
   dense_map::createDir(out_dir);
-  std::string image_list = out_dir + "/images.txt";
+  std::string image_list = out_dir + "/cameras.txt";
   std::cout << "Writing: " << image_list << std::endl;
 
   std::ofstream f;
@@ -939,8 +940,11 @@ void writeRigConfig(std::string const& out_dir, bool model_rig, int ref_cam_type
       f << "distortion_type: " << dense_map::FISHEYE_DISTORTION << "\n";
     else if (D.size() >= 4 && D.size() <= 5)
       f << "distortion_type: " << dense_map::RADTAN_DISTORTION << "\n";
+    else if (D.size() > 5)
+      f << "distortion_type: " << dense_map::RPC_DISTORTION << "\n";
     else
-      LOG(FATAL) << "Expecting 0, 1, 4, or 5 distortion coefficients. Got: " << D.size() << ".\n";
+      LOG(FATAL) << "Expecting 0, 1, 4, 5, or more distortion coefficients. Got: "
+                 << D.size() << ".\n";
 
     Eigen::Vector2i image_size = cam_params[cam_type].GetDistortedSize();
     f << "image_size: " << image_size[0] << ' ' << image_size[1] << "\n";
@@ -1115,8 +1119,9 @@ void readRigConfig(std::string const& rig_config, bool have_rig_transforms, int 
       Eigen::Vector2d optical_center(vals[0], vals[1]);
 
       readConfigVals(f, "distortion_coeffs:", -1, vals);
-      if (vals.size() != 0 && vals.size() != 1 && vals.size() != 4 && vals.size() != 5)
-        LOG(FATAL) << "Expecting 0, 1, 4, or 5 distortion coefficients.\n";
+      if (vals.size() != 0 && vals.size() != 1 && vals.size() != 4 && vals.size() < 5)
+        LOG(FATAL) << "Expecting 0, 1, 4, 5, or more distortion coefficients.\n";
+      
       Eigen::VectorXd distortion = vals;
       
       readConfigVals(f, "distortion_type:", 1, str_vals);
@@ -1128,9 +1133,13 @@ void readRigConfig(std::string const& rig_config, bool have_rig_transforms, int 
                    << dense_map::FISHEYE_DISTORTION << "\n";
       if ((distortion.size() == 4 || distortion.size() == 5) &&
           str_vals[0] != dense_map::RADTAN_DISTORTION)
-        LOG(FATAL) << "When there is 1 distortion coefficient, distortion type must be: "
+        LOG(FATAL) << "When there are 4 or 5 distortion coefficient, distortion type must be: "
                    << dense_map::RADTAN_DISTORTION << "\n";
-
+      if ((distortion.size() > 5) &&
+          str_vals[0] != dense_map::RPC_DISTORTION)
+        LOG(FATAL) << "When there are more than 5 distortion coefficients, distortion "
+                   << "type must be: " << dense_map::RPC_DISTORTION << "\n";
+      
       readConfigVals(f, "image_size:", 2, vals);
       Eigen::Vector2i image_size(vals[0], vals[1]);
 

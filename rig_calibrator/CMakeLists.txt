@@ -37,17 +37,29 @@ target_link_libraries(undistort_image_texrecon
 set_target_properties(undistort_image_texrecon PROPERTIES
     RUNTIME_OUTPUT_DIRECTORY "${CMAKE_BINARY_DIR}/bin")
 
+# Build the fit_rpc auxiliary tool
+add_executable(fit_rpc bin/fit_rpc.cc)
+target_link_libraries(fit_rpc 
+    rig_calibrator)
+set_target_properties(fit_rpc PROPERTIES
+    RUNTIME_OUTPUT_DIRECTORY "${CMAKE_BINARY_DIR}/bin")
+
 # Set RPATHS for the tool. Setting it for the lib only as above is not enough.
 # TODO(oalexan1): Note sure about the robustness of the logic below but it seems to work
+# TODO(oalexan1): Use a loop here, as there are too many lines
 if(APPLE)
   set_target_properties(rig_calibrator_bin PROPERTIES
     INSTALL_RPATH "@loader_path;${MULTIVIEW_DEPS_DIR}/lib")
   set_target_properties(undistort_image_texrecon PROPERTIES
     INSTALL_RPATH "@loader_path;${MULTIVIEW_DEPS_DIR}/lib")
+  set_target_properties(fit_rpc PROPERTIES
+    INSTALL_RPATH "@loader_path;${MULTIVIEW_DEPS_DIR}/lib")
 elseif(UNIX) # Unix which is not Apple
   set_target_properties(rig_calibrator_bin PROPERTIES
     INSTALL_RPATH "$ORIGIN:$ORIGIN/../lib:${MULTIVIEW_DEPS_DIR}/lib")
   set_target_properties(undistort_image_texrecon PROPERTIES
+    INSTALL_RPATH "$ORIGIN:$ORIGIN/../lib:${MULTIVIEW_DEPS_DIR}/lib")
+  set_target_properties(fit_rpc PROPERTIES
     INSTALL_RPATH "$ORIGIN:$ORIGIN/../lib:${MULTIVIEW_DEPS_DIR}/lib")
 endif()
 
@@ -55,6 +67,7 @@ endif()
 install(TARGETS rig_calibrator LIBRARY DESTINATION ${CMAKE_INSTALL_LIBDIR})
 install(TARGETS rig_calibrator_bin RUNTIME DESTINATION ${CMAKE_INSTALL_BINDIR})
 install(TARGETS undistort_image_texrecon RUNTIME DESTINATION ${CMAKE_INSTALL_BINDIR})
+install(TARGETS fit_rpc RUNTIME DESTINATION ${CMAKE_INSTALL_BINDIR})
 
 # Install the python tools
 INSTALL(FILES bin/theia_sfm.py

@@ -212,10 +212,12 @@ DEFINE_bool(float_scale, false,
 DEFINE_bool(float_timestamp_offsets, false,
             "If to optimize the timestamp offsets among the cameras. This is experimental.");
 
-DEFINE_int32(num_exclude_boundary_pixels, 0,
+DEFINE_string(num_exclude_boundary_pixels, "",
              "Flag as outliers pixels closer than this to image boundary, and ignore "
              "that boundary region when texturing using the optimized cameras with "
-             "the --out_texture_dir option. This is very experimental.");
+             "the --out_texture_dir option. Provide one number per sensor, in the same order "
+             "as in the rig config file. Example: '100 0 0'. For fisheye lenses, this "
+             "improves a lot the quality of results.");
 
 DEFINE_double(timestamp_offsets_max_change, 1.0,
               "If floating the timestamp offsets, do not let them change by more than this "
@@ -306,11 +308,11 @@ DEFINE_bool(save_images_and_depth_clouds, false,
 DEFINE_string(rig_config, "",
               "Read the rig configuration from this file.");
 
-DEFINE_string(nvm_file, "",
-              "Read images and camera poses from an nvm file, as exported by Theia.");
+DEFINE_string(nvm, "",
+              "Read images and camera poses from this nvm file, as exported by Theia.");
 
-DEFINE_string(image_list, "",
-              "Read images and world-to-camera poses from this list. "
+DEFINE_string(camera_poses, "",
+              "Read the images and world-to-camera poses from this list. "
               "The same format is used as for when this tool saves the outputs "
               "with the --save_images_and_depth_clouds option.");
 
@@ -839,7 +841,7 @@ void meshProjectCameras(std::vector<std::string> const& cam_names,
                         std::vector<Eigen::Affine3d> const& world_to_cam,
                         mve::TriangleMesh::Ptr const& mesh,
                         std::shared_ptr<BVHTree> const& bvh_tree,
-                        int num_exclude_boundary_pixels,
+                        std::vector<int> const& num_exclude_boundary_pixels,
                         std::string const& out_dir) {
   if (cam_names.size() != cam_params.size())
     LOG(FATAL) << "There must be as many camera names as sets of camera parameters.\n";
@@ -847,7 +849,9 @@ void meshProjectCameras(std::vector<std::string> const& cam_names,
     LOG(FATAL) << "There must be as many camera images as camera poses.\n";
   if (out_dir.empty())
     LOG(FATAL) << "The output directory is empty.\n";
-
+  if (num_exclude_boundary_pixels.size() != cam_names.size())
+    LOG(FATAL) << "Must have as many values for excluding boundary pixels as cameras.\n";
+  
   char filename_buffer[1000];
 
   for (size_t cid = 0; cid < cam_images.size(); cid++) {
@@ -861,7 +865,7 @@ void meshProjectCameras(std::vector<std::string> const& cam_names,
 
     std::cout << "Creating texture for: " << out_prefix << std::endl;
     meshProject(mesh, bvh_tree, cam_images[cid].image, world_to_cam[cid], cam_params[cam_type],
-                num_exclude_boundary_pixels, out_prefix);
+                num_exclude_boundary_pixels[cam_type], out_prefix);
   }
 }
 
@@ -1047,9 +1051,6 @@ void parameterValidation() {
   if (FLAGS_depth_mesh_weight < 0.0)
     LOG(FATAL) << "The depth mesh weight must non-negative.\n";
 
-  if (FLAGS_num_exclude_boundary_pixels < 0)
-    LOG(FATAL) << "Must have a non-negative value for --num_exclude_boundary_pixels.\n";
-
   if (FLAGS_registration && (FLAGS_xyz_file.empty() || FLAGS_hugin_file.empty()))
     LOG(FATAL) << "In order to register the map, the hugin and xyz file must be specified.";
 
@@ -1079,8 +1080,8 @@ void parameterValidation() {
   if (FLAGS_rig_config == "")
     LOG(FATAL) << "Must specify the initial rig configuration via --rig_config.\n";
 
-  if (FLAGS_image_list == "" && FLAGS_nvm_file == "")
-    LOG(FATAL) << "Must specify the image list via --image_list or --nvm_file.\n";
+  if (FLAGS_camera_poses == "" && FLAGS_nvm == "")
+    LOG(FATAL) << "Must specify the image list via --camera_poses or --nvm.\n";
 #endif
 
   return;
@@ -1530,13 +1531,17 @@ void meshTriangulations(  // Inputs
 }
 
 void flagOutlierByExclusionDist(  // Inputs
-  int ref_cam_type, int num_exclude_boundary_pixels,
+  int ref_cam_type, std::vector<int> const& num_exclude_boundary_pixels,
   std::vector<camera::CameraParameters> const& cam_params,
   std::vector<dense_map::cameraImage> const& cams,
   std::vector<std::map<int, int>> const& pid_to_cid_fid,
   std::vector<std::vector<std::pair<float, float>>> const& keypoint_vec,
   // Outputs
   std::vector<std::map<int, std::map<int, int>>>& pid_cid_fid_inlier) {
+
+  if (num_exclude_boundary_pixels.size() != cam_params.size())
+    LOG(FATAL) << "Must have as many values for excluding boundary pixels as cameras.\n";
+  
   // Initialize the output
   pid_cid_fid_inlier.resize(pid_to_cid_fid.size());
 
@@ -1546,14 +1551,15 @@ void flagOutlierByExclusionDist(  // Inputs
          cid_fid++) {
       int cid = cid_fid->first;
       int fid = cid_fid->second;
+      int cam_type = cams[cid].camera_type;
 
       // Initially there are inliers only
       pid_cid_fid_inlier[pid][cid][fid] = 1;
 
       // Flag as outliers pixels at the image boundary.
       Eigen::Vector2d dist_ip(keypoint_vec[cid][fid].first, keypoint_vec[cid][fid].second);
-      Eigen::Vector2i dist_size = cam_params[cams[cid].camera_type].GetDistortedSize();
-      int excl = num_exclude_boundary_pixels;
+      Eigen::Vector2i dist_size = cam_params[cam_type].GetDistortedSize();
+      int excl = num_exclude_boundary_pixels[cam_type];
       if (dist_ip.x() < excl || dist_ip.x() > dist_size[0] - 1 - excl ||
           dist_ip.y() < excl || dist_ip.y() > dist_size[1] - 1 - excl) {
         dense_map::setMapValue(pid_cid_fid_inlier, pid, cid, fid, 0);
@@ -1993,7 +1999,7 @@ void readImageEntry(// Inputs
 }
 
 void readDataFromList(// Inputs
-                      std::string const& image_list_file, int ref_cam_type,
+                      std::string const& camera_poses_file, int ref_cam_type,
                       std::vector<std::string> const& cam_names,
                       // Outputs
                       std::vector<double>& ref_timestamps,
@@ -2010,10 +2016,10 @@ void readDataFromList(// Inputs
   depth_data.clear();
 
   // Open the file
-  std::cout << "Reading: " << image_list_file << std::endl;
+  std::cout << "Reading: " << camera_poses_file << std::endl;
   std::ifstream f;
-  f.open(image_list_file.c_str(), std::ios::binary | std::ios::in);
-  if (!f.is_open()) LOG(FATAL) << "Cannot open file for reading: " << image_list_file << "\n";
+  f.open(camera_poses_file.c_str(), std::ios::binary | std::ios::in);
+  if (!f.is_open()) LOG(FATAL) << "Cannot open file for reading: " << camera_poses_file << "\n";
 
   // Read here temporarily the images and depth maps
   std::map<int, std::map<double, ImageMessage>> image_maps;
@@ -2026,8 +2032,8 @@ void readDataFromList(// Inputs
     std::string image_file;
     std::istringstream iss(line);
     if (!(iss >> image_file))
-      LOG(FATAL) << "Cannot parse the image file, sensor id, timestamp, and depth file in: "
-                 << image_list_file << "\n";
+      LOG(FATAL) << "Cannot parse the image file in: "
+                 << camera_poses_file << "\n";
 
     // Read the camera to world transform
     Eigen::VectorXd vals(12);
@@ -2063,7 +2069,7 @@ void readDataFromList(// Inputs
 // from Theia
 // TODO(oalexan1): Move to utils
 void readDataFromNvm(// Inputs
-                     std::string const& nvm_file, int ref_cam_type,
+                     std::string const& nvm, int ref_cam_type,
                      std::vector<std::string> const& cam_names,
                      // Outputs
                      std::vector<double>& ref_timestamps,
@@ -2079,7 +2085,7 @@ void readDataFromNvm(// Inputs
   std::vector<Eigen::Affine3d> cid_to_cam_t_global;
   
   // cid_to_cam_t_global has world_to_cam
-  dense_map::ReadNVM(nvm_file,  
+  dense_map::ReadNVM(nvm,  
                      &cid_to_keypoint_map,  
                      &cid_to_filename,  
                      &pid_to_cid_fid,  
@@ -2640,6 +2646,25 @@ Eigen::Affine3d registerTransforms(std::string const& hugin_file, std::string co
 
   return registration_trans;
 }
+
+// From the string '100 0 0' extract three values. If the string is empty,
+// produce as many zeros as there are cameras.
+std::vector<int> parseNumExcludePixels(size_t num_cams, std::string num_excl_str) {
+  std::istringstream iss(num_excl_str);
+  std::vector<int> vals;
+  int val = 0;
+  while (iss >> val)
+    vals.push_back(val);
+
+  if (vals.empty())
+      vals = std::vector<int>(num_cams, 0);
+  
+  if (vals.size() != num_cams) 
+    LOG(FATAL) << "Must have as many values for excluding boundary pixels as cameras.\n";
+
+  return vals;
+}
+  
 }  // namespace dense_map
 
 int main(int argc, char** argv) {
@@ -2709,9 +2734,9 @@ int main(int argc, char** argv) {
   // Make a copy of them here.
   world_to_ref = sparse_map->cid_to_cam_t_global_;
 
-  // TODO(oalexan1): Note how below we overwrite with data read from --image_list
+  // TODO(oalexan1): Note how below we overwrite with data read from --camera_poses
   // and --rig_config. Need to have --sparse_map and --bag be mutually exclusive
-  // with --rig_config and --image_list.
+  // with --rig_config and --camera_poses.
 #endif
 
   // image_data is on purpose stored in vectors of vectors, with each
@@ -2726,12 +2751,12 @@ int main(int argc, char** argv) {
   std::vector<std::vector<dense_map::ImageMessage>> image_data;
   std::vector<std::vector<dense_map::ImageMessage>> depth_data;
   std::vector<std::string> ref_image_files;
-  if (FLAGS_image_list != "")
-    dense_map::readDataFromList(FLAGS_image_list, ref_cam_type, cam_names, // in
+  if (FLAGS_camera_poses != "")
+    dense_map::readDataFromList(FLAGS_camera_poses, ref_cam_type, cam_names, // in
                                 ref_timestamps, world_to_ref, ref_image_files,
                                 image_data, depth_data); // out
-  else if (FLAGS_nvm_file != "") 
-    dense_map::readDataFromNvm(FLAGS_nvm_file, ref_cam_type, cam_names, // in
+  else if (FLAGS_nvm != "") 
+    dense_map::readDataFromNvm(FLAGS_nvm, ref_cam_type, cam_names, // in
                                ref_timestamps, world_to_ref, ref_image_files,
                                image_data, depth_data); // out
 
@@ -2756,6 +2781,11 @@ int main(int argc, char** argv) {
   dense_map::indexMessages(view, bag_map);
 #endif
 
+  std::vector<int> num_exclude_boundary_pixels =
+    dense_map::parseNumExcludePixels(cam_params.size(), FLAGS_num_exclude_boundary_pixels);
+  if (num_exclude_boundary_pixels.size() != cam_params.size())
+    LOG(FATAL) << "Must have as many values for excluding boundary pixels as cameras.\n";
+  
   // Keep here the images, timestamps, and bracketing information
   std::vector<dense_map::cameraImage> cams;
   //  The range of ref_to_cam_timestamp_offsets[cam_type] before
@@ -2954,10 +2984,11 @@ int main(int argc, char** argv) {
   // pixel is an inlier. Originally all pixels are inliers. Once an
   // inlier becomes an outlier, it never becomes an inlier again.
   std::vector<std::map<int, std::map<int, int>>> pid_cid_fid_inlier;
+  
   // TODO(oalexan1): Must initialize all points as inliers outside this function,
   // as now this function resets those.
   dense_map::flagOutlierByExclusionDist(  // Inputs
-    ref_cam_type, FLAGS_num_exclude_boundary_pixels, cam_params, cams, pid_to_cid_fid,
+    ref_cam_type, num_exclude_boundary_pixels, cam_params, cams, pid_to_cid_fid,
     keypoint_vec,
     // Outputs
     pid_cid_fid_inlier);
@@ -3428,7 +3459,7 @@ int main(int argc, char** argv) {
   // necessary since world_to_cam has been updated by now.
   if (FLAGS_out_texture_dir != "")
     dense_map::meshProjectCameras(cam_names, cam_params, cams, world_to_cam, mesh, bvh_tree,
-                                  FLAGS_num_exclude_boundary_pixels,
+                                  num_exclude_boundary_pixels,
                                   FLAGS_out_texture_dir);
 
   if (FLAGS_save_images_and_depth_clouds) {

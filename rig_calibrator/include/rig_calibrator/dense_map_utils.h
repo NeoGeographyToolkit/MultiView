@@ -51,6 +51,7 @@ const int NUM_AFFINE_PARAMS  = 12; // 3x3 matrix (9) + translation (3)  // NOLIN
 const std::string NO_DEPTH_FILE      = "no_depth_file";
 const std::string FISHEYE_DISTORTION = "fisheye";
 const std::string RADTAN_DISTORTION  = "radtan";
+const std::string RPC_DISTORTION     = "rpc";
 const std::string NO_DISTORION       = "no_distortion";
 
 // A function to parse a string like
