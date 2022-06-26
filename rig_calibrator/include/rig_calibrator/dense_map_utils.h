@@ -233,10 +233,7 @@ void genImageAndDepthFileNames(  // Inputs
   std::vector<std::string>& image_files, std::vector<std::string>& depth_files);
 
 // Save images and depth clouds to disk
-void saveImagesAndDepthClouds(std::vector<cameraImage> const& cams,
-                              std::vector<std::string> const& image_files,
-                              std::vector<std::string> const& depth_files);
-
+void saveImagesAndDepthClouds(std::vector<cameraImage> const& cams);
 
 // A struct to collect together some attributes of an image or depth cloud
 // (stored as an image with 3 channels)
@@ -252,7 +249,7 @@ struct ImageMessage {
 // forward in time, and we keep track of where we are in the vector using
 // the variable beg_pos that we update as we go.
 bool lookupImage(double desired_time, std::vector<ImageMessage> const& msgs,
-                 cv::Mat& image, int& beg_pos, double& found_time);
+                 cv::Mat& image, std::string & image_name, int& beg_pos, double& found_time);
 
 // Convert a string of space-separated numbers to a vector
 void strToVec(std::string const& str, std::vector<double> & vec);
@@ -260,8 +257,6 @@ void strToVec(std::string const& str, std::vector<double> & vec);
 // Read the images, depth clouds, and their metadata
 // Save the properties of images. Use space as separator.
 void writeImageList(std::string const& out_dir, std::vector<dense_map::cameraImage> const& cams,
-                    std::vector<std::string> const& image_files,
-                    std::vector<std::string> const& depth_files,
                     std::vector<Eigen::Affine3d> const& world_to_cam);
 
 // Save the optimized rig configuration

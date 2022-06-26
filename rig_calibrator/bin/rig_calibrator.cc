@@ -64,10 +64,10 @@
 // offset exists among their clocks, this program can model that,
 // and also float those offsets, if desired.
 
-// The initial ref camera poses are computed using SfM, with the
-// Astrobee build_map tool. The obtained "sparse map" of poses must
-// be registered to world coordinates, to get the world scale correctly.
-// The sparse map can be fixed or further refined in this tool.
+// The initial ref camera poses are computed using Theia SfM. The
+// obtained "sparse map" of poses must be registered to world
+// coordinates, to get the world scale correctly.  The sparse map can
+// be fixed or further refined in this tool.
 
 // The initial extrinsics are assumed known, and are refined by this
 // tool. Likely SfM can be used to get an initial value of the
@@ -101,20 +101,6 @@
 #include <opencv2/highgui.hpp>
 #include <opencv2/core/utility.hpp>
 
-// Conditional dependence on Astrobee, ROS, Lua, protobuf, and
-// SparseMap
-#define HAVE_ASTROBEE 0
-#if HAVE_ASTROBEE
-#include <ff_common/utils.h>
-#include <sparse_mapping/sparse_map.h>
-#include <sparse_mapping/tensor.h>
-#include <sparse_map_utils.h>
-#include <dense_map_ros_utils.h>
-#include <dense_map_lua_config.h>
-#else
-#include <rig_calibrator/dense_map_noros_utils.h>
-#endif
-
 #include <rig_calibrator/dense_map_utils.h>
 #include <rig_calibrator/system_utils.h>
 #include <rig_calibrator/transform_utils.h>
@@ -141,30 +127,6 @@
 #include <pcl/io/pcd_io.h>
   
 namespace fs = boost::filesystem;
-
-#if HAVE_ASTROBEE
-
-DEFINE_string(ros_bag, "", "A ROS bag with recorded nav_cam, haz_cam intensity, "
-              "full-resolution sci_cam, and haz_cam depth clouds.");
-
-DEFINE_string(sparse_map, "",
-              "A registered SURF sparse map made with some of the ROS bag data, "
-              "including nav cam images closely bracketing the sci cam images.");
-
-DEFINE_string(output_map, "", "Output file containing the updated map.");
-
-DEFINE_string(nav_cam_topic, "/mgt/img_sampler/nav_cam/image_record",
-              "The nav cam topic in the bag file.");
-
-DEFINE_string(haz_cam_points_topic, "/hw/depth_haz/points",
-              "The depth point cloud topic in the bag file.");
-
-DEFINE_string(haz_cam_intensity_topic, "/hw/depth_haz/extended/amplitude_int",
-              "The depth camera intensity topic in the bag file.");
-
-DEFINE_string(sci_cam_topic, "/hw/cam_sci/compressed", "The sci cam topic in the bag file.");
-
-#endif
 
 DEFINE_int32(num_overlaps, 10, "How many images (of all camera types) close and forward in "
              "time to match to given image.");
@@ -223,7 +185,7 @@ DEFINE_double(timestamp_offsets_max_change, 1.0,
               "If floating the timestamp offsets, do not let them change by more than this "
               "(measured in seconds). Existing image bracketing acts as an additional constraint.");
 
-DEFINE_double(depth_tri_weight, 1000.0,
+DEFINE_double(depth_tri_weight, 0.0,
               "The weight to give to the constraint that depth measurements agree with "
               "triangulated points. Use a bigger number as depth errors are usually on the "
               "order of 0.01 meters while reprojection errors are on the order of 1 pixel.");
@@ -302,9 +264,6 @@ DEFINE_string(out_dir, "",
               "Save in this directory the camera intrinsics and extrinsics. "
               "See also --save-images_and_depth_clouds, --save-matches, --verbose, and --in_dir.");
 
-DEFINE_bool(save_images_and_depth_clouds, false,
-            "Save the images and point clouds used in processing. Implies that --out_dir is set.");
-
 DEFINE_string(rig_config, "",
               "Read the rig configuration from this file.");
 
@@ -313,8 +272,8 @@ DEFINE_string(nvm, "",
 
 DEFINE_string(camera_poses, "",
               "Read the images and world-to-camera poses from this list. "
-              "The same format is used as for when this tool saves the outputs "
-              "with the --save_images_and_depth_clouds option.");
+              "The same format is used as for when this tool saves the updated poses "
+              "in the output directory.");
 
 DEFINE_bool(use_initial_rig_transforms, false,
             "Use the transforms among the sensors of the rig specified via --rig_config. "
@@ -322,7 +281,7 @@ DEFINE_bool(use_initial_rig_transforms, false,
 
 DEFINE_bool(save_matches, false,
             "Save the interest point matches. Stereo Pipeline's viewer can be used for "
-            "visualizing these. Implies that --out_dir is set.");
+            "visualizing these.");
 
 DEFINE_bool(export_to_voxblox, false,
             "Save the depth clouds and optimized transforms needed to create a mesh with voxblox "
@@ -523,6 +482,8 @@ struct BracketedCamError {
   int m_num_focal_lengths;
 };  // End class BracketedCamError
 
+// TODO(oalexan1): Move to future costFunctions.h
+  
 // An error function minimizing the product of a given weight and the
 // error between a triangulated point and a measured depth point. The
 // depth point needs to be transformed to world coordinates first. For
@@ -1017,18 +978,6 @@ void setMapValue(std::vector<std::map<int, std::map<int, int>>> & pid_cid_fid,
 }
 
 void parameterValidation() {
-#if HAVE_ASTROBEE
-
-  if (FLAGS_ros_bag.empty())
-    LOG(FATAL) << "The bag file was not specified.";
-  if (FLAGS_sparse_map.empty())
-    LOG(FATAL) << "The input sparse map was not specified.";
-
-  if (FLAGS_output_map.empty())
-    LOG(FATAL) << "The output sparse map was not specified.";
-
-#endif
-
   if (FLAGS_robust_threshold <= 0.0)
     LOG(FATAL) << "The robust threshold must be positive.\n";
 
@@ -1061,11 +1010,8 @@ void parameterValidation() {
   if (FLAGS_no_rig && FLAGS_float_timestamp_offsets)
       LOG(FATAL) << "Cannot float timestamps with option --no_rig.\n";
 
-  if (FLAGS_save_images_and_depth_clouds && FLAGS_out_dir == "")
-    LOG(FATAL) << "Cannot save images and clouds if no output directory was provided.\n";
-
-  if (FLAGS_save_matches && FLAGS_out_dir == "")
-    LOG(FATAL) << "Cannot save matches if no output directory was provided.\n";
+  if (FLAGS_out_dir == "")
+    LOG(FATAL) << "The output directory was not specified.\n";
 
   if (FLAGS_export_to_voxblox && FLAGS_out_dir == "")
     LOG(FATAL) << "Cannot save matches if no output directory was provided.\n";
@@ -1076,13 +1022,11 @@ void parameterValidation() {
   if (FLAGS_out_texture_dir != "" && FLAGS_mesh == "")
       LOG(FATAL) << "Cannot project camera images onto a mesh if a mesh was not provided.\n";
 
-#if !HAVE_ASTROBEE
   if (FLAGS_rig_config == "")
     LOG(FATAL) << "Must specify the initial rig configuration via --rig_config.\n";
 
   if (FLAGS_camera_poses == "" && FLAGS_nvm == "")
     LOG(FATAL) << "Must specify the image list via --camera_poses or --nvm.\n";
-#endif
 
   return;
 }
@@ -1133,8 +1077,6 @@ void set_up_block_sizes(int num_depth_params,
   mesh_block_sizes.push_back(dense_map::NUM_XYZ_PARAMS);
 }
 
-typedef std::map<std::string, std::vector<rosbag::MessageInstance>> StrToMsgMap;
-
 // Look up each ref cam image by timestamp. In between any two ref cam timestamps,
 // which are no further from each other than the bracket length, look up an image
 // of each of the other camera types. If more than one choice, try to stay as close
@@ -1147,8 +1089,7 @@ void lookupImagesAndBrackets(  // Inputs
   double max_image_to_depth_timestamp_diff,
   std::vector<std::string> const& cam_names,
   std::vector<camera::CameraParameters> const& cam_params,
-  std::vector<double> const& ref_timestamps, std::vector<std::string> const& image_topics,
-  std::vector<std::string> const& depth_topics, StrToMsgMap const& bag_map,
+  std::vector<double> const& ref_timestamps,
   std::vector<std::vector<ImageMessage>> const& image_data,
   std::vector<std::vector<ImageMessage>> const& depth_data,
   std::vector<double> const& ref_to_cam_timestamp_offsets,
@@ -1200,22 +1141,15 @@ void lookupImagesAndBrackets(  // Inputs
         // Start looking up the image timestamp from this position. Some care
         // is needed here as we advance in time in image_start_positions[cam_type].
         double found_time = -1.0;
-        // This has to succeed since this timestamp originally came from the bag
-        bool have_lookup = false;
-        if (!image_data.empty())
-          have_lookup =  // Read from images/depth clouds stored in files
-            dense_map::lookupImage(cam.timestamp, image_data[cam_type], cam.image,
-                                   image_start_positions[cam_type],  // this will move forward
-                                   found_time);
-
-        else
-          have_lookup =  // Read from bag
-            dense_map::lookupImage(cam.timestamp, mapVal(bag_map, image_topics[cam_type]),
-                                   save_grayscale,
-                                   // outputs
-                                   cam.image,
-                                   image_start_positions[cam_type],  // this will move forward
-                                   found_time);
+        // This has to succeed since this timestamp originally came from an existing image
+        // Read from images/depth clouds stored in files
+        bool have_lookup =  
+          dense_map::lookupImage(cam.timestamp, image_data[cam_type],
+                                 // Outputs
+                                 cam.image, cam.image_name, 
+                                 image_start_positions[cam_type],  // this will move forward
+                                 found_time);
+        
         if (!have_lookup)
           LOG(FATAL) << std::fixed << std::setprecision(17)
                      << "Cannot look up camera at time " << cam.timestamp << ".\n";
@@ -1253,30 +1187,23 @@ void lookupImagesAndBrackets(  // Inputs
         int start_pos = image_start_positions[cam_type];  // care here
         double curr_timestamp = beg_timestamp;            // start here
         cv::Mat best_image;
+        std::string best_image_name;
         double best_dist = 1.0e+100;
         double best_time = -1.0, found_time = -1.0;
         while (1) {
           if (found_time > end_timestamp) break;  // out of range
 
           cv::Mat image;
-          bool have_lookup = false;
-          if (!image_data.empty())
-            have_lookup =  // Read from images/depth clouds stored in files
-              dense_map::lookupImage(curr_timestamp, image_data[cam_type], image,
-                                     // care here, start_pos moves forward
-                                     start_pos,
-                                     // found_time will be updated now
-                                     found_time);
-          else
-            have_lookup =                             // Read from bag
-              dense_map::lookupImage(curr_timestamp,  // start looking from here
-                                     mapVal(bag_map, image_topics[cam_type]), save_grayscale,
-                                     // outputs
-                                     image,
-                                     // care here, start_pos moves forward
-                                     start_pos,
-                                     // found_time will be updated now
-                                     found_time);
+          std::string image_name;
+            // Read from images/depth clouds stored in files
+          bool have_lookup =
+            dense_map::lookupImage(curr_timestamp, image_data[cam_type],
+                                   // Outputs
+                                   image, image_name,
+                                   // care here, start_pos moves forward
+                                   start_pos,
+                                   // found_time will be updated now
+                                   found_time);
 
           if (!have_lookup)
             break;  // Need not succeed, but then there's no need to go on as we are at the end
@@ -1292,6 +1219,7 @@ void lookupImagesAndBrackets(  // Inputs
             // solution. Otherwise we may have moved too far.
             image_start_positions[cam_type] = start_pos;
             image.copyTo(best_image);
+            best_image_name = image_name;
           }
 
           // Go forward in time. We count on the fact that
@@ -1315,6 +1243,7 @@ void lookupImagesAndBrackets(  // Inputs
         cam.beg_ref_index = beg_ref_it;
         cam.end_ref_index = end_ref_it;
         cam.image         = best_image;
+        cam.image_name    = best_image_name;
 
         success = true;
       }
@@ -1338,30 +1267,24 @@ void lookupImagesAndBrackets(  // Inputs
 
       // Look up the closest cloud in time (either before or after cam.timestamp)
       // This need not succeed.
+      // Read from images/depth clouds stored in files
       cam.cloud_timestamp = -1.0;  // will change
-      if (!depth_data.empty())     // Read from images/depth clouds stored in files
+      if (!depth_data.empty()) 
         dense_map::lookupImage(cam.timestamp,  // start looking from this time forward
                                depth_data[cam_type],
                                // Outputs
-                               cam.depth_cloud,
+                               cam.depth_cloud, cam.depth_name, 
                                cloud_start_positions[cam_type],  // this will move forward
                                cam.cloud_timestamp);             // found time
-      else if (depth_topics[cam_type] != "")                     // Read from bag
-        dense_map::lookupCloud(cam.timestamp,  // start looking from this time forward
-                               mapVal(bag_map, depth_topics[cam_type]),
-                               max_image_to_depth_timestamp_diff,
-                               // Outputs
-                               cam.depth_cloud,
-                               cloud_start_positions[cam_type],  // this will move forward
-                               cam.cloud_timestamp);             // found time
-
+      
       cams.push_back(cam);
     }  // end loop over camera types
   }    // end loop over ref images
 
   // See how many timestamps we have for each camera
   std::map<int, int> num_images;
-  for (int cam_type_it = 0; cam_type_it < num_cam_types; cam_type_it++) num_images[cam_type_it] = 0;
+  for (int cam_type_it = 0; cam_type_it < num_cam_types; cam_type_it++)
+    num_images[cam_type_it] = 0;
   for (size_t cam_it = 0; cam_it < cams.size(); cam_it++)
     num_images[cams[cam_it].camera_type]++;
 
@@ -1398,7 +1321,7 @@ void lookupImagesAndBrackets(  // Inputs
               << ", " << max_timestamp_offset[cam_type] << "]\n";
   }
 
-  // The images from the bag may need to be resized to be the same
+  // The images may need to be resized to be the same
   // size as in the calibration file. Sometimes the full-res images
   // can be so blurry that interest point matching fails, hence the
   // resizing.
@@ -1713,12 +1636,13 @@ void evalResiduals(  // Inputs
 // Given all the merged and filtered tracks in pid_cid_fid, for each
 // image pair cid1 and cid2 with cid1 < cid2 < cid1 + num_overlaps + 1,
 // save the matches of this pair which occur in the set of tracks.
-void saveInlinerMatchPairs(  // Inputs
-  std::vector<std::string> const& image_files, int num_overlaps,
-  std::vector<std::map<int, int>> const& pid_to_cid_fid,
-  std::vector<std::vector<std::pair<float, float>>> const& keypoint_vec,
-  std::vector<std::map<int, std::map<int, int>>> const& pid_cid_fid_inlier,
-  std::string const& out_dir) {
+void saveInlinerMatchPairs(// Inputs
+                           std::vector<dense_map::cameraImage> const& cams,
+                           int num_overlaps,
+                           std::vector<std::map<int, int>> const& pid_to_cid_fid,
+                           std::vector<std::vector<std::pair<float, float>>> const& keypoint_vec,
+                           std::vector<std::map<int, std::map<int, int>>> const& pid_cid_fid_inlier,
+                           std::string const& out_dir) {
   MATCH_MAP matches;
 
   for (size_t pid = 0; pid < pid_to_cid_fid.size(); pid++) {
@@ -1759,14 +1683,14 @@ void saveInlinerMatchPairs(  // Inputs
     int left_index = index_pair.first;
     int right_index = index_pair.second;
 
-    auto & left_image  = image_files[left_index];  // alias
-    auto & right_image = image_files[right_index];  // alias
-
     std::string match_dir = out_dir + "/matches";
     dense_map::createDir(match_dir);
 
     std::string suffix = "-inliers";
-    std::string match_file = dense_map::matchFileName(match_dir, left_image, right_image, suffix);
+    std::string match_file = dense_map::matchFileName(match_dir,
+                                                      cams[left_index].image_name,
+                                                      cams[right_index].image_name,
+                                                      suffix);
 
     std::cout << "Writing: " << match_file << std::endl;
     dense_map::writeMatchFile(match_file, match_pair.first, match_pair.second);
@@ -2115,7 +2039,9 @@ void readDataFromNvm(// Inputs
                                 ref_timestamps, world_to_ref, ref_image_files,
                                 image_data, depth_data);
 }
-                       
+  
+// TODO(oalexan1): Move to transforms
+  
 // Given the transforms from each camera to the world and their timestamps,
 // find an initial guess for the relationship among the sensors on the rig.
 // Note that strictly speaking the transforms in world_to_ref_vec are among
@@ -2668,14 +2594,9 @@ std::vector<int> parseNumExcludePixels(size_t num_cams, std::string num_excl_str
 }  // namespace dense_map
 
 int main(int argc, char** argv) {
-#if HAVE_ASTROBEE
-  ff_common::InitFreeFlyerApplication(&argc, &argv);
-  GOOGLE_PROTOBUF_VERIFY_VERSION;
-#else
   google::InitGoogleLogging(argv[0]);
   google::ParseCommandLineFlags(&argc, &argv, true);
   tbb::task_arena schedule(tbb::task_arena::automatic); // to force linking to tbb
-#endif
 
   dense_map::parameterValidation();
 
@@ -2690,13 +2611,9 @@ int main(int argc, char** argv) {
   std::vector<double>                   ref_to_cam_timestamp_offsets;
 
   bool use_initial_rig_transforms = FLAGS_use_initial_rig_transforms; // this may change
-  if (FLAGS_rig_config != "")  // Read a plain text config file for n sensors
-    dense_map::readRigConfig(FLAGS_rig_config, use_initial_rig_transforms, ref_cam_type, cam_names,
-                             cam_params, ref_to_cam_trans, depth_to_image,
-                             ref_to_cam_timestamp_offsets);
-  else  // Read a lua-based config file for an Astrobee robot with 3 sensors
-    dense_map::readLuaConfig(use_initial_rig_transforms, ref_cam_type, cam_names, cam_params,
-                             ref_to_cam_trans, depth_to_image, ref_to_cam_timestamp_offsets);
+  dense_map::readRigConfig(FLAGS_rig_config, use_initial_rig_transforms, ref_cam_type, cam_names,
+                           cam_params, ref_to_cam_trans, depth_to_image,
+                           ref_to_cam_timestamp_offsets);
 
   int num_cam_types = cam_params.size();
 
@@ -2714,31 +2631,6 @@ int main(int argc, char** argv) {
   // and it is very important to always keep these in sync.
   std::vector<Eigen::Affine3d> world_to_ref, world_to_cam;
 
-  // The timestamp for the ref camera.
-  std::vector<double> ref_timestamps;
-
-#if HAVE_ASTROBEE
-  // Read the sparse map. It has the ref cam poses.
-  boost::shared_ptr<sparse_mapping::SparseMap> sparse_map =
-    boost::shared_ptr<sparse_mapping::SparseMap>(new sparse_mapping::SparseMap(FLAGS_sparse_map));
-
-  // Parse the ref timestamps from the sparse map. We assume that the
-  // map image names are the timestamps.
-  const std::vector<std::string>& sparse_map_images = sparse_map->cid_to_filename_;
-  ref_timestamps.resize(sparse_map_images.size());
-  for (size_t cid = 0; cid < sparse_map_images.size(); cid++)
-    ref_timestamps[cid] = dense_map::fileNameToTimestamp(sparse_map_images[cid]);
-  if (ref_timestamps.empty()) LOG(FATAL) << "No sparse map timestamps found.";
-
-  // Will optimize the ref cam poses as part of the process
-  // Make a copy of them here.
-  world_to_ref = sparse_map->cid_to_cam_t_global_;
-
-  // TODO(oalexan1): Note how below we overwrite with data read from --camera_poses
-  // and --rig_config. Need to have --sparse_map and --bag be mutually exclusive
-  // with --rig_config and --camera_poses.
-#endif
-
   // image_data is on purpose stored in vectors of vectors, with each
   // image_data[i] having data in increasing order of timestamp.  This
   // way it is fast to find next timestamps after a given one.
@@ -2748,6 +2640,7 @@ int main(int argc, char** argv) {
   // successive invocations, rather than caching and advancing the vector index.
   // Then looking up by a given timestamp would be more direct than now,
   // while looking up next timestamp after the given one would be as now.
+  std::vector<double> ref_timestamps; // Timestamps for the ref cameras
   std::vector<std::vector<dense_map::ImageMessage>> image_data;
   std::vector<std::vector<dense_map::ImageMessage>> depth_data;
   std::vector<std::string> ref_image_files;
@@ -2759,27 +2652,6 @@ int main(int argc, char** argv) {
     dense_map::readDataFromNvm(FLAGS_nvm, ref_cam_type, cam_names, // in
                                ref_timestamps, world_to_ref, ref_image_files,
                                image_data, depth_data); // out
-
-  // Build a map for quick access for all the messages we may need
-  std::vector<std::string> topics;
-  dense_map::StrToMsgMap bag_map;
-  std::vector<std::string> image_topics, depth_topics;
-#if HAVE_ASTROBEE
-  image_topics = {FLAGS_nav_cam_topic,
-                  FLAGS_haz_cam_intensity_topic,
-                  FLAGS_sci_cam_topic};
-  depth_topics = {"", FLAGS_haz_cam_points_topic, ""};
-
-  std::cout << "Reading the bag: " << FLAGS_ros_bag << std::endl;
-  for (auto it = 0; it < image_topics.size(); it++)
-    if (image_topics[it] != "") topics.push_back(image_topics[it]);
-  for (auto it = 0; it < depth_topics.size(); it++)
-    if (depth_topics[it] != "") topics.push_back(depth_topics[it]);
-  rosbag::Bag bag;
-  bag.open(FLAGS_ros_bag, rosbag::bagmode::Read);
-  rosbag::View view(bag, rosbag::TopicQuery(topics));
-  dense_map::indexMessages(view, bag_map);
-#endif
 
   std::vector<int> num_exclude_boundary_pixels =
     dense_map::parseNumExcludePixels(cam_params.size(), FLAGS_num_exclude_boundary_pixels);
@@ -2798,8 +2670,7 @@ int main(int argc, char** argv) {
   dense_map::lookupImagesAndBrackets(  // Inputs
     ref_cam_type, FLAGS_bracket_len, FLAGS_timestamp_offsets_max_change,
     FLAGS_max_image_to_depth_timestamp_diff, cam_names, cam_params,
-    ref_timestamps, image_topics, depth_topics,
-    bag_map, image_data, depth_data,
+    ref_timestamps, image_data, depth_data,
     ref_to_cam_timestamp_offsets,
     // Outputs
     cams, min_timestamp_offset, max_timestamp_offset);
@@ -2852,8 +2723,15 @@ int main(int argc, char** argv) {
                                       ref_image_files,  
                                       world_to_ref);
     // The above transformed world_to_ref. Also transform world_to_cam.
+    // TODO(oalexan1): Apply transform passed in from outside
     dense_map::TransformCameras(registration_trans, world_to_cam);
     dense_map::TransformRig(registration_trans, ref_to_cam_trans); // this uses different logic
+
+    // TODO(oalexan1): In post-registration, apply transform to depth_to_image.
+    // Not here though, as the current scale is from Theia's coords to world,
+    // rather than within the world.
+    //depth_to_image[cam_type].linear() *= map_scale;
+    //depth_to_image[cam_type].translation() *= map_scale;
   }
 
   // Put the rig transforms in arrays, so we can optimize them
@@ -2949,22 +2827,11 @@ int main(int argc, char** argv) {
                                           &world_to_cam_vec[dense_map::NUM_RIGID_PARAMS * cid]);
   }
 
-  // The image file names are needed to save the images and matches
-  std::vector<std::string> image_files, depth_files;
-  if (FLAGS_save_images_and_depth_clouds || FLAGS_save_matches)
-    dense_map::genImageAndDepthFileNames(  // Inputs
-      cams, cam_names, FLAGS_out_dir,
-      // Outputs
-      image_files, depth_files);
-
-  if (FLAGS_save_images_and_depth_clouds)
-    dense_map::saveImagesAndDepthClouds(cams, image_files, depth_files);
-
   // Detect and match features
   std::vector<std::vector<std::pair<float, float>>> keypoint_vec;
   std::vector<std::map<int, int>> pid_to_cid_fid;
   dense_map::detectMatchFeatures(  // Inputs
-    cams, cam_params, image_files, FLAGS_out_dir, FLAGS_save_matches, world_to_cam,
+    cams, cam_params, FLAGS_out_dir, FLAGS_save_matches, world_to_cam,
     FLAGS_num_overlaps, FLAGS_initial_max_reprojection_error, FLAGS_num_match_threads,
     FLAGS_verbose,
     // Outputs
@@ -3341,6 +3208,11 @@ int main(int argc, char** argv) {
       cam_params[it].SetFocalLength(Eigen::Vector2d(focal_lengths[it], focal_lengths[it]));
       cam_params[it].SetOpticalOffset(optical_centers[it]);
       cam_params[it].SetDistortion(distortions[it]);
+
+      // This is needed for RPC, as that one has undistortion coeffs which must
+      // be synced up with new distortion coeffs
+      if (distortions[it].size() > 5) 
+        cam_params[it].updateRpcUndistortion(num_exclude_boundary_pixels[it]);
     }
 
     // Copy back the optimized extrinsics, whether it was optimized or fixed
@@ -3384,68 +3256,9 @@ int main(int argc, char** argv) {
     depth_to_image[cam_type].linear() *= depth_to_image_scales[cam_type];
 
   if (FLAGS_save_matches)
-    dense_map::saveInlinerMatchPairs(image_files, FLAGS_num_overlaps, pid_to_cid_fid,
+    dense_map::saveInlinerMatchPairs(cams, FLAGS_num_overlaps, pid_to_cid_fid,
                                      keypoint_vec, pid_cid_fid_inlier, FLAGS_out_dir);
 
-#if HAVE_ASTROBEE
-  // Copy back the optimized ref map poses
-  sparse_map->cid_to_cam_t_global_ = world_to_ref;
-
-  bool map_changed = (FLAGS_num_iterations > 0 &&
-                      (FLAGS_camera_poses_to_float != "" || FLAGS_intrinsics_to_float != ""));
-  if (map_changed) {
-    // Rebuild the map. This does not change the poses.
-    std::cout << "Either the sparse map intrinsics or cameras got modified. "
-              << "The map must be rebuilt." << std::endl;
-    dense_map::RebuildMap(FLAGS_output_map,  // Will be used for temporary saving of aux data
-                          cam_params[ref_cam_type],
-                          FLAGS_refiner_min_angle, FLAGS_verbose,
-                          sparse_map);
-  }
-
-  if (FLAGS_registration) {
-    std::cout << "Redoing registration of the obtained map and adjusting all extrinsics.\n";
-    std::vector<std::string> data_files;
-    data_files.push_back(FLAGS_hugin_file);
-    data_files.push_back(FLAGS_xyz_file);
-    bool verification = false;
-    double map_scale
-      = sparse_mapping::RegistrationOrVerification(data_files, verification, sparse_map.get());
-
-    std::cout << "Registration resulted in a scale adjustment of: " << map_scale << ".\n";
-    // We do not change depth_to_image_scales since multiplying the
-    // affine component of depth_to_image is enough.
-    for (int cam_type = 0; cam_type < num_cam_types; cam_type++) {
-      // This transform is affine, so both the linear and translation parts need a scale
-      depth_to_image[cam_type].linear() *= map_scale;
-      depth_to_image[cam_type].translation() *= map_scale;
-      // This is a rotation + translation, so only the translation needs the scale
-      ref_to_cam_trans[cam_type].translation() *= map_scale;
-
-      // TODO(oalexan1): This messes up the sparse map, which will likely require updating
-      // world_to_ref_vec, and maybe other things.  First pull the camera transforms
-      // from the registered sparse maps, and see what that affects.
-      // Also consider the cases when we model or not the transform among sensors.
-
-      // This is a bug if further changes are not done here, when registration is happening.
-      LOG(FATAL) << "This is a bug. Registration is failing unless world_to_ref_vec "
-                 << "and other quantities are updated.\n";
-
-      // Update ref_to_cam_vec
-      dense_map::rigid_transform_to_array(
-        ref_to_cam_trans[cam_type],                                // input
-        &ref_to_cam_vec[dense_map::NUM_RIGID_PARAMS * cam_type]);  // output
-    }
-  }
-
-  std::cout << "Writing: " << FLAGS_output_map << std::endl;
-  sparse_map->Save(FLAGS_output_map);
-
-  // Update the config file
-  dense_map::writeLuaConfig(cam_names, cam_params, ref_to_cam_trans,
-                             ref_to_cam_timestamp_offsets,
-                             depth_to_image);
-#endif
 
   // Update the transforms from the world to every camera
   dense_map::calc_world_to_cam_rig_or_not(  // Inputs
@@ -3462,14 +3275,12 @@ int main(int argc, char** argv) {
                                   num_exclude_boundary_pixels,
                                   FLAGS_out_texture_dir);
 
-  if (FLAGS_save_images_and_depth_clouds) {
-    dense_map::writeImageList(FLAGS_out_dir, cams, image_files, depth_files, world_to_cam);
-
-    bool model_rig = (!FLAGS_no_rig);
-    dense_map::writeRigConfig(FLAGS_out_dir, model_rig, ref_cam_type, cam_names,
-                              cam_params, ref_to_cam_trans, depth_to_image,
-                              ref_to_cam_timestamp_offsets);
-  }
+  dense_map::writeImageList(FLAGS_out_dir, cams, world_to_cam);
+  
+  bool model_rig = (!FLAGS_no_rig);
+  dense_map::writeRigConfig(FLAGS_out_dir, model_rig, ref_cam_type, cam_names,
+                            cam_params, ref_to_cam_trans, depth_to_image,
+                            ref_to_cam_timestamp_offsets);
 
   if (FLAGS_export_to_voxblox)
     exportToVoxblox(cam_names, cams, world_to_cam, FLAGS_out_dir);

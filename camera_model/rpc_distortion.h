@@ -76,10 +76,25 @@ class RPCLensDistortion {
   
 };
 
-void fitRPC(int rpc_degree, int num_samples, int num_exclude_boundary_pixels,
-            camera::CameraParameters const& cam_params,
-            int num_opt_threads, int num_iterations, double parameter_tolerance,
-            bool verbose, RPCLensDistortion & rpc);
+void fitRpcDist(int rpc_degree, int num_samples, int num_exclude_boundary_pixels,
+                camera::CameraParameters const& cam_params,
+                int num_opt_threads, int num_iterations, double parameter_tolerance,
+                bool verbose,
+                // Output
+                Eigen::VectorXd & rpc_dist_coeffs);
+
+void fitRpcUndist(Eigen::VectorXd const & rpc_dist_coeffs,
+                  int num_samples, int num_exclude_boundary_pixels,
+                  camera::CameraParameters const& cam_params,
+                  int num_opt_threads, int num_iterations, double parameter_tolerance,
+                  bool verbose,
+                  // output
+                  Eigen::VectorXd & rpc_undist_coeffs);
+
+void evalRpcDistUndist(int num_samples, int num_exclude_boundary_pixels,
+                       camera::CameraParameters const& cam_params,
+                       RPCLensDistortion const& rpc);
+  
 }
   
 #endif  // RIG_CALIBRATOR_RPC_DISTORTION_H

@@ -199,9 +199,7 @@ struct cameraImage;
 void detectMatchFeatures(  // Inputs
                          std::vector<dense_map::cameraImage> const& cams,
                          std::vector<camera::CameraParameters> const& cam_params,
-                         std::vector<std::string> const& image_files,
-                         std::string const& out_dir,
-                         bool save_matches,
+                         std::string const& out_dir, bool save_matches,
                          std::vector<Eigen::Affine3d> const& world_to_cam, int num_overlaps,
                          int initial_max_reprojection_error, int num_match_threads,
                          bool verbose,

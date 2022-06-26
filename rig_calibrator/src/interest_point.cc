@@ -444,9 +444,7 @@ std::string matchFileName(std::string const& match_dir,
 void detectMatchFeatures(  // Inputs
                          std::vector<dense_map::cameraImage> const& cams,
                          std::vector<camera::CameraParameters> const& cam_params,
-                         std::vector<std::string> const& image_files,
-                         std::string const& out_dir,
-                         bool save_matches,
+                         std::string const& out_dir, bool save_matches,
                          std::vector<Eigen::Affine3d> const& world_to_cam, int num_overlaps,
                          int initial_max_reprojection_error, int num_match_threads,
                          bool verbose,
@@ -579,9 +577,6 @@ void detectMatchFeatures(  // Inputs
   if (save_matches) {
     if (out_dir.empty()) LOG(FATAL) << "Cannot save matches if no output directory was provided.\n";
 
-    if (image_files.size() != cams.size())
-      LOG(FATAL) << "Must have as many image files to save as cameras.\n";
-
     std::string match_dir = out_dir + "/matches";
     dense_map::createDir(match_dir);
 
@@ -592,8 +587,8 @@ void detectMatchFeatures(  // Inputs
       int left_index = index_pair.first;
       int right_index = index_pair.second;
 
-      std::string left_image = image_files[left_index];
-      std::string right_image = image_files[right_index];
+      std::string const& left_image = cams[left_index].image_name; // alias
+      std::string const& right_image = cams[right_index].image_name; // alias
 
       std::string suffix = "";
       std::string match_file = matchFileName(match_dir, left_image, right_image, suffix);

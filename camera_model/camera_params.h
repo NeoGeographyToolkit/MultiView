@@ -120,6 +120,8 @@ namespace camera {
     const Eigen::VectorXd& GetDistortion() const;
 
     dense_map::RPCLensDistortion m_rpc;
+
+    void updateRpcUndistortion(int num_exclude_boundary_pixels);
     
     // Comparison operator
     friend bool operator== (CameraParameters const& A, CameraParameters const& B) {
@@ -133,7 +135,6 @@ namespace camera {
               A.distortion_precalc1_    == B.distortion_precalc1_    &&
               A.distortion_precalc2_    == B.distortion_precalc2_    &&
               A.distortion_precalc3_    == B.distortion_precalc3_);
-
     }
 
    private:

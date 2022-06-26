@@ -252,6 +252,49 @@ void camera::CameraParameters::SetDistortion(Eigen::VectorXd const& distortion) 
   }
 }
 
+// This must be called before a model having RPC distortion can be used
+// for undistortion
+// TODO(oalexan1): The model must know its num_exclude_boundary_pixels
+void camera::CameraParameters::updateRpcUndistortion(int num_exclude_boundary_pixels) {
+  int num_samples = 500; // in each of rows and columns; should be enough
+  int num_threads = 1; // this will be quick, 1 thread is enough
+  bool verbose = false;
+  int num_iterations = 100; // should be plenty
+  double parameter_tolerance = 1e-12; // should be enough
+
+  if (distortion_coeffs_.size() %2 != 0) 
+    LOG(FATAL) << "Must have an even size for distortion_coeffs_ to process RPC.\n";
+
+  // distortion_coeffs_ stores both distortion and undistortion rpc coeffs. Get
+  // the distortion ones, and update the undistortion ones.
+  // This is quite confusing, but an outside user of this class need not know
+  // these details
+  int num_dist = distortion_coeffs_.size()/2;
+  Eigen::VectorXd rpc_dist_coeffs(num_dist);
+  for (int it = 0; it < num_dist; it++)
+    rpc_dist_coeffs[it] = distortion_coeffs_[it];
+
+  Eigen::VectorXd rpc_undist_coeffs;
+  dense_map::fitRpcUndist(rpc_dist_coeffs,
+                          num_samples,
+                          num_exclude_boundary_pixels, *this,
+                          num_threads, num_iterations,
+                          parameter_tolerance,
+                          verbose,
+                          // Output
+                          rpc_undist_coeffs);
+
+  dense_map::RPCLensDistortion rpc;
+  rpc.set_distortion_parameters(rpc_dist_coeffs);
+  rpc.set_undistortion_parameters(rpc_undist_coeffs);
+  dense_map::evalRpcDistUndist(num_samples, num_exclude_boundary_pixels,  
+                               *this, rpc);
+
+  // Copy back the updated values
+  for (int it = 0; it < num_dist; it++)
+    distortion_coeffs_[it + num_dist] = rpc_undist_coeffs[it];
+}
+
 const Eigen::VectorXd& camera::CameraParameters::GetDistortion() const {
   return distortion_coeffs_;
 }

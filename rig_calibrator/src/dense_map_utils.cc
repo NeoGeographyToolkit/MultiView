@@ -45,9 +45,10 @@ std::string print_vec(Eigen::Vector3d a) {
   return std::string(st);
 }
 
-// A little function to replace separators with space  
+// A little function to replace separators with space. Note that the backslash
+// is a separator, in case, it used as a continuation line.
 void replace_separators_with_space(std::string & str) {
-  std::string sep = ":, \t\r\n";
+  std::string sep = "\\:, \t\r\n";
   for (size_t it = 0; it < sep.size(); it++) 
     std::replace(str.begin(), str.end(), sep[it], ' ');
 }
@@ -62,10 +63,8 @@ void parse_intrinsics_to_float(std::string const& intrinsics_to_float_str,
   // Wipe the output
   intrinsics_to_float.clear();
 
-  // Replace all separators with spaces
-  std::string sep = ":, \t\r\n";
-
   std::string input_str = intrinsics_to_float_str; // so we can edit it
+
   replace_separators_with_space(input_str);
 
   std::istringstream iss(input_str);
@@ -761,60 +760,16 @@ void readXyzImage(std::string const& filename, cv::Mat & img) {
   return;
 }
 
-// Create the image and depth cloud file names
-void genImageAndDepthFileNames(  // Inputs
-  std::vector<dense_map::cameraImage> const& cams, std::vector<std::string> const& cam_names,
-  std::string const& out_dir,
-  // Outputs
-  std::vector<std::string>& image_files, std::vector<std::string>& depth_files) {
-  // Wipe the output
-  image_files.clear();
-
-  char buffer[1000];
-  for (size_t it = 0; it < cams.size(); it++) {
-    // Use the timestamp as image and depth cloud names, unless those
-    // names already exist. Note that several sensors can produce
-    // images with same timestamp, so also keep track of camera name.
-    std::string cam_dir = out_dir + "/" + cam_names[cams[it].camera_type];
-    std::string image_name;
-    // Will use .tif images, as those are lossless
-    snprintf(buffer, sizeof(buffer), "%10.7f.tif", cams[it].timestamp);
-    image_name = buffer;
-    image_name = cam_dir + "/" + image_name;
-    image_files.push_back(image_name);
-
-    // We count having on the depth file having precisely the same
-    // name as the image file, with only a different extension
-    std::string depth_name;
-    snprintf(buffer, sizeof(buffer), "%10.7f.pc", cams[it].timestamp);
-    depth_name = buffer;
-    depth_name = cam_dir + "/" + depth_name;
-    depth_files.push_back(depth_name);
-  }
-}
-
 // Save images and depth clouds to disk
-void saveImagesAndDepthClouds(std::vector<dense_map::cameraImage> const& cams,
-                              std::vector<std::string> const& image_files,
-                              std::vector<std::string> const& depth_files) {
-  if (cams.size() != image_files.size())
-    LOG(FATAL) << "There must be as many image files as cameras.\n";
-
+void saveImagesAndDepthClouds(std::vector<dense_map::cameraImage> const& cams) {
   for (size_t it = 0; it < cams.size(); it++) {
-    // Create the directory for the image file
-    std::string out_dir = boost::filesystem::path(image_files[it]).parent_path().string();
-    if (out_dir != "") dense_map::createDir(out_dir);
 
-    std::cout << "Writing: " << image_files[it] << std::endl;
-    cv::imwrite(image_files[it], cams[it].image);
+    std::cout << "Writing: " << cams[it].image_name << std::endl;
+    cv::imwrite(cams[it].image_name, cams[it].image);
 
     if (cams[it].depth_cloud.cols > 0 && cams[it].depth_cloud.rows > 0) {
-      // Create the directory for the depth cloud
-      out_dir = boost::filesystem::path(depth_files[it]).parent_path().string();
-      if (out_dir != "") dense_map::createDir(out_dir);
-
-      std::cout << "Writing: " << depth_files[it] << std::endl;
-      dense_map::saveXyzImage(depth_files[it], cams[it].depth_cloud);
+      std::cout << "Writing: " << cams[it].depth_name << std::endl;
+      dense_map::saveXyzImage(cams[it].depth_name, cams[it].depth_cloud);
     }
   }
 
@@ -825,10 +780,14 @@ void saveImagesAndDepthClouds(std::vector<dense_map::cameraImage> const& cams,
 // that during repeated calls to this function we always travel
 // forward in time, and we keep track of where we are in the bag using
 // the variable start_pos that we update as we go.
-bool lookupImage(double desired_time, std::vector<ImageMessage> const& msgs,
-                 cv::Mat& image, int& start_pos, double& found_time) {
-  // Initialize the outputs.
+bool lookupImage(// Inputs
+                 double desired_time, std::vector<ImageMessage> const& msgs,
+                 // Outputs
+                 cv::Mat& image, std::string & image_name,
+                 int& start_pos, double& found_time) {
+  // Initialize the outputs. Note that start_pos is passed in from outside.
   image = cv::Mat();
+  image_name = "";
   found_time = -1.0;
 
   int num_msgs = msgs.size();
@@ -852,6 +811,7 @@ bool lookupImage(double desired_time, std::vector<ImageMessage> const& msgs,
     if (found_time >= desired_time) {
       // Found the desired data. Do a deep copy, to not depend on the original structure.
       msgs[local_pos].image.copyTo(image);
+      image_name = msgs[local_pos].name;
       return true;
     }
   }
@@ -871,8 +831,6 @@ void strToVec(std::string const& str, std::vector<double> & vec) {
 // Read the images, depth clouds, and their metadata
 // Save the properties of images. Use space as separator.
 void writeImageList(std::string const& out_dir, std::vector<dense_map::cameraImage> const& cams,
-                    std::vector<std::string> const& image_files,
-                    std::vector<std::string> const& depth_files,
                     std::vector<Eigen::Affine3d> const& world_to_cam) {
   dense_map::createDir(out_dir);
   std::string image_list = out_dir + "/cameras.txt";
@@ -891,7 +849,7 @@ void writeImageList(std::string const& out_dir, std::vector<dense_map::cameraIma
     Eigen::MatrixXd T = world_to_cam[it].matrix();
 
     // Save the rotation and translation of T
-    f << image_files[it] << " " << dense_map::affineToStr(world_to_cam[it]) << "\n";
+    f << cams[it].image_name << " " << dense_map::affineToStr(world_to_cam[it]) << "\n";
   }
 
   f.close();
@@ -952,23 +910,15 @@ void writeRigConfig(std::string const& out_dir, bool model_rig, int ref_cam_type
     Eigen::Vector2i undist_size = cam_params[cam_type].GetUndistortedSize();
     f << "undistorted_image_size: " << undist_size[0] << ' ' << undist_size[1] << "\n";
 
-    // This is very important. When we don't assume a rig,
-    // the transform among the sensors should be invalid.
-    Eigen::Affine3d Zero;
-    Zero.matrix() = 0 * Zero.matrix();
     Eigen::Affine3d T;
-
     if (model_rig)
       T = ref_to_cam_trans[cam_type];
     else
-      T = Zero;
+      T = Eigen::Affine3d::Identity(); // write something valid
 
-    f << "ref_to_sensor_transform: "
-      << dense_map::affineToStr(T)
-      << "\n";
+    f << "ref_to_sensor_transform: " << dense_map::affineToStr(T) << "\n";
 
-    f << "depth_to_image_transform: "
-      << dense_map::affineToStr(depth_to_image[cam_type]) << "\n";
+    f << "depth_to_image_transform: " << dense_map::affineToStr(depth_to_image[cam_type]) << "\n";
 
     f << "ref_to_sensor_timestamp_offset: " << ref_to_cam_timestamp_offsets[cam_type] << "\n";
   }

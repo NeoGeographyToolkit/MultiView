@@ -107,15 +107,33 @@ int main(int argc, char** argv) {
                            cam_params, ref_to_cam_trans, depth_to_image,
                            ref_to_cam_timestamp_offsets);
   
-
   std::cout << "Focal length is " << cam_params[0].GetFocalVector().transpose() << std::endl;
 
+  Eigen::VectorXd rpc_dist_coeffs;
+  dense_map::fitRpcDist(FLAGS_rpc_degree, FLAGS_num_samples,
+                        FLAGS_num_exclude_boundary_pixels, cam_params[0],
+                        FLAGS_num_opt_threads, FLAGS_num_iterations,
+                        FLAGS_parameter_tolerance,
+                        FLAGS_verbose,
+                        // Output
+                        rpc_dist_coeffs);
+  
+  Eigen::VectorXd rpc_undist_coeffs;
+  dense_map::fitRpcUndist(rpc_dist_coeffs,
+                          FLAGS_num_samples,
+                          FLAGS_num_exclude_boundary_pixels, cam_params[0],
+                          FLAGS_num_opt_threads, FLAGS_num_iterations,
+                          FLAGS_parameter_tolerance,
+                          FLAGS_verbose,
+                          // Output
+                          rpc_undist_coeffs);
+
   dense_map::RPCLensDistortion rpc;
-  dense_map::fitRPC(FLAGS_rpc_degree, FLAGS_num_samples,
-                    FLAGS_num_exclude_boundary_pixels, cam_params[0],
-                    FLAGS_num_opt_threads, FLAGS_num_iterations,
-                    FLAGS_parameter_tolerance,
-                    FLAGS_verbose, rpc);
+  rpc.set_distortion_parameters(rpc_dist_coeffs);
+  rpc.set_undistortion_parameters(rpc_undist_coeffs);
+
+  dense_map::evalRpcDistUndist(FLAGS_num_samples, FLAGS_num_exclude_boundary_pixels,  
+                       cam_params[0], rpc);
 
   // Create the model with RPC distortion. Note how we pass both the distortion
   // and undistortion RPC coefficients.
