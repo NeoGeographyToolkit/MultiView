@@ -20,13 +20,9 @@
 #ifndef INTEREST_POINT_H_
 #define INTEREST_POINT_H_
 
-//#include <ff_common/thread.h>
 #include <camera_model/camera_params.h>
-
 #include <opencv2/imgproc.hpp>
-
 #include <glog/logging.h>
-
 
 #include <Eigen/Core>
 #include <Eigen/Geometry>
@@ -39,6 +35,9 @@
 
 namespace dense_map {
 
+// Forward declaration  
+class cameraImage;
+  
 /// A class for storing information about an interest point
 /// in the format the NASA ASP can read it (very useful
 // for visualization)
@@ -55,18 +54,12 @@ struct InterestPoint {
   // as seen in the constructor below.
   // TODO(Oleg): There is no way to enforce that ix be in sync with x or
   // iy with y.
-  InterestPoint(float x = 0, float y = 0, float scale = 1.0, float interest = 0.0, float ori = 0.0, bool pol = false,
+  InterestPoint(float x = 0, float y = 0, float scale = 1.0, float interest = 0.0,
+                float ori = 0.0, bool pol = false,
                 uint32_t octave = 0, uint32_t scale_lvl = 0)
-      : x(x),
-        y(y),
-        scale(scale),
-        ix(int32_t(x)),
-        iy(int32_t(y)),
-        orientation(ori),
-        interest(interest),
-        polarity(pol),
-        octave(octave),
-        scale_lvl(scale_lvl) {}
+      : x(x), y(y), scale(scale), ix(int32_t(x)), iy(int32_t(y)),
+        orientation(ori), interest(interest), polarity(pol),
+        octave(octave), scale_lvl(scale_lvl) {}
 
   /// Subpixel (col, row) location of point
   float x, y;
@@ -185,7 +178,7 @@ void Triangulate(bool rm_invalid_xyz, double focal_length,
   
 // Triangulate two rays emanating from given undistorted and centered pixels
 Eigen::Vector3d TriangulatePair(double focal_length1, double focal_length2,
-                                  Eigen::Affine3d const& world_to_cam1,
+                                Eigen::Affine3d const& world_to_cam1,
                                 Eigen::Affine3d const& world_to_cam2, Eigen::Vector2d const& pix1,
                                 Eigen::Vector2d const& pix2);
 
@@ -196,7 +189,7 @@ Eigen::Vector3d Triangulate(std::vector<double> const& focal_length_vec,
 
 struct cameraImage;
 
-void detectMatchFeatures(  // Inputs
+void detectMatchFeatures(// Inputs
                          std::vector<dense_map::cameraImage> const& cams,
                          std::vector<camera::CameraParameters> const& cam_params,
                          std::string const& out_dir, bool save_matches,
@@ -207,6 +200,16 @@ void detectMatchFeatures(  // Inputs
                          std::vector<std::vector<std::pair<float, float>>>& keypoint_vec,
                          std::vector<std::map<int, int>>& pid_to_cid_fid);
 
+void multiViewTriangulation(// Inputs
+                            std::vector<camera::CameraParameters>             const& cam_params,
+                            std::vector<dense_map::cameraImage>               const& cams,
+                            std::vector<Eigen::Affine3d>                      const& world_to_cam,
+                            std::vector<std::map<int, int>>                   const& pid_to_cid_fid,
+                            std::vector<std::vector<std::pair<float, float>>> const& keypoint_vec,
+                            // Outputs
+                            std::vector<std::map<int, std::map<int, int>>>& pid_cid_fid_inlier,
+                            std::vector<Eigen::Vector3d>& xyz_vec);
+  
 }  // namespace dense_map
 
 #endif  // INTEREST_POINT_H_

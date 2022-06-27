@@ -21,6 +21,7 @@
 #include <opencv2/highgui.hpp>
 #include <opencv2/calib3d/calib3d.hpp>
 
+#include <rig_calibrator/basic_algs.h>
 #include <rig_calibrator/interest_point.h>
 #include <rig_calibrator/camera_image.h>
 #include <rig_calibrator/system_utils.h>
@@ -69,7 +70,8 @@ void detectFeatures(const cv::Mat& image, bool verbose,
 
   if (FLAGS_refiner_feature_detector == "SIFT") {
     cv::Ptr<cv::xfeatures2d::SIFT> sift =
-      cv::xfeatures2d::SIFT::create(FLAGS_sift_nFeatures, FLAGS_sift_nOctaveLayers, FLAGS_sift_contrastThreshold,
+      cv::xfeatures2d::SIFT::create(FLAGS_sift_nFeatures, FLAGS_sift_nOctaveLayers,
+                                    FLAGS_sift_contrastThreshold,
                                     FLAGS_sift_edgeThreshold, FLAGS_sift_sigma);
     sift->detect(image, storage);
     sift->compute(image, storage, *descriptors);
@@ -115,8 +117,10 @@ void matchFeatures(std::mutex* match_mutex, int left_image_index, int right_imag
     int right_ip_index = cv_matches.at(j).trainIdx;
 
     // Get the keypoints from the good matches
-    left_vec.push_back(cv::Point2f(left_keypoints.col(left_ip_index)[0], left_keypoints.col(left_ip_index)[1]));
-    right_vec.push_back(cv::Point2f(right_keypoints.col(right_ip_index)[0], right_keypoints.col(right_ip_index)[1]));
+    left_vec.push_back(cv::Point2f(left_keypoints.col(left_ip_index)[0],
+                                   left_keypoints.col(left_ip_index)[1]));
+    right_vec.push_back(cv::Point2f(right_keypoints.col(right_ip_index)[0],
+                                    right_keypoints.col(right_ip_index)[1]));
   }
 
   if (left_vec.empty()) return;
@@ -441,7 +445,7 @@ std::string matchFileName(std::string const& match_dir,
   return match_file;
 }
 
-void detectMatchFeatures(  // Inputs
+void detectMatchFeatures(// Inputs
                          std::vector<dense_map::cameraImage> const& cams,
                          std::vector<camera::CameraParameters> const& cam_params,
                          std::string const& out_dir, bool save_matches,
@@ -635,4 +639,62 @@ void detectMatchFeatures(  // Inputs
   return;
 }
 
+void multiViewTriangulation(// Inputs
+                            std::vector<camera::CameraParameters>             const& cam_params,
+                            std::vector<dense_map::cameraImage>               const& cams,
+                            std::vector<Eigen::Affine3d>                      const& world_to_cam,
+                            std::vector<std::map<int, int>>                   const& pid_to_cid_fid,
+                            std::vector<std::vector<std::pair<float, float>>> const& keypoint_vec,
+                            // Outputs
+                            std::vector<std::map<int, std::map<int, int>>>& pid_cid_fid_inlier,
+                            std::vector<Eigen::Vector3d>& xyz_vec) {
+  
+  xyz_vec.clear();
+  xyz_vec.resize(pid_to_cid_fid.size());
+
+  for (size_t pid = 0; pid < pid_to_cid_fid.size(); pid++) {
+    std::vector<double> focal_length_vec;
+    std::vector<Eigen::Affine3d> world_to_cam_aff_vec;
+    std::vector<Eigen::Vector2d> pix_vec;
+
+    for (auto cid_fid = pid_to_cid_fid[pid].begin(); cid_fid != pid_to_cid_fid[pid].end();
+         cid_fid++) {
+      int cid = cid_fid->first;
+      int fid = cid_fid->second;
+
+      // Triangulate inliers only
+      if (!dense_map::getMapValue(pid_cid_fid_inlier, pid, cid, fid))
+        continue;
+
+      Eigen::Vector2d dist_ip(keypoint_vec[cid][fid].first, keypoint_vec[cid][fid].second);
+      Eigen::Vector2d undist_ip;
+      cam_params[cams[cid].camera_type].Convert<camera::DISTORTED, camera::UNDISTORTED_C>
+        (dist_ip, &undist_ip);
+
+      focal_length_vec.push_back(cam_params[cams[cid].camera_type].GetFocalLength());
+      world_to_cam_aff_vec.push_back(world_to_cam[cid]);
+      pix_vec.push_back(undist_ip);
+    }
+
+    if (pix_vec.size() < 2) {
+      // If after outlier filtering less than two rays are left, can't triangulate.
+      // Must set all features for this pid to outliers.
+      for (auto cid_fid = pid_to_cid_fid[pid].begin(); cid_fid != pid_to_cid_fid[pid].end();
+           cid_fid++) {
+        int cid = cid_fid->first;
+        int fid = cid_fid->second;
+        dense_map::setMapValue(pid_cid_fid_inlier, pid, cid, fid, 0);
+      }
+
+      // Nothing else to do
+      continue;
+    }
+
+    // Triangulate n rays emanating from given undistorted and centered pixels
+    xyz_vec[pid] = dense_map::Triangulate(focal_length_vec, world_to_cam_aff_vec, pix_vec);
+  }
+
+  return;
+}
+  
 }  // end namespace dense_map
