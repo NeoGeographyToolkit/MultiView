@@ -1,6 +1,7 @@
 #!/usr/bin/python
 
-import sys, os, re, subprocess
+import sys, os, re, subprocess, shutil, subprocess, glob
+import numpy as np
 
 def mkdir_p(path):
     if path == "":
@@ -46,8 +47,6 @@ def run_cmd(cmd):
     if process.returncode != 0:
         print("Failed execution of: " + " ".join(cmd))
         sys.exit(1)
-
-
 
 def readConfigVals(handle, tag, num_vals):
     """
@@ -166,3 +165,159 @@ def imageExtension(images):
         raise Exception("The input image set is invalid.")
     return list(extensions)[0]
         
+def parse_images_and_camera_poses(image_list, rig_sensor):
+
+    with open(image_list, 'r') as f:
+        lines = f.readlines()
+
+    images = []
+    world_to_cam = []
+    for line in lines:
+        m = re.match("^(.*?)\#", line)
+        if m:
+            # Wipe comments
+            line = m.group(1)
+        line = line.rstrip()
+        if len(line) == 0:
+            continue
+        
+        vals = line.split()
+        if len(vals) < 13:
+            raise Exception("Could not parse: " + image_list)
+
+        image = vals[0]
+        vals = vals[1:13]
+
+        curr_sensor = os.path.basename(os.path.dirname(image))
+        if curr_sensor != rig_sensor:
+            continue
+
+        # Put the values in a matrix
+        M = np.identity(4)
+        count = 0
+        # Read rotation
+        for row in range(3):
+            for col in range(3):
+                M[row][col] = float(vals[count])
+                count = count + 1
+        # Read translation
+        for row in range(3):
+            M[row][3] = float(vals[count])
+            count = count + 1
+
+        images.append(image)
+        world_to_cam.append(M)
+        
+    return (images, world_to_cam)
+
+def undistort_images(args, images, base_dir, extension, extra_opts):
+
+    # Form the list of distorted images
+    dist_image_list = args.out_dir + "/" + args.rig_sensor + "/distorted_index.txt"
+    mkdir_p(os.path.dirname(dist_image_list))
+    print("Writing: " + dist_image_list)
+    dist_images = []
+    with open(dist_image_list, 'w') as f:
+        for image in images:
+            dist_images.append(image)
+            f.write(image + "\n")
+
+    # Form the list of unundistorted images
+    undist_dir = args.out_dir + "/" + args.rig_sensor + "/undistorted_images"
+
+    if os.path.isdir(undist_dir):
+        # Wipe the existing directory, as it may have stray files
+        print("Removing recursively old directory: " + undist_dir)
+        shutil.rmtree(undist_dir)
+    
+    undist_image_list = args.out_dir + "/" + args.rig_sensor + "/undistorted_index.txt"
+    mkdir_p(undist_dir)
+    print("Writing: " + undist_image_list)
+    undistorted_images = []
+    with open(undist_image_list, 'w') as f:
+        for image in dist_images:
+            image = undist_dir + "/" + os.path.basename(image)
+            # Use desired extension. For example, texrecon seems to want .jpg. In stereo
+            # one prefers .tif, as that one is lossless.
+            path, ext = os.path.splitext(image)
+            image = path + extension
+            undistorted_images.append(image)
+            f.write(image + "\n")
+
+    undist_intrinsics = undist_dir + "/undistorted_intrinsics.txt"
+    cmd = [base_dir + "/bin/undistort_image_texrecon",
+           "--image_list", dist_image_list,
+           "--output_list", undist_image_list,
+           "--rig_config", args.rig_config,
+           "--rig_sensor", args.rig_sensor,
+           "--undistorted_crop_win", args.undistorted_crop_win,
+           "--undistorted_intrinsics", undist_intrinsics] + \
+           extra_opts
+    
+    print("Undistorting " + args.rig_sensor + " images.")
+    run_cmd(cmd)
+
+    return (undist_intrinsics, undistorted_images, undist_dir)
+
+def read_intrinsics(intrinsics_file):
+    
+    if not os.path.exists(intrinsics_file):
+        raise Exception("Missing file: " + intrinsics_file)
+
+    with open(intrinsics_file, "r") as f:
+        for line in f:
+            if re.match("^\s*\#", line):
+                continue  # ignore the comments
+            vals = line.split()
+            if len(vals) < 5:
+                raise Exception("Expecting 5 parameters in " + intrinsics_file)
+            widx = float(vals[0])
+            widy = float(vals[1])
+            f = float(vals[2])
+            cx = float(vals[3])
+            cy = float(vals[4])
+
+            return(widx, widy, f, cx, cy)
+
+    # If no luck
+    raise Exception("Could not read intrinsics from: " + intrinsics_file)
+
+def write_tsai_camera_file(tsai_file, f, cx, cy, cam_to_world):
+    """
+    Write a tsai camera file understandable by ASP. Assume that the
+    intrinsics f, cx, cy are in units of pixels, and the pitch is 1,
+    and that there is no distortion.
+    """
+
+    print("Writing: " + tsai_file)
+    M = cam_to_world # to save on typing
+    with open(tsai_file, "w") as g:
+        g.write("VERSION_3\n")
+        g.write("fu = %0.17g\n" % f)
+        g.write("fv = %0.17g\n" % f)
+        g.write("cu = %0.17g\n" % cx)
+        g.write("cv = %0.17g\n" % cy)
+        g.write("u_direction = 1 0 0\n")
+        g.write("v_direction = 0 1 0\n")
+        g.write("w_direction = 0 0 1\n")
+        g.write("C = %0.17g %0.17g %0.17g\n" % (M[0][3], M[1][3], M[2][3]))
+        g.write("R = %0.17g %0.17g %0.17g %0.17g %0.17g %0.17g %0.17g %0.17g %0.17g\n" %
+                (M[0][0], M[0][1], M[0][2],
+                 M[1][0], M[1][1], M[1][2],
+                 M[2][0], M[2][1], M[2][2]))
+        g.write("pitch = 1\n")
+        g.write("NULL\n")
+
+def write_cam_to_world_matrix(cam_to_world_file, cam_to_world):
+
+    print("Writing: " + cam_to_world_file)
+    M = cam_to_world # to save on typing
+    with open(cam_to_world_file, "w") as g:
+        g.write(("%0.17g %0.17g %0.17g %0.17g\n" + \
+                 "%0.17g %0.17g %0.17g %0.17g\n" + \
+                 "%0.17g %0.17g %0.17g %0.17g\n" + \
+                 "%0.17g %0.17g %0.17g %0.17g\n") % 
+                (M[0][0], M[0][1], M[0][2], M[0][3],
+                 M[1][0], M[1][1], M[1][2], M[1][3],
+                 M[2][0], M[2][1], M[2][2], M[2][3],
+                 M[3][0], M[3][1], M[3][2], M[3][3]))

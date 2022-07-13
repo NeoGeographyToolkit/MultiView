@@ -19,8 +19,9 @@
 # under the License.
 
 """
-A wrapper around the tools that when run together produce a textured mesh.
+Prepare for and then run stereo on many image pairs, and produce a fuse mesh.
 """
+
 import argparse, os, re, shutil, subprocess, sys, glob
 import numpy as np
 
@@ -45,12 +46,9 @@ def process_args(args):
                         help="Which rig sensor images to texture. Must be among the " + \
                         "sensors specified via --rig_config.")
 
-    parser.add_argument("--image_list", dest="image_list",
+    parser.add_argument("--camera_poses", dest="camera_poses",
                         default="", help= "Read images and camera poses from this list.")
 
-    parser.add_argument("--mesh", dest="mesh",
-                        default="", help="The mesh to use for texturing, in .ply format.")
-    
     parser.add_argument("--out_dir", dest="out_dir",
                         default="", help="The directory where to write the textured mesh " + \
                         "and other data.")
@@ -69,11 +67,8 @@ def process_args(args):
 
 def sanity_checks(args):
 
-    if args.image_list == "":
+    if args.camera_poses == "":
         raise Exception("The path to the list having input images and poses was not specified.")
-
-    if args.mesh == "":
-        raise Exception("The mesh to use for texturing was not specified.")
 
     if args.rig_config == "":
         raise Exception("The path to the rig configuration was not specified.")
@@ -86,94 +81,53 @@ def sanity_checks(args):
 
     if args.undistorted_crop_win == "":
         raise Exception("The undistorted crop win was not specified.")
-
-def convert_intrinsics_to_texrecon(undist_intrinsics_file):
-
-    (widx, widy, f, cx, cy) = rig_utils.read_intrinsics(undist_intrinsics_file)
-
-    max_wid = widx
-    if widy > max_wid:
-        max_wid = widy
-
-    # normalize
-    nf = f / max_wid
-    ncx = cx / widx
-    ncy = cy / widy
-    d0 = 0.0
-    d1 = 0.0
-    paspect = 1.0
-
-    return (nf, d0, d1, paspect, ncx, ncy)
-
-def create_texrecon_cameras(undistorted_images, world_to_cam, nf, d0, d1, paspect, ncx, ncy):
-    if len(undistorted_images) != len(world_to_cam):
-        raise Exception("Expecting as many images as cameras.")
-
-    for it in range(len(undistorted_images)):
-        path, ext = os.path.splitext(undistorted_images[it])
-        cam = path + ".cam"
-
-        print("Writing: " + cam)
-        with open(cam, "w") as g:
-            M = world_to_cam[it]
-            # write translation
-            g.write("%0.17g %0.17g %0.17g " % (M[0][3], M[1][3], M[2][3]))
-
-            # write rotation
-            g.write(
-                "%0.17g %0.17g %0.17g %0.17g %0.17g %0.17g %0.17g %0.17g %0.17g\n"
-                % (M[0][0], M[0][1], M[0][2], M[1][0], M[1][1], M[1][2],
-                   M[2][0], M[2][1], M[2][2]))
-
-            # normalized inrinsics
-            g.write("%0.17g %0.17g %0.17g %0.17g %0.17g %0.17g\n"
-                % (nf, d0, d1, paspect, ncx, ncy))
     
-def run_texrecon(base_dir, undist_dir, mesh, texture_dir):
-
-    # That is one long path
-    texrecon_path = base_dir + "/bin/texrecon_bin"
-    if not os.path.exists(texrecon_path):
-        raise Exception("Cannot find: " + texrecon_path)
-    
-    rig_utils.mkdir_p(texture_dir)
-
-    cmd = [texrecon_path, undist_dir, mesh, texture_dir,
-           "-o", "gauss_clamping",
-           "-d", "view_dir_dot_face_dir", # TODO(oalexan1): The -d option needs study
-           "--keep_unseen_faces"]
-
-    log_file = os.path.join(texture_dir, "texrecon_log.txt")
-    print("Running texrecon.\n")
-    rig_utils.run_cmd(cmd)
-
-    textured_mesh = texture_dir + ".obj"
-
-    print("\nWrote: " + textured_mesh)
-    
-    return textured_mesh
-
 if __name__ == "__main__":
 
     args = process_args(sys.argv)
-
     sanity_checks(args)
-
     rig_utils.mkdir_p(args.out_dir)
 
+    # Read the images and camera poses
     (images, world_to_cam) \
-             = rig_utils.parse_images_and_camera_poses(args.image_list, args.rig_sensor)
-    
+             = rig_utils.parse_images_and_camera_poses(args.camera_poses, args.rig_sensor)
+
+    # Write undistorted images
     base_dir = os.path.dirname(os.path.dirname(os.path.abspath(sys.argv[0])))
-    extension = '.jpg' # extension of undistorted images, as preferred by texrecon
-    extra_opts = ["--save_bgr"] # create color images
+    extension = '.tif' # use lossless .tif extension for undistorted images
+    extra_opts = []
     (undist_intrinsics_file, undistorted_images, undist_dir) \
                         = rig_utils.undistort_images(args, images, base_dir, extension, extra_opts)
 
-    (nf, d0, d1, paspect, ncx, ncy) = convert_intrinsics_to_texrecon(undist_intrinsics_file)
+    # Write camera poses in the format of ASP and voxblox
+    (widx, widy, f, cx, cy) = rig_utils.read_intrinsics(undist_intrinsics_file)
+    undist_image_dict = {}
+    for image in undistorted_images:
+        # Use the image name without dir and extension as a key
+        base = os.path.basename(image)
+        base = os.path.splitext(base)[0]
+        undist_image_dict[base] = image
 
-    create_texrecon_cameras(undistorted_images, world_to_cam, nf, d0, d1, paspect, ncx, ncy)
+    count = 0
+    for dist_image in images:
 
-    texture_dir = args.out_dir + "/" + args.rig_sensor + "/texture"
-    run_texrecon(base_dir, undist_dir, args.mesh, texture_dir)
+        base = os.path.basename(dist_image)
+        base = os.path.splitext(base)[0]
+        if base not in undist_image_dict:
+            raise Exception("Cannot find undistorted image for: "  + dist_image)
+        undist_image = undist_image_dict[base]
+        tsai_file = os.path.splitext(undist_image)[0] + ".tsai"
+
+        # Find the camera-to-world transform
+        cam_to_world = np.linalg.inv(world_to_cam[count])
+        rig_utils.write_tsai_camera_file(tsai_file, f, cx, cy, cam_to_world)
+        
+        # For use with voxblox later
+        cam_to_world_file = os.path.splitext(undist_image)[0] + "_cam2world.txt"
+        rig_utils.write_cam_to_world_matrix(cam_to_world_file, cam_to_world)
+        
+        count = count + 1
+
+    print("Found " + str(len(undistorted_images)) + " undistorted images.")
+    print("Wrote: " + str(count) + " cameras.")
 

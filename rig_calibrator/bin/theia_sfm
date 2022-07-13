@@ -23,13 +23,11 @@ https://stereopipeline.readthedocs.io/en/latest/tools/rig_calibrator.html
 
 import argparse, glob, os, re, shutil, subprocess, sys
 
+# Find and import rig_utils.py
 curr_path = os.path.abspath(sys.path[0])
 libexec_path = os.path.dirname(curr_path) + "/libexec" # install dir for rig_utils.py
-
-# Paths to find modules
 sys.path.insert(0, curr_path)
 sys.path.insert(0, libexec_path)
-
 import rig_utils
 
 def sanityChecks(args):
