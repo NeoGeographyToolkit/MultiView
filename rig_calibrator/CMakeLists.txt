@@ -12,16 +12,6 @@ target_link_libraries(rig_calibrator
     TBB::tbb TBB::tbbmalloc mve mve_util
     gflags glog Boost::filesystem pcl_common pcl_io_ply pcl_io)
 
-# Set RPATHS for the library
-# TODO(oalexan1): Note sure about the robustness of the logic below but it seems to work
-if(APPLE)
-  set_target_properties(rig_calibrator PROPERTIES
-    INSTALL_RPATH "@loader_path;${MULTIVIEW_DEPS_DIR}/lib")
-elseif(UNIX) # Unix which is not Apple
-  set_target_properties(rig_calibrator PROPERTIES
-    INSTALL_RPATH "$ORIGIN:$ORIGIN/../lib:${MULTIVIEW_DEPS_DIR}/lib")
-endif()
-
 # Build the rig_calibrator tool
 add_executable(rig_calibrator_bin bin/rig_calibrator.cc)
 set_target_properties(rig_calibrator_bin PROPERTIES OUTPUT_NAME "rig_calibrator")
@@ -44,10 +34,11 @@ target_link_libraries(fit_rpc
 set_target_properties(fit_rpc PROPERTIES
     RUNTIME_OUTPUT_DIRECTORY "${CMAKE_BINARY_DIR}/bin")
 
-# Set RPATHS for the tool. Setting it for the lib only as above is not enough.
-# TODO(oalexan1): Note sure about the robustness of the logic below but it seems to work
+# Set RPATHS. 
 # TODO(oalexan1): Use a loop here, as there are too many lines
 if(APPLE)
+  set_target_properties(rig_calibrator PROPERTIES
+    INSTALL_RPATH "@loader_path;${MULTIVIEW_DEPS_DIR}/lib")
   set_target_properties(rig_calibrator_bin PROPERTIES
     INSTALL_RPATH "@loader_path;${MULTIVIEW_DEPS_DIR}/lib")
   set_target_properties(undistort_image_texrecon PROPERTIES
@@ -55,6 +46,8 @@ if(APPLE)
   set_target_properties(fit_rpc PROPERTIES
     INSTALL_RPATH "@loader_path;${MULTIVIEW_DEPS_DIR}/lib")
 elseif(UNIX) # Unix which is not Apple
+  set_target_properties(rig_calibrator PROPERTIES
+    INSTALL_RPATH "$ORIGIN:$ORIGIN/../lib:${MULTIVIEW_DEPS_DIR}/lib")
   set_target_properties(rig_calibrator_bin PROPERTIES
     INSTALL_RPATH "$ORIGIN:$ORIGIN/../lib:${MULTIVIEW_DEPS_DIR}/lib")
   set_target_properties(undistort_image_texrecon PROPERTIES
@@ -69,13 +62,22 @@ install(TARGETS rig_calibrator_bin RUNTIME DESTINATION ${CMAKE_INSTALL_BINDIR})
 install(TARGETS undistort_image_texrecon RUNTIME DESTINATION ${CMAKE_INSTALL_BINDIR})
 install(TARGETS fit_rpc RUNTIME DESTINATION ${CMAKE_INSTALL_BINDIR})
 
-# Install the python tools
-INSTALL(FILES bin/theia_sfm.py
+# Install the python tools.
+# TODO(oalexan1): Make a loop here.
+INSTALL(FILES bin/theia_sfm
     PERMISSIONS OWNER_READ OWNER_WRITE OWNER_EXECUTE GROUP_EXECUTE GROUP_READ WORLD_EXECUTE
     DESTINATION bin)
-INSTALL(FILES bin/texrecon.py
+INSTALL(FILES bin/texrecon
     PERMISSIONS OWNER_READ OWNER_WRITE OWNER_EXECUTE GROUP_EXECUTE GROUP_READ WORLD_EXECUTE
     DESTINATION bin)
+INSTALL(FILES bin/multi_stereo
+    PERMISSIONS OWNER_READ OWNER_WRITE OWNER_EXECUTE GROUP_EXECUTE GROUP_READ WORLD_EXECUTE
+    DESTINATION bin)
+
+# Install the python tool utils
+INSTALL(FILES bin/rig_utils.py
+    PERMISSIONS OWNER_READ OWNER_WRITE GROUP_READ
+    DESTINATION libexec)
 
 # Install the Theia flags
 INSTALL(FILES theia_flags.txt
