@@ -17,55 +17,20 @@
 # under the License.
 
 """
-# TODO(oalexan1): Write here documentation.
+Documentation is at:
+https://stereopipeline.readthedocs.io/en/latest/tools/rig_calibrator.html
 """
 
 import argparse, glob, os, re, shutil, subprocess, sys
 
-def mkdir_p(path):
-    if path == "":
-        return  # this can happen when path is os.path.dirname("myfile.txt")
-    try:
-        os.makedirs(path)
-    except OSError:
-        if os.path.isdir(path):
-            pass
-        else:
-            raise Exception("Could not make directory " +
-                            path + " as a file with this name exists.")
+curr_path = os.path.abspath(sys.path[0])
+libexec_path = os.path.dirname(curr_path) + "/libexec" # install dir for rig_utils.py
 
-def which(program):
-    """Find if a program is in the PATH"""
+# Paths to find modules
+sys.path.insert(0, curr_path)
+sys.path.insert(0, libexec_path)
 
-    def is_exe(fpath):
-        return os.path.isfile(fpath) and os.access(fpath, os.X_OK)
-
-    fpath, fname = os.path.split(program)
-    if fpath:
-        if is_exe(program):
-            return program
-    else:
-        for path in os.environ["PATH"].split(os.pathsep):
-            path = path.strip('"')
-            exe_file = os.path.join(path, program)
-            if is_exe(exe_file):
-                return exe_file
-
-    return None
-
-
-def run_cmd(cmd):
-    """
-    Run a command.
-    """
-    # TODO(oalexan1): Should the "system" command be used instead?
-    # Then it will print the output of each command.
-    print(" ".join(cmd) + "\n")
-    process = subprocess.Popen(cmd, stdout=subprocess.PIPE)
-    process.wait()
-    if process.returncode != 0:
-        print("Failed execution of: " + " ".join(cmd))
-        sys.exit(1)
+import rig_utils
 
 def sanityChecks(args):
 
@@ -125,120 +90,6 @@ def processArgs(args, base_dir):
     
     return args
 
-def readConfigVals(handle, tag, num_vals):
-    """
-    Read a tag and vals. If num_vals > 0, expecting to read this many vals.
-    """
-    
-    vals = []
-
-    while True:
-
-        line = handle.readline()
-        
-        # Wipe everything after pound but keep the newline,
-        # as otherwise this will be treated as the last line
-        match = re.match("^(.*?)\#.*?\n", line)
-        if match:
-            line = match.group(1) + "\n"
-
-        if len(line) == 0:
-            # Last line, lacks a newline
-            break
-
-        line = line.rstrip() # wipe newlne
-        if len(line) == 0:
-            continue
-        
-        vals = line.split()
-        if len(vals) == 0 or vals[0] != tag:
-            raise Exception("Failed to read entry for: " + tag)
-
-        vals = vals[1:]
-        if num_vals > 0 and len(vals) != num_vals:
-            raise Exception("Failed to read " + str(num_vals) + " values.")
-
-        # Done
-        break
-    
-    # Return the handle as well, as it changed
-    return (vals, handle)
-
-def parseRigConfig(rig_config_file):
-
-    cameras = []
-    
-    with open(rig_config_file, "r") as handle:
-
-        (vals, handle) = readConfigVals(handle, 'ref_sensor_name:', 1)
-        ref_sensor_name = vals[0]
-
-        while True:
-            camera = {}
-            
-            (vals, handle) = readConfigVals(handle, 'sensor_name:', 1)
-            if len(vals) == 0:
-                break # end of file
-            camera["sensor_name"] = vals[0]
-
-            (vals, handle) = readConfigVals(handle, "focal_length:", 1)
-            camera["focal_length"] = vals[0]
-
-            (vals, handle) = readConfigVals(handle, "optical_center:", 2)
-            camera["optical_center"] = vals
-
-            (vals, handle) = readConfigVals(handle, "distortion_coeffs:", -1) # var length
-            camera["distortion_coeffs"] = vals
-            if (len(vals) != 0 and len(vals) != 1 and len(vals) != 4 and len(vals) != 5):
-                raise Exception("Expecting 0, 1, 4, or 5 distortion coefficients")
-
-            (vals, handle) = readConfigVals(handle, "distortion_type:", 1)
-            if len(camera["distortion_coeffs"]) == 0 and vals[0] != "no_distortion":
-                raise Exception("When there are no distortion coefficients, distortion type " + \
-                                "must be: no_distortion")
-            if len(camera["distortion_coeffs"]) == 1 and vals[0] != "fisheye":
-                raise Exception("When there is 1 distortion coefficient, distortion type " + \
-                                "must be: fisheye")
-            if ((len(camera["distortion_coeffs"]) == 4 or len(camera["distortion_coeffs"]) == 5)
-                and (vals[0] != "radtan")):
-                raise Exception("When there are 4 or 5 distortion coefficients, distortion " + \
-                                "type must be: radtan")
-            camera["distortion_type"] = vals[0]
-
-            (vals, handle) = readConfigVals(handle, "image_size:", 2)
-            camera["image_size"] = vals
-            
-            (vals, handle) = readConfigVals(handle, "undistorted_image_size:", 2)
-            camera["undistorted_image_size"] = vals
-
-            (vals, handle) = readConfigVals(handle, "ref_to_sensor_transform:", -1)
-            camera["ref_to_sensor_transform"] = vals
-            
-            (vals, handle) = readConfigVals(handle, "depth_to_image_transform:", -1)
-            camera["depth_to_image_transform"] = vals
-
-            (vals, handle) = readConfigVals(handle, "ref_to_sensor_timestamp_offset:", 1)
-            camera["ref_to_sensor_timestamp_offset"] = vals[0]
-
-            cameras.append(camera)
-
-    return cameras
-
-def imageExtension(images):
-    '''
-    Get the image extensions for all images. Check that there is only one.
-    '''
-    
-    extensions = set()
-    for image in images:
-        path, ext = os.path.splitext(image)
-        extensions.add(ext)
-    if len(extensions) > 1:
-        raise Exception("Input images have a mix of filename extensions. Use just one.")
-    if len(extensions) == 0:
-        raise Exception("The input image set is invalid.")
-    return list(extensions)[0]
-        
 def genTheiaCalibFile(rig_config, args):
 
     # Parse the images for all cameras
@@ -247,7 +98,7 @@ def genTheiaCalibFile(rig_config, args):
     for image_wildcard in args.images.split():
         sensor_name = os.path.basename(os.path.dirname(image_wildcard))
         images[sensor_name] = glob.glob(image_wildcard)
-        ext = imageExtension(images[sensor_name])
+        ext = rig_utils.imageExtension(images[sensor_name])
         extensions.add(ext)
         
     if len(extensions) > 1:
@@ -257,7 +108,7 @@ def genTheiaCalibFile(rig_config, args):
     extension = list(extensions)[0]
 
     print("Output directory: " + args.out_dir)    
-    mkdir_p(args.out_dir)
+    rig_utils.mkdir_p(args.out_dir)
 
     # Remove old images in sym_image_dir
     sym_image_dir = args.out_dir + "/images"
@@ -269,7 +120,7 @@ def genTheiaCalibFile(rig_config, args):
 
     # Theia likes all images in the same dir, so do it with sym links
     print("Creating sym links to the input images in: " + sym_image_dir)
-    mkdir_p(sym_image_dir)
+    rig_utils.mkdir_p(sym_image_dir)
     sym_images = {}
     for sensor_id in range(len(rig_config)):
         sensor_name = rig_config[sensor_id]['sensor_name']
@@ -373,7 +224,7 @@ if __name__ == "__main__":
 
     args = processArgs(sys.argv, base_dir)
 
-    rig_config = parseRigConfig(args.rig_config)
+    rig_config = rig_utils.parseRigConfig(args.rig_config)
 
     (calib_file, sym_image_dir, images, sym_images, image_extension) \
                  = genTheiaCalibFile(rig_config, args)
@@ -397,12 +248,12 @@ if __name__ == "__main__":
            sym_image_dir + "/*" + image_extension, "--calibration_file", calib_file,
            "--output_reconstruction", reconstruction_file, "--matching_working_directory",
            matching_dir, "--intrinsics_to_optimize", "NONE"]
-    run_cmd(cmd)
+    rig_utils.run_cmd(cmd)
     
     nvm_file = reconstruction_file + ".nvm"
     cmd = [base_dir + "/bin/export_to_nvm_file", "-input_reconstruction_file",
            reconstruction_file + "-0", "-output_nvm_file", nvm_file]
-    run_cmd(cmd)
+    rig_utils.run_cmd(cmd)
 
     final_nvm_file = args.out_dir + "/cameras.nvm"
     put_orig_images_in_nvm(nvm_file, final_nvm_file, images, sym_images)
