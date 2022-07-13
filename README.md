@@ -15,8 +15,7 @@ into a mesh, and [MVS
 Texturing](https://github.com/nmoehrle/mvs-texturing) for creation of
 textured meshes. Most of the original work in this package went
 towards the creation of the calibration logic and ensuring that all
-components work together to create high-fidelity results (this is
-still being worked on).
+components work together to create high-fidelity results.
 
 These tools are shipped as part of the [NASA Ames
 Stereo Pipeline](https://github.com/NeoGeographyToolkit/StereoPipeline/releases) (only with the Linux build for the moment).
