@@ -187,13 +187,15 @@ double inv_gamma(double x);
 // Apply the inverse gamma transform to images, multiply them by
 // max_iso_times_exposure/ISO/exposure_time to adjust for
 // lightning differences, then apply the gamma transform back.
-void exposureCorrection(double max_iso_times_exposure, double iso, double exposure, cv::Mat const& input_image,
+void exposureCorrection(double max_iso_times_exposure, double iso,
+                        double exposure, cv::Mat const& input_image,
                         cv::Mat& output_image);
 
 // Scale an image to correct for lightning variations by taking into
 // account that JPEG images have gamma correction applied to them.
 // See https://en.wikipedia.org/wiki/Gamma_correction.
-void scaleImage(double max_iso_times_exposure, double iso, double exposure, cv::Mat const& input_image,
+void scaleImage(double max_iso_times_exposure, double iso, double exposure,
+                cv::Mat const& input_image,
                 cv::Mat& output_image);
 
 // Given two bounds, pick two timestamps within these bounds, the one

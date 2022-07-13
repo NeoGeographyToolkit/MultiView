@@ -907,6 +907,9 @@ void writeRigConfig(std::string const& out_dir, bool model_rig, int ref_cam_type
     Eigen::Vector2i image_size = cam_params[cam_type].GetDistortedSize();
     f << "image_size: " << image_size[0] << ' ' << image_size[1] << "\n";
 
+    Eigen::Vector2i distorted_crop_size = cam_params[cam_type].GetDistortedCropSize();
+    f << "distorted_crop_size: " << distorted_crop_size[0] << ' ' << distorted_crop_size[1] << "\n";
+
     Eigen::Vector2i undist_size = cam_params[cam_type].GetUndistortedSize();
     f << "undistorted_image_size: " << undist_size[0] << ' ' << undist_size[1] << "\n";
 
@@ -1093,10 +1096,14 @@ void readRigConfig(std::string const& rig_config, bool have_rig_transforms, int 
       readConfigVals(f, "image_size:", 2, vals);
       Eigen::Vector2i image_size(vals[0], vals[1]);
 
+      readConfigVals(f, "distorted_crop_size:", 2, vals);
+      Eigen::Vector2i distorted_crop_size(vals[0], vals[1]);
+
       readConfigVals(f, "undistorted_image_size:", 2, vals);
       Eigen::Vector2i undistorted_image_size(vals[0], vals[1]);
 
       camera::CameraParameters params(image_size, focal_length, optical_center, distortion);
+      params.SetDistortedCropSize(distorted_crop_size);
       params.SetUndistortedSize(undistorted_image_size);
       cam_params.push_back(params);
 
