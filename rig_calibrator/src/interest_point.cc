@@ -597,7 +597,8 @@ void detectMatchFeatures(// Inputs
       std::string suffix = "";
       std::string match_file = matchFileName(match_dir, left_image, right_image, suffix);
 
-      std::cout << "Writing: " << match_file << std::endl;
+      std::cout << "Writing: " << left_image << " " << right_image << " "
+                << match_file << std::endl;
       dense_map::writeMatchFile(match_file, match_pair.first, match_pair.second);
     }
   }
