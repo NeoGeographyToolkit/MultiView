@@ -33,18 +33,22 @@
 namespace fs = boost::filesystem;
 
 /*
-  Undistort camera images. Taken from the Astrobee repo. Used to prepare
-  images for texrecon.
 
-  Provide distorted images, and lists of distorted and to-be-produced
-  undistorted images. Usage:
+Undistort camera images. Taken from the Astrobee repo. Used to prepare
+images for texrecon.
 
-  undistort_image_texrecon \
-    --image_list texrecon_out/sci_cam/distorted_index.txt \
+Provide distorted images, and lists of distorted and to-be-produced
+undistorted images.
+
+Usage:
+
+  undistort_image_texrecon                                   \
+    --image_list texrecon_out/sci_cam/distorted_index.txt    \
     --output_list texrecon_out/sci_cam/undistorted_index.txt \
     --rig_config rig_input/rig_config.txt                    \
-    --undistorted_crop_win '1250 1000' \
+    --undistorted_crop_win '1250 1000'                       \
     --rig_sensor sci_cam
+
 */
 
 DEFINE_string(image_list, "", "A file having the list of images to undistort, one per line. "
@@ -328,9 +332,20 @@ int main(int argc, char ** argv) {
       #endif
       undist_image = bgr_image;
     }
-    cv::imwrite(undist_file, undist_image);
-  }
 
+    cv::Mat gray_image;
+    if (!FLAGS_save_bgr && undist_image.channels() > 1) {
+      #if (CV_VERSION_MAJOR >= 4)
+        cvtColor(undist_image, gray_image, cv::COLOR_BGR2GRAY);
+      #else
+        cvtColor(undist_image, gray_image, CV_BGR2GRAY);
+      #endif
+      undist_image = gray_image;
+    }
+
+    cv::imwrite(undist_file, undist_image);
+  } // end iterating over images
+  
   // Write some very useful info
   std::cout << "Distorted image size:       " << dist_size.transpose()      << "\n";
   std::cout << "Undistorted image size:     " << undist_size.transpose()    << "\n";
