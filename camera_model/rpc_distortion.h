@@ -63,6 +63,8 @@ class RPCLensDistortion {
 
   void scale(double scale);
 
+  bool set_can_undistort(bool flag) { m_can_undistort = flag; }
+  
   bool can_undistort() const { return m_can_undistort; }
   static void init_as_identity(Eigen::VectorXd & params);
   static void increment_degree(Eigen::VectorXd & params);
@@ -76,23 +78,20 @@ class RPCLensDistortion {
   
 };
 
-void fitRpcDist(int rpc_degree, int num_samples, int num_exclude_boundary_pixels,
-                camera::CameraParameters const& cam_params,
+void fitRpcDist(int rpc_degree, int num_samples, camera::CameraParameters const& cam_params,
                 int num_opt_threads, int num_iterations, double parameter_tolerance,
                 bool verbose,
                 // Output
                 Eigen::VectorXd & rpc_dist_coeffs);
 
 void fitRpcUndist(Eigen::VectorXd const & rpc_dist_coeffs,
-                  int num_samples, int num_exclude_boundary_pixels,
-                  camera::CameraParameters const& cam_params,
+                  int num_samples, camera::CameraParameters const& cam_params,
                   int num_opt_threads, int num_iterations, double parameter_tolerance,
                   bool verbose,
                   // output
                   Eigen::VectorXd & rpc_undist_coeffs);
 
-void evalRpcDistUndist(int num_samples, int num_exclude_boundary_pixels,
-                       camera::CameraParameters const& cam_params,
+void evalRpcDistUndist(int num_samples, camera::CameraParameters const& cam_params,
                        RPCLensDistortion const& rpc);
   
 }

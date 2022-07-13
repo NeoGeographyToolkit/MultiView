@@ -39,6 +39,7 @@ camera::CameraParameters::CameraParameters(Eigen::Vector2i const& image_size,
     Eigen::Vector2d const& optical_center,
     Eigen::VectorXd const& distortion) {
   SetDistortedSize(image_size);
+  SetDistortedCropSize(image_size);
   SetUndistortedSize(image_size);
   focal_length_ = focal_length;
   optical_offset_ = optical_center;
@@ -70,6 +71,7 @@ camera::CameraParameters::CameraParameters(std::string const& calibration_file,
     fs["image_height"]  >> size[1];
   }
   SetDistortedSize(size);
+  SetDistortedCropSize(size);
 
   // Read in focal length and optical offset
   fs["intrinsic_matrix"] >> cam_mat;
@@ -102,65 +104,9 @@ camera::CameraParameters::CameraParameters(std::string const& calibration_file,
   crop_offset_ = size;
 }
 
-// camera::CameraParameters::CameraParameters(config_reader::ConfigReader* config, const char* name) {
-//   cv::Mat cam_mat(3, 3, CV_64F);
-//   Eigen::Vector2i size;
-
-//   config_reader::ConfigReader::Table camera(config, name);
-//   // Read in distorted image size.
-//   if (!camera.GetInt("width", &size[0]))
-//     fprintf(stderr, "Could not read camera width.");
-//   if (!camera.GetInt("height", &size[1]))
-//     fprintf(stderr, "Could not read camera height.");
-//   SetDistortedSize(size);
-
-//   config_reader::ConfigReader::Table vector(&camera, "intrinsic_matrix");
-//   for (int i = 0; i < 9; i++) {
-//     if (!vector.GetReal((i + 1), &cam_mat.at<double>(i / 3, i % 3))) {
-//       fprintf(stderr, "Failed to read vector intrinsic_matrix.");
-//       break;
-//     }
-//   }
-//   // Read in focal length and optical offset
-//   optical_offset_ << cam_mat.at<double>(0, 2), cam_mat.at<double>(1, 2);
-//   focal_length_ << cam_mat.at<double>(0, 0), cam_mat.at<double>(1, 1);
-
-//   // Read in the distortion coefficients. It can be a number or a list.
-//   Eigen::VectorXd buffer(1);
-//   std::string dist_name = "distortion_coeff";
-//   if (camera.IsNumber(dist_name.c_str())) {
-//     if (!camera.GetReal(dist_name.c_str(), &buffer[0]))
-//       fprintf(stderr, "Could not read camera distortion_coeff.");
-//   } else {
-//     config_reader::ConfigReader::Table dist(&camera, dist_name.c_str());
-//     buffer.resize(dist.GetSize());
-//     for (int i = 0; i < dist.GetSize(); i++) {
-//       if (!dist.GetReal(i + 1, &buffer[i]))
-//         fprintf(stderr, "Could not read camera distortion_coeff.");
-//     }
-//   }
-
-//   SetDistortion(buffer);
-
-//   if (!camera.GetInt("undistorted_width", &size[0]))
-//     fprintf(stderr, "Could not read camera undistorted_width.");
-//   if (!camera.GetInt("undistorted_height", &size[1]))
-//     fprintf(stderr, "Could not read camera undistorted_height.");
-//   SetUndistortedSize(size);
-
-//   // right now all our crops are zero
-//   // ff_common::ConfigReader::Table crop_table(&camera, "crop");
-//   // // Read in crop offset
-//   // if (!crop_table.GetInt("x", &size[0]))
-//   //   size[0] = 0;
-//   // if (!crop_table.GetInt("y", &size[1]))
-//   //   size[1] = 0;
-//   // crop_offset_ = size;
-// }
-
 void camera::CameraParameters::SetDistortedSize(Eigen::Vector2i const& image_size) {
   distorted_image_size_ = image_size;
-  distorted_half_size_ = image_size.cast<double>() / 2;
+  distorted_half_size_ = image_size.cast<double>() / 2.0;
 }
 
 const Eigen::Vector2i& camera::CameraParameters::GetDistortedSize() const {
@@ -171,9 +117,17 @@ const Eigen::Vector2d& camera::CameraParameters::GetDistortedHalfSize() const {
   return distorted_half_size_;
 }
 
+void camera::CameraParameters::SetDistortedCropSize(Eigen::Vector2i const& crop_size) {
+  distorted_crop_size_ = crop_size;
+}
+
+const Eigen::Vector2i& camera::CameraParameters::GetDistortedCropSize() const {
+  return distorted_crop_size_;
+}
+
 void camera::CameraParameters::SetUndistortedSize(Eigen::Vector2i const& image_size) {
   undistorted_image_size_ = image_size;
-  undistorted_half_size_ = image_size.cast<double>() / 2;
+  undistorted_half_size_ = image_size.cast<double>() / 2.0;
 }
 
 const Eigen::Vector2i& camera::CameraParameters::GetUndistortedSize() const {
@@ -214,7 +168,8 @@ const Eigen::Vector2d& camera::CameraParameters::GetFocalVector() const {
 
 void camera::CameraParameters::SetDistortion(Eigen::VectorXd const& distortion) {
 
-  m_rpc = dense_map::RPCLensDistortion(); // reset this
+  // Reset this. Will be needed only with RPC distortion.
+  m_rpc = dense_map::RPCLensDistortion(); 
   
   distortion_coeffs_ = distortion;
 
@@ -253,17 +208,22 @@ void camera::CameraParameters::SetDistortion(Eigen::VectorXd const& distortion) 
 }
 
 // This must be called before a model having RPC distortion can be used
-// for undistortion
-// TODO(oalexan1): The model must know its num_exclude_boundary_pixels
-void camera::CameraParameters::updateRpcUndistortion(int num_exclude_boundary_pixels) {
-  int num_samples = 500; // in each of rows and columns; should be enough
-  int num_threads = 1; // this will be quick, 1 thread is enough
+// for undistortion. Here it is assumed that the distortion component
+// of distortion_coeffs_ is up-to-date, and its undistortion component
+// must be updated.
+void camera::CameraParameters::updateRpcUndistortion(int num_threads) {
+  int num_samples = 400; // in each of rows and columns; should be enough
   bool verbose = false;
   int num_iterations = 100; // should be plenty
   double parameter_tolerance = 1e-12; // should be enough
 
-  if (distortion_coeffs_.size() %2 != 0) 
-    LOG(FATAL) << "Must have an even size for distortion_coeffs_ to process RPC.\n";
+  std::cout << "Finding RPC undistortion. Using " << num_samples
+            << " samples in width and height, "
+            << num_iterations << " iterations, and "
+            << num_threads << " threads." << std::endl;
+  
+  if (distortion_coeffs_.size() % 2 != 0) 
+    LOG(FATAL) << "Must have an even number of RPC distortion coefficients.\n";
 
   // distortion_coeffs_ stores both distortion and undistortion rpc coeffs. Get
   // the distortion ones, and update the undistortion ones.
@@ -275,9 +235,8 @@ void camera::CameraParameters::updateRpcUndistortion(int num_exclude_boundary_pi
     rpc_dist_coeffs[it] = distortion_coeffs_[it];
 
   Eigen::VectorXd rpc_undist_coeffs;
-  dense_map::fitRpcUndist(rpc_dist_coeffs,
-                          num_samples,
-                          num_exclude_boundary_pixels, *this,
+  dense_map::fitRpcUndist(rpc_dist_coeffs, num_samples,
+                          *this,
                           num_threads, num_iterations,
                           parameter_tolerance,
                           verbose,
@@ -287,8 +246,7 @@ void camera::CameraParameters::updateRpcUndistortion(int num_exclude_boundary_pi
   dense_map::RPCLensDistortion rpc;
   rpc.set_distortion_parameters(rpc_dist_coeffs);
   rpc.set_undistortion_parameters(rpc_undist_coeffs);
-  dense_map::evalRpcDistUndist(num_samples, num_exclude_boundary_pixels,  
-                               *this, rpc);
+  dense_map::evalRpcDistUndist(num_samples, *this, rpc);
 
   // Copy back the updated values
   for (int it = 0; it < num_dist; it++)

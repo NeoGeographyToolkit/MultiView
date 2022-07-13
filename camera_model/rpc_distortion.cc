@@ -496,16 +496,14 @@ struct BBox {
 // only the distorted pixels within image domain, and as far from image
 // boundary as desired.
 // Note that: dist_pix - dist_half_size = distortion_function(undist_pix - undist_size/2)
-void genUndistDistPairs(int num_samples, int num_exclude_boundary_pixels,
-                        camera::CameraParameters const& cam_params,
+void genUndistDistPairs(int num_samples, camera::CameraParameters const& cam_params,
                         std::vector<Eigen::Vector2d>& undist_centered_pixels,
                         std::vector<Eigen::Vector2d>& dist_centered_pixels) {
   undist_centered_pixels.clear();
   dist_centered_pixels.clear();
 
-  std::cout << "--temporary box!" << std::endl;
-  
   Eigen::Vector2i dist_size        = cam_params.GetDistortedSize();
+  Eigen::Vector2i dist_crop_size   = cam_params.GetDistortedCropSize();
   Eigen::Vector2i undist_size      = cam_params.GetUndistortedSize();
   Eigen::Vector2d dist_half_size   = cam_params.GetDistortedHalfSize();
   Eigen::Vector2d undist_half_size = cam_params.GetUndistortedHalfSize();
@@ -521,24 +519,17 @@ void genUndistDistPairs(int num_samples, int num_exclude_boundary_pixels,
       // Generate an undistorted/distorted point pair using the input model.
       Eigen::Vector2d undist_pix(x, y);
 
-      if (std::abs(undist_pix[0] - undist_half_size[0]) > 430  || 
-          std::abs(undist_pix[1] - undist_half_size[1]) > 270)
-        continue; 
-      
       Eigen::Vector2d dist_pix;
-      cam_params.Convert<camera::UNDISTORTED,  camera::DISTORTED>
+      cam_params.Convert<camera::UNDISTORTED, camera::DISTORTED>
         (undist_pix, &dist_pix);
 
-      int excl = num_exclude_boundary_pixels;
-
-      if (std::abs(dist_pix[0] - dist_half_size[0]) > 340  || 
-          std::abs(dist_pix[1] - dist_half_size[1]) > 160)
-          continue; 
+      // Exclude points based on dist_crop_size. 
+      // Note that if dist_crop_size equals dist_size, which is image
+      // size, no points are excluded.
+      if (std::abs(dist_pix[0] - dist_size[0] / 2.0) > dist_crop_size[0] / 2.0  ||
+          std::abs(dist_pix[1] - dist_size[1] / 2.0) > dist_crop_size[1] / 2.0) 
+        continue;
       
-//       if (dist_pix[0] < excl || dist_pix[0] > dist_size[0] - 1 - excl ||
-//           dist_pix[1] < excl || dist_pix[1] > dist_size[1] - 1 - excl)
-//         continue;
-
       // Ensure that these pixels are centered. Here we use the same
       // convention as in camera_params.cc.
       undist_pix -= undist_half_size;
@@ -549,6 +540,7 @@ void genUndistDistPairs(int num_samples, int num_exclude_boundary_pixels,
     }
   }
 
+  // Determine the bounding boxes of the obtained sets of pixels.
   BBox undist, dist;
   for (size_t it = 0; it < undist_centered_pixels.size(); it++) {
     undist.grow(undist_centered_pixels[it]);
@@ -621,15 +613,14 @@ void fitCurrDegRPC(std::vector<Eigen::Vector2d> const& undist_centered_pixels,
   evalResiduals("after opt", residual_names, problem, residuals);
 }
 
-void fitRpcDist(int rpc_degree, int num_samples, int num_exclude_boundary_pixels,
-                camera::CameraParameters const& cam_params,
+void fitRpcDist(int rpc_degree, int num_samples, camera::CameraParameters const& cam_params,
                 int num_opt_threads, int num_iterations, double parameter_tolerance,
                 bool verbose,
                 // Output
                 Eigen::VectorXd & rpc_dist_coeffs) {
 
   std::vector<Eigen::Vector2d> undist_centered_pixels, dist_centered_pixels;
-  genUndistDistPairs(num_samples, num_exclude_boundary_pixels, cam_params,
+  genUndistDistPairs(num_samples, cam_params,
                      // Outputs
                      undist_centered_pixels, dist_centered_pixels);
 
@@ -659,17 +650,13 @@ void fitRpcDist(int rpc_degree, int num_samples, int num_exclude_boundary_pixels
 }
 
 void fitRpcUndist(Eigen::VectorXd const & rpc_dist_coeffs,
-                  int num_samples, int num_exclude_boundary_pixels,
-                  camera::CameraParameters const& cam_params,
+                  int num_samples, camera::CameraParameters const& cam_params,
                   int num_opt_threads, int num_iterations, double parameter_tolerance,
                   bool verbose,
                   // output
                   Eigen::VectorXd & rpc_undist_coeffs) {
 
   int rpc_deg = rpc_degree(rpc_dist_coeffs.size());
-
-  // TODO(oalexan1): This is fishy, since it still uses the old
-  // distortion models.
 
   // Also, samples are from all over the undist
   // region. Need to find a good value for that one.
@@ -681,7 +668,7 @@ void fitRpcUndist(Eigen::VectorXd const & rpc_dist_coeffs,
   // which can do undistortion. Ideally,
   // undistort_rpc(distort_rpc(pix)) = pix.
   std::vector<Eigen::Vector2d> undist_centered_pixels, dist_centered_pixels;
-  genUndistDistPairs(num_samples, num_exclude_boundary_pixels, cam_params,
+  genUndistDistPairs(num_samples, cam_params,
                      // Outputs
                      undist_centered_pixels, dist_centered_pixels);
 
@@ -723,12 +710,11 @@ void fitRpcUndist(Eigen::VectorXd const & rpc_dist_coeffs,
 
 }
 
-void evalRpcDistUndist(int num_samples, int num_exclude_boundary_pixels,
-                       camera::CameraParameters const& cam_params,
+void evalRpcDistUndist(int num_samples, camera::CameraParameters const& cam_params,
                        RPCLensDistortion const& rpc) {
 
   std::vector<Eigen::Vector2d> undist_centered_pixels, dist_centered_pixels;
-  genUndistDistPairs(num_samples, num_exclude_boundary_pixels, cam_params,
+  genUndistDistPairs(num_samples, cam_params,
                      // Outputs
                      undist_centered_pixels, dist_centered_pixels);
 

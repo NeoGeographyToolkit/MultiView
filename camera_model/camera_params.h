@@ -93,6 +93,11 @@ namespace camera {
     const Eigen::Vector2i& GetDistortedSize() const;
     const Eigen::Vector2d& GetDistortedHalfSize() const;
 
+    // Domain of validity of distortion model (normally all image)
+    // Centered around image center.
+    void SetDistortedCropSize(Eigen::Vector2i const& crop_size);
+    const Eigen::Vector2i& GetDistortedCropSize() const;
+
     //   These apply to UNDISTORTED, UNDISTORTED_C
     void SetUndistortedSize(Eigen::Vector2i const& image_size);
     const Eigen::Vector2i& GetUndistortedSize() const;
@@ -121,12 +126,17 @@ namespace camera {
 
     dense_map::RPCLensDistortion m_rpc;
 
-    void updateRpcUndistortion(int num_exclude_boundary_pixels);
+    // This must be called before a model having RPC distortion can be used
+    // for undistortion. Here it is assumed that the distortion component
+    // of distortion_coeffs_ is up-to-date, and its undistortion component
+    // must be updated.
+    void updateRpcUndistortion(int num_threads);
     
     // Comparison operator
     friend bool operator== (CameraParameters const& A, CameraParameters const& B) {
       return (A.crop_offset_            == B.crop_offset_            &&
               A.distorted_image_size_   == B.distorted_image_size_   &&
+              A.distorted_crop_size_    == B.distorted_crop_size_   &&
               A.undistorted_image_size_ == B.undistorted_image_size_ &&
               A.distorted_half_size_    == B.distorted_half_size_    &&
               A.focal_length_           == B.focal_length_           &&
@@ -147,8 +157,11 @@ namespace camera {
 
     // Members
     Eigen::Vector2i
-      crop_offset_,             // Start of DISTORTED in RAW frame
+       crop_offset_,             // Start of DISTORTED in RAW frame
       distorted_image_size_,    // Applies to DISTORTED, DISTORTED_C
+      // Domain of validity of distortion model (normally all image).
+      // Centered at the image center.
+      distorted_crop_size_,     
       undistorted_image_size_;  // Applies to UNDISTORTED, UNDISTORTED_C,
                                 // this is bigger than distorted image size
                                 // because we need to expand the sensor to
