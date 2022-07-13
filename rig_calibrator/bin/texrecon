@@ -279,7 +279,7 @@ def create_texrecon_cameras(undistorted_images, world_to_cam, nf, d0, d1, paspec
 def run_texrecon(base_dir, undist_dir, mesh, texture_dir):
 
     # That is one long path
-    texrecon_path = base_dir + "/bin/texrecon"
+    texrecon_path = base_dir + "/bin/texrecon_bin"
     if not os.path.exists(texrecon_path):
         raise Exception("Cannot find: " + texrecon_path)
     
