@@ -22,7 +22,7 @@
 Prepare for and then run stereo on many image pairs, and produce a fuse mesh.
 """
 
-import argparse, os, re, shutil, subprocess, sys, glob
+import argparse, os, re, shutil, subprocess, sys, glob, shlex
 import numpy as np
 
 # Find and import rig_utils.py
@@ -53,6 +53,17 @@ def process_args(args):
                         default="", help="The directory where to write the textured mesh " + \
                         "and other data.")
     
+    parser.add_argument("--parallel_stereo_options", dest="parallel_stereo_options",
+                        default="", help="Options to pass to parallel_stereo. Use double " + \
+                        "quotes around the full list and simple quotes if needed by an "   + \
+                        "individual option, or vice-versa.")
+    
+    parser.add_argument("--pc_filter_options", dest="pc_filter_options",
+                        default="", help="Options to pass to pc_filter.")
+
+    parser.add_argument("--voxblox_options", dest="voxblox_options",
+                        default="", help="Options to pass to voxblox.")
+    
     # Note how the percent sign below is escaped, by writing: %%
     parser.add_argument("--undistorted_crop_win", dest="undistorted_crop_win", default = "",
                         help = "The dimensions of the central image region to keep after "   + \
@@ -61,9 +72,22 @@ def process_args(args):
                         "This would need revisiting. Suggested the Astrobee images: "        + \
                         "sci_cam: '1250 1000' nav_cam: '1100 776'. haz_cam: '250 200'.")
     
+    parser.add_argument("--first_step",  dest="first_step", default="stereo",
+                        help  = "Let the first step run by this tool be one of: " + \
+                        "'stereo', 'pc_filter', or 'mesh_gen'. " + \
+                        "This allows resuming a run at a desired step. " + \
+                        "The stereo subdirectories are deleted before that step takes place.")
+
+    parser.add_argument("--last_step",  dest="last_step", default="mesh_gen",
+                        help  = "The last step run by this tool. See ``--first_step`` " + \
+                        "for allowed values.")
+    
     args = parser.parse_args()
 
     return args
+
+# Assign to each step a number, given the order in which they should be done
+step_dict = {"stereo": 0, "pc_filter": 1, "mesh_gen": 2}
 
 def sanity_checks(args):
 
@@ -81,25 +105,14 @@ def sanity_checks(args):
 
     if args.undistorted_crop_win == "":
         raise Exception("The undistorted crop win was not specified.")
-    
-if __name__ == "__main__":
 
-    args = process_args(sys.argv)
-    sanity_checks(args)
-    rig_utils.mkdir_p(args.out_dir)
+    for step in [args.first_step, args.last_step]:
+        if step not in step_dict:
+            raise Exception("Invalid values specified for --first_step or --last_step.")
 
-    # Read the images and camera poses
-    (images, world_to_cam) \
-             = rig_utils.parse_images_and_camera_poses(args.camera_poses, args.rig_sensor)
+def write_asp_and_voxblox_cameras(undist_intrinsics_file, distorted_images, undistorted_images,
+                                  world_to_cam):
 
-    # Write undistorted images
-    base_dir = os.path.dirname(os.path.dirname(os.path.abspath(sys.argv[0])))
-    extension = '.tif' # use lossless .tif extension for undistorted images
-    extra_opts = []
-    (undist_intrinsics_file, undistorted_images, undist_dir) \
-                        = rig_utils.undistort_images(args, images, base_dir, extension, extra_opts)
-
-    # Write camera poses in the format of ASP and voxblox
     (widx, widy, f, cx, cy) = rig_utils.read_intrinsics(undist_intrinsics_file)
     undist_image_dict = {}
     for image in undistorted_images:
@@ -108,8 +121,12 @@ if __name__ == "__main__":
         base = os.path.splitext(base)[0]
         undist_image_dict[base] = image
 
+    # Collect the undistorted images for which camera info is present
+    undistorted_images_out = []
+    cameras = []
+    cam_to_world_files = []
     count = 0
-    for dist_image in images:
+    for dist_image in distorted_images:
 
         base = os.path.basename(dist_image)
         base = os.path.splitext(base)[0]
@@ -125,9 +142,84 @@ if __name__ == "__main__":
         # For use with voxblox later
         cam_to_world_file = os.path.splitext(undist_image)[0] + "_cam2world.txt"
         rig_utils.write_cam_to_world_matrix(cam_to_world_file, cam_to_world)
+
+        undistorted_images_out.append(undist_image)
+        cameras.append(tsai_file)
+        cam_to_world_files.append(cam_to_world_file)
         
         count = count + 1
-
+        
     print("Found " + str(len(undistorted_images)) + " undistorted images.")
     print("Wrote: " + str(count) + " cameras.")
+
+    return (undistorted_images_out, cameras, cam_to_world_files)
+
+def run_stereo(left_image, right_image, left_cam, right_cam, cam_to_world, args, tools_base_dir):
+
+    out_dir =  args.out_dir + "/" + args.rig_sensor
+
+    left_prefix = os.path.basename(os.path.basename(left_image))
+    left_prefix, ext = os.path.splitext(left_prefix)
+
+    right_prefix = os.path.basename(os.path.basename(right_image))
+    right_prefix, ext = os.path.splitext(right_prefix)
+
+    stereo_dir = out_dir + "/stereo/" + left_prefix + "_" + right_prefix
+    stereo_prefix = stereo_dir + "/run"
+    if os.path.isdir(stereo_dir):
+        # Wipe the existing directory
+        print("Removing recursively old directory: " + stereo_dir)
+        shutil.rmtree(stereo_dir)
+
+    # Split on spaces but keep quoted parts together
+    parallel_stereo_options = shlex.split(args.parallel_stereo_options) 
+
+    cmd = [tools_base_dir + "/bin/parallel_stereo"] + \
+          parallel_stereo_options + \
+          [left_image, right_image, left_cam, right_cam, stereo_prefix]
+
+    # Allow this to fail, as perhaps not all stereo pairs are good
+    rig_utils.run_cmd(cmd, quit_on_failure = False)
+           
+if __name__ == "__main__":
+
+    args = process_args(sys.argv)
+    sanity_checks(args)
+    rig_utils.mkdir_p(args.out_dir)
+
+    # Read the images and camera poses
+    (distorted_images, world_to_cam) \
+             = rig_utils.parse_images_and_camera_poses(args.camera_poses, args.rig_sensor)
+
+    # Write undistorted images
+    tools_base_dir = os.path.dirname(os.path.dirname(os.path.abspath(sys.argv[0])))
+    extension = '.tif' # use lossless .tif extension for undistorted images
+    extra_opts = []
+    (undist_intrinsics_file, undistorted_images, undist_dir) \
+                        = rig_utils.undistort_images(args, distorted_images,
+                                                     tools_base_dir, extension, extra_opts)
+
+    # Write camera poses in the format of ASP and voxblox
+    (undistorted_images, cameras, cam_to_world_files) \
+                         = write_asp_and_voxblox_cameras(undist_intrinsics_file,
+                                                         distorted_images, undistorted_images,
+                                                         world_to_cam)
+
+    print("--first step, ", step_dict[args.first_step])
+    print("--last step, ", step_dict[args.last_step])
+    
+    # Run stereo on each pair
+    # TODO(oalexan1): This must be parallelized like done for icebridge
+    if step_dict[args.first_step] <= 0 and step_dict[args.last_step] >= 0:
+        for t in range(len(undistorted_images) - 1):
+            run_stereo(undistorted_images[t], undistorted_images[t + 1],
+                       cameras[t], cameras[t + 1],
+                       cam_to_world_files[t], args, tools_base_dir)
+
+    if step_dict[args.first_step] <= 1 and step_dict[args.last_step] >= 1:
+        print("--will do fltr!")
+        
+        
+    voxblox_index =  args.out_dir + "/" + args.rig_sensor + "/voxblox_index.txt"
+    print("will write index: " + voxblox_index)
 

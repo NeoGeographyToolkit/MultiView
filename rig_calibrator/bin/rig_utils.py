@@ -3,6 +3,10 @@
 import sys, os, re, subprocess, shutil, subprocess, glob
 import numpy as np
 
+if sys.version_info < (3, 0, 0):
+    print('\nERROR: Must use Python 3.0 or greater.')
+    sys.exit(1)
+
 def mkdir_p(path):
     if path == "":
         return  # this can happen when path is os.path.dirname("myfile.txt")
@@ -34,19 +38,46 @@ def which(program):
 
     return None
 
+def add_missing_quotes(vals):
+    """
+    Given a list of strings, protect each one having spaces with quotes, if not present.
+    """
 
-def run_cmd(cmd):
+    out_vals = []
+    for val in vals:
+        if (' ' in val or '\t' in val) and (val[0] != '\'' and val[0] != '"'):
+            val = '\'' + val + '\''
+        out_vals.append(val)
+    return out_vals
+        
+def run_cmd(cmd, quit_on_failure = True):
     """
-    Run a command.
+    Run a command. Print the output in real time.
     """
-    # TODO(oalexan1): Should the "system" command be used instead?
-    # Then it will print the output of each command.
-    print(" ".join(cmd) + "\n")
-    process = subprocess.Popen(cmd, stdout=subprocess.PIPE)
-    process.wait()
-    if process.returncode != 0:
+
+    # This is a bugfix for not printing quotes around strings with spaces
+    fmt_cmd = add_missing_quotes(cmd)
+    print(" ".join(fmt_cmd))
+    
+    p = subprocess.Popen(cmd, stdout=subprocess.PIPE, stderr=subprocess.PIPE,
+                         universal_newlines=True)
+
+    # Print the standard output in real time
+    status = 0
+    while True:
+        out = p.stdout.readline()
+        status = p.poll()
+        if not out:
+            break # finished the run
+
+        # Print the line but wipe the extra whitespace
+        print(out.rstrip())
+
+    if status != 0 and quit_on_failure:
         print("Failed execution of: " + " ".join(cmd))
         sys.exit(1)
+
+    return status
 
 def readConfigVals(handle, tag, num_vals):
     """
@@ -210,7 +241,7 @@ def parse_images_and_camera_poses(image_list, rig_sensor):
         
     return (images, world_to_cam)
 
-def undistort_images(args, images, base_dir, extension, extra_opts):
+def undistort_images(args, images, tools_base_dir, extension, extra_opts):
 
     # Form the list of distorted images
     dist_image_list = args.out_dir + "/" + args.rig_sensor + "/distorted_index.txt"
@@ -223,7 +254,7 @@ def undistort_images(args, images, base_dir, extension, extra_opts):
             f.write(image + "\n")
 
     # Form the list of unundistorted images
-    undist_dir = args.out_dir + "/" + args.rig_sensor + "/undistorted_images"
+    undist_dir = args.out_dir + "/" + args.rig_sensor + "/undistorted"
 
     if os.path.isdir(undist_dir):
         # Wipe the existing directory, as it may have stray files
@@ -245,7 +276,7 @@ def undistort_images(args, images, base_dir, extension, extra_opts):
             f.write(image + "\n")
 
     undist_intrinsics = undist_dir + "/undistorted_intrinsics.txt"
-    cmd = [base_dir + "/bin/undistort_image_texrecon",
+    cmd = [tools_base_dir + "/bin/undistort_image_texrecon",
            "--image_list", dist_image_list,
            "--output_list", undist_image_list,
            "--rig_config", args.rig_config,

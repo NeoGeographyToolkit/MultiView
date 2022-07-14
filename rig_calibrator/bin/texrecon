@@ -129,10 +129,10 @@ def create_texrecon_cameras(undistorted_images, world_to_cam, nf, d0, d1, paspec
             g.write("%0.17g %0.17g %0.17g %0.17g %0.17g %0.17g\n"
                 % (nf, d0, d1, paspect, ncx, ncy))
     
-def run_texrecon(base_dir, undist_dir, mesh, texture_dir):
+def run_texrecon(tools_base_dir, undist_dir, mesh, texture_dir):
 
     # That is one long path
-    texrecon_path = base_dir + "/bin/texrecon_bin"
+    texrecon_path = tools_base_dir + "/bin/texrecon_bin"
     if not os.path.exists(texrecon_path):
         raise Exception("Cannot find: " + texrecon_path)
     
@@ -164,16 +164,17 @@ if __name__ == "__main__":
     (images, world_to_cam) \
              = rig_utils.parse_images_and_camera_poses(args.image_list, args.rig_sensor)
     
-    base_dir = os.path.dirname(os.path.dirname(os.path.abspath(sys.argv[0])))
+    tools_base_dir = os.path.dirname(os.path.dirname(os.path.abspath(sys.argv[0])))
     extension = '.jpg' # extension of undistorted images, as preferred by texrecon
     extra_opts = ["--save_bgr"] # create color images
     (undist_intrinsics_file, undistorted_images, undist_dir) \
-                        = rig_utils.undistort_images(args, images, base_dir, extension, extra_opts)
+                        = rig_utils.undistort_images(args, images, tools_base_dir,
+                                                     extension, extra_opts)
 
     (nf, d0, d1, paspect, ncx, ncy) = convert_intrinsics_to_texrecon(undist_intrinsics_file)
 
     create_texrecon_cameras(undistorted_images, world_to_cam, nf, d0, d1, paspect, ncx, ncy)
 
     texture_dir = args.out_dir + "/" + args.rig_sensor + "/texture"
-    run_texrecon(base_dir, undist_dir, args.mesh, texture_dir)
+    run_texrecon(tools_base_dir, undist_dir, args.mesh, texture_dir)
 
