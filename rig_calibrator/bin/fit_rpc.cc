@@ -17,6 +17,9 @@
  * under the License.
  */
 
+// TODO(oalexan1): Do not use -out_dir. Use -out_config.
+// TODO(oalexan1): Print an underestimate and overestimate for the undistorted win.
+
 #include <ceres/ceres.h>
 #include <ceres/rotation.h>
 #include <ceres/problem.h>
@@ -51,9 +54,6 @@
 
 namespace fs = boost::filesystem;
 
-DEFINE_int32(num_exclude_boundary_pixels, 0,
-             "Exclude this many pixels from image boundary when fitting a distortion model.");
-
 DEFINE_int32(rpc_degree, -1,
              "The degree of the RPC model to fit.");
 
@@ -87,9 +87,6 @@ int main(int argc, char** argv) {
   if (FLAGS_out_dir.empty())
     LOG(FATAL) << "Output camera config directory was not specified.";
 
-  if (FLAGS_num_exclude_boundary_pixels < 0)
-    LOG(FATAL) << "The number of boundary pixels to exclude cannot be negative.\n";
-  
   if (FLAGS_rpc_degree <= 0)
     LOG(FATAL) << "The RPC degree must be positive.";
 
@@ -111,7 +108,7 @@ int main(int argc, char** argv) {
 
   Eigen::VectorXd rpc_dist_coeffs;
   dense_map::fitRpcDist(FLAGS_rpc_degree, FLAGS_num_samples,
-                        FLAGS_num_exclude_boundary_pixels, cam_params[0],
+                        cam_params[0],
                         FLAGS_num_opt_threads, FLAGS_num_iterations,
                         FLAGS_parameter_tolerance,
                         FLAGS_verbose,
@@ -121,7 +118,7 @@ int main(int argc, char** argv) {
   Eigen::VectorXd rpc_undist_coeffs;
   dense_map::fitRpcUndist(rpc_dist_coeffs,
                           FLAGS_num_samples,
-                          FLAGS_num_exclude_boundary_pixels, cam_params[0],
+                          cam_params[0],
                           FLAGS_num_opt_threads, FLAGS_num_iterations,
                           FLAGS_parameter_tolerance,
                           FLAGS_verbose,
@@ -132,8 +129,7 @@ int main(int argc, char** argv) {
   rpc.set_distortion_parameters(rpc_dist_coeffs);
   rpc.set_undistortion_parameters(rpc_undist_coeffs);
 
-  dense_map::evalRpcDistUndist(FLAGS_num_samples, FLAGS_num_exclude_boundary_pixels,  
-                       cam_params[0], rpc);
+  dense_map::evalRpcDistUndist(FLAGS_num_samples, cam_params[0], rpc);
 
   // Create the model with RPC distortion. Note how we pass both the distortion
   // and undistortion RPC coefficients.
