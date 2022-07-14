@@ -241,7 +241,7 @@ def parse_images_and_camera_poses(image_list, rig_sensor):
         
     return (images, world_to_cam)
 
-def undistort_images(args, images, tools_base_dir, extension, extra_opts):
+def undistort_images(args, images, tools_base_dir, extension, extra_opts, suff):
 
     # Form the list of distorted images
     dist_image_list = args.out_dir + "/" + args.rig_sensor + "/distorted_index.txt"
@@ -254,14 +254,14 @@ def undistort_images(args, images, tools_base_dir, extension, extra_opts):
             f.write(image + "\n")
 
     # Form the list of unundistorted images
-    undist_dir = args.out_dir + "/" + args.rig_sensor + "/undistorted"
+    undist_dir = args.out_dir + "/" + args.rig_sensor + "/undistorted" + suff
 
     if os.path.isdir(undist_dir):
         # Wipe the existing directory, as it may have stray files
         print("Removing recursively old directory: " + undist_dir)
         shutil.rmtree(undist_dir)
     
-    undist_image_list = args.out_dir + "/" + args.rig_sensor + "/undistorted_index.txt"
+    undist_image_list = undist_dir + "/index.txt"
     mkdir_p(undist_dir)
     print("Writing: " + undist_image_list)
     undistorted_images = []

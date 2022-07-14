@@ -45,7 +45,7 @@ def process_args(args):
                         help="Which rig sensor images to texture. Must be among the " + \
                         "sensors specified via --rig_config.")
 
-    parser.add_argument("--image_list", dest="image_list",
+    parser.add_argument("--camera_poses", dest="camera_poses",
                         default="", help= "Read images and camera poses from this list.")
 
     parser.add_argument("--mesh", dest="mesh",
@@ -69,7 +69,7 @@ def process_args(args):
 
 def sanity_checks(args):
 
-    if args.image_list == "":
+    if args.camera_poses == "":
         raise Exception("The path to the list having input images and poses was not specified.")
 
     if args.mesh == "":
@@ -162,14 +162,15 @@ if __name__ == "__main__":
     rig_utils.mkdir_p(args.out_dir)
 
     (images, world_to_cam) \
-             = rig_utils.parse_images_and_camera_poses(args.image_list, args.rig_sensor)
+             = rig_utils.parse_images_and_camera_poses(args.camera_poses, args.rig_sensor)
     
     tools_base_dir = os.path.dirname(os.path.dirname(os.path.abspath(sys.argv[0])))
     extension = '.jpg' # extension of undistorted images, as preferred by texrecon
     extra_opts = ["--save_bgr"] # create color images
+    suff = "_texrecon"
     (undist_intrinsics_file, undistorted_images, undist_dir) \
                         = rig_utils.undistort_images(args, images, tools_base_dir,
-                                                     extension, extra_opts)
+                                                     extension, extra_opts, suff)
 
     (nf, d0, d1, paspect, ncx, ncy) = convert_intrinsics_to_texrecon(undist_intrinsics_file)
 

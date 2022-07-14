@@ -53,7 +53,7 @@ def process_args(args):
                         default="", help="The directory where to write the textured mesh " + \
                         "and other data.")
     
-    parser.add_argument("--parallel_stereo_options", dest="parallel_stereo_options",
+    parser.add_argument("--stereo_options", dest="stereo_options",
                         default="", help="Options to pass to parallel_stereo. Use double " + \
                         "quotes around the full list and simple quotes if needed by an "   + \
                         "individual option, or vice-versa.")
@@ -61,8 +61,8 @@ def process_args(args):
     parser.add_argument("--pc_filter_options", dest="pc_filter_options",
                         default="", help="Options to pass to pc_filter.")
 
-    parser.add_argument("--voxblox_options", dest="voxblox_options",
-                        default="", help="Options to pass to voxblox.")
+    parser.add_argument("--mesh_gen_options", dest="mesh_gen_options",
+                        default="", help="Options to pass to voxblox for mesh generation.")
     
     # Note how the percent sign below is escaped, by writing: %%
     parser.add_argument("--undistorted_crop_win", dest="undistorted_crop_win", default = "",
@@ -154,9 +154,10 @@ def write_asp_and_voxblox_cameras(undist_intrinsics_file, distorted_images, undi
 
     return (undistorted_images_out, cameras, cam_to_world_files)
 
-def run_stereo(left_image, right_image, left_cam, right_cam, cam_to_world, args, tools_base_dir):
+def run_pair(left_image, right_image, left_cam, right_cam, args, tools_base_dir,
+             first_step, last_step):
 
-    out_dir =  args.out_dir + "/" + args.rig_sensor
+    out_dir = args.out_dir + "/" + args.rig_sensor
 
     left_prefix = os.path.basename(os.path.basename(left_image))
     left_prefix, ext = os.path.splitext(left_prefix)
@@ -166,21 +167,64 @@ def run_stereo(left_image, right_image, left_cam, right_cam, cam_to_world, args,
 
     stereo_dir = out_dir + "/stereo/" + left_prefix + "_" + right_prefix
     stereo_prefix = stereo_dir + "/run"
-    if os.path.isdir(stereo_dir):
-        # Wipe the existing directory
-        print("Removing recursively old directory: " + stereo_dir)
-        shutil.rmtree(stereo_dir)
+    pcd_file = stereo_prefix + '-PC-filter.pcd'
+    
+    if first_step <= 0 and last_step >= 0:
+        # Run stereo
+        if os.path.isdir(stereo_dir):
+            # Wipe the existing directory
+            print("Removing recursively old directory: " + stereo_dir)
+            shutil.rmtree(stereo_dir)
 
-    # Split on spaces but keep quoted parts together
-    parallel_stereo_options = shlex.split(args.parallel_stereo_options) 
+        # Split on spaces but keep quoted parts together. Wipe stray
+        # continuation lines.
+        args.stereo_options = args.stereo_options.replace('\\', ' ')
+        stereo_options = shlex.split(args.stereo_options) 
+        cmd = [tools_base_dir + "/bin/parallel_stereo"] + \
+              stereo_options + \
+              [left_image, right_image, left_cam, right_cam, stereo_prefix]
+        
+        # Allow this to fail, as perhaps not all stereo pairs are good
+        rig_utils.run_cmd(cmd, quit_on_failure = False)
 
-    cmd = [tools_base_dir + "/bin/parallel_stereo"] + \
-          parallel_stereo_options + \
-          [left_image, right_image, left_cam, right_cam, stereo_prefix]
+    if first_step <= 1 and last_step >= 1:
 
-    # Allow this to fail, as perhaps not all stereo pairs are good
-    rig_utils.run_cmd(cmd, quit_on_failure = False)
-           
+        # Split on spaces but keep quoted parts together
+        args.pc_filter_options = args.pc_filter_options.replace('\\', ' ')
+        pc_filter_options = shlex.split(args.pc_filter_options) 
+        cmd = [tools_base_dir + "/bin/pc_filter",
+               '--input-cloud',   stereo_prefix + '-PC.tif',
+               '--input-texture', stereo_prefix + '-L.tif',
+               '--output-cloud',  stereo_prefix + '-PC-filter.tif',
+               '--camera', left_cam] + \
+               pc_filter_options
+
+        # Allow this to fail, as perhaps not all stereo pairs are good
+        rig_utils.run_cmd(cmd, quit_on_failure = False)
+
+        # Run point2mesh. This is for debugging purposes, to be able
+        # to inspect each cloud.
+        # We use -s 4 as otherwise the .obj file is too big
+        cmd = [tools_base_dir + "/bin/point2mesh", "-s", "4",
+               "--texture-step-size", "1",
+               stereo_prefix + '-PC-filter.tif',
+               stereo_prefix + '-L.tif']
+        rig_utils.run_cmd(cmd, quit_on_failure = False)
+ 
+        # Write this in PCD format and in left camera's coordinates,
+        # so it can be merged later with voxblox
+        cmd = [tools_base_dir + "/bin/pc_filter",
+               '--input-cloud',   stereo_prefix + '-PC.tif',
+               '--input-texture', stereo_prefix + '-L.tif',
+               '--output-cloud',  pcd_file,
+               '--camera', left_cam,
+               '--transform-to-camera-coordinates',
+               '--output-weight', stereo_prefix + 'PC-weight.tif'] + \
+               pc_filter_options
+        rig_utils.run_cmd(cmd, quit_on_failure = False)
+
+    return pcd_file
+
 if __name__ == "__main__":
 
     args = process_args(sys.argv)
@@ -195,9 +239,10 @@ if __name__ == "__main__":
     tools_base_dir = os.path.dirname(os.path.dirname(os.path.abspath(sys.argv[0])))
     extension = '.tif' # use lossless .tif extension for undistorted images
     extra_opts = []
+    suff = "_stereo" 
     (undist_intrinsics_file, undistorted_images, undist_dir) \
                         = rig_utils.undistort_images(args, distorted_images,
-                                                     tools_base_dir, extension, extra_opts)
+                                                     tools_base_dir, extension, extra_opts, suff)
 
     # Write camera poses in the format of ASP and voxblox
     (undistorted_images, cameras, cam_to_world_files) \
@@ -205,21 +250,31 @@ if __name__ == "__main__":
                                                          distorted_images, undistorted_images,
                                                          world_to_cam)
 
-    print("--first step, ", step_dict[args.first_step])
-    print("--last step, ", step_dict[args.last_step])
-    
-    # Run stereo on each pair
     # TODO(oalexan1): This must be parallelized like done for icebridge
-    if step_dict[args.first_step] <= 0 and step_dict[args.last_step] >= 0:
-        for t in range(len(undistorted_images) - 1):
-            run_stereo(undistorted_images[t], undistorted_images[t + 1],
-                       cameras[t], cameras[t + 1],
-                       cam_to_world_files[t], args, tools_base_dir)
-
-    if step_dict[args.first_step] <= 1 and step_dict[args.last_step] >= 1:
-        print("--will do fltr!")
+    # Run for each pair parallel_stereo and/or filtering. Even if desired
+    # to skip these steps, must go through the motions to produce
+    # some lists of files neded for mesh generation later.
+    pcd_files = []
+    for t in range(len(undistorted_images) - 1):
+        pcd_file = run_pair(undistorted_images[t], undistorted_images[t + 1],
+                            cameras[t], cameras[t + 1], args, tools_base_dir,
+                            step_dict[args.first_step], step_dict[args.last_step])
+        pcd_files.append(pcd_file)
         
-        
-    voxblox_index =  args.out_dir + "/" + args.rig_sensor + "/voxblox_index.txt"
-    print("will write index: " + voxblox_index)
-
+    if step_dict[args.first_step] <= 2 and step_dict[args.last_step] >= 2:
+        # Fuse the results in a mesh with voxblox
+        voxblox_index =  args.out_dir + "/" + args.rig_sensor + "/voxblox_index.txt"
+        fused_mesh = args.out_dir + "/" + args.rig_sensor + "/fused_mesh.ply"
+        print("Writing: " + voxblox_index)
+        with open(voxblox_index, "w") as handle:
+            for t in range(len(undistorted_images) - 1):
+                handle.write(cam_to_world_files[t] + "\n")
+                handle.write(pcd_files[t] + "\n")
+            
+        args.mesh_gen_options = args.mesh_gen_options.replace('\\', ' ')
+        mesh_gen_options = shlex.split(args.mesh_gen_options) 
+        cmd = [tools_base_dir + "/bin/voxblox_mesh",
+               '--index', voxblox_index,
+               '--output_mesh', fused_mesh] + \
+               mesh_gen_options
+        rig_utils.run_cmd(cmd, quit_on_failure = True)
