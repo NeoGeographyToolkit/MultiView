@@ -25,7 +25,7 @@ Stereo Pipeline](https://github.com/NeoGeographyToolkit/StereoPipeline/releases)
  * [rig calibrator](https://stereopipeline.readthedocs.io/en/latest/tools/rig_calibrator.html)
  * [voxblox mesh creation](https://stereopipeline.readthedocs.io/en/latest/tools/voxblox_mesh.html)
  * [mesh texturing](https://stereopipeline.readthedocs.io/en/latest/tools/texrecon.html)
-
+ * [stereo fusion](https://stereopipeline.readthedocs.io/en/latest/tools/multi_stereo.html)
 # Fetching the code
 
 This package depends on other repositories, which are included as

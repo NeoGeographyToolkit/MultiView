@@ -370,7 +370,6 @@ void adjustImageSize(camera::CameraParameters const& cam_params, cv::Mat & image
 // Project texture and find the UV coordinates
 void projectTexture(mve::TriangleMesh::ConstPtr mesh, std::shared_ptr<BVHTree> bvh_tree,
                     cv::Mat const& image, camera::CameraModel const& cam,
-                    double num_exclude_boundary_pixels,
                     // outputs
                     std::vector<double>& smallest_cost_per_face,
                     std::vector<Eigen::Vector3i>& face_vec,
@@ -399,7 +398,7 @@ bool ray_mesh_intersect(Eigen::Vector2d const& dist_pix,
 void meshProject(mve::TriangleMesh::Ptr const& mesh, std::shared_ptr<BVHTree> const& bvh_tree,
                  cv::Mat const& image,
                  Eigen::Affine3d const& world_to_cam, camera::CameraParameters const& cam_params,
-                 int64_t num_exclude_boundary_pixels, std::string const& out_prefix);
+                 std::string const& out_prefix);
 
 // Save a model
 void isaac_save_model(IsaacObjModel* obj_model, std::string const& prefix);

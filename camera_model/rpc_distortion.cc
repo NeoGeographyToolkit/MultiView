@@ -547,8 +547,12 @@ void genUndistDistPairs(int num_samples, camera::CameraParameters const& cam_par
     dist.grow(dist_centered_pixels[it]);
   }
 
-  std::cout << "--orig undist " << undist.m_min[0] << ' ' << undist.m_min[1] << ' ' << undist.m_max[0] << ' ' << undist.m_max[1] << std::endl;
-  std::cout << "--orig dist " << dist.m_min[0] << ' ' << dist.m_min[1] << ' ' << dist.m_max[0] << ' ' << dist.m_max[1] << std::endl;
+  std::cout << "Original centered undistortion pixel box: "
+            << undist.m_min[0] << ' ' << undist.m_min[1] << ' '
+            << undist.m_max[0] << ' ' << undist.m_max[1] << std::endl;
+  std::cout << "Original centered distortion pixel box: "
+            << dist.m_min[0] << ' ' << dist.m_min[1] << ' '
+            << dist.m_max[0] << ' ' << dist.m_max[1] << std::endl;
   return;
 }
 
@@ -566,6 +570,8 @@ void fitCurrDegRPC(std::vector<Eigen::Vector2d> const& undist_centered_pixels,
     ceres::CostFunction* rpc_cost_fun =
       RpcFitError::Create(undist_centered_pixels[it], dist_centered_pixels[it],
                           block_sizes);
+    // Note that we do not use a robust threshold, so we want the RPC
+    // to work on the entire domain.
     ceres::LossFunction* rpc_loss_fun = NULL;
 
     residual_names.push_back("pix_x");
@@ -683,8 +689,12 @@ void fitRpcUndist(Eigen::VectorXd const & rpc_dist_coeffs,
     dist.grow(dist_centered_pixels[it]);
   }
   
-  std::cout << "--final undist " << undist.m_min[0] << ' ' << undist.m_min[1] << ' ' << undist.m_max[0] << ' ' << undist.m_max[1] << std::endl;
-  std::cout << "--final dist " << dist.m_min[0] << ' ' << dist.m_min[1] << ' ' << dist.m_max[0] << ' ' << dist.m_max[1] << std::endl;
+  std::cout << "Final centered undistortion box: "
+            << undist.m_min[0] << ' ' << undist.m_min[1]
+            << ' ' << undist.m_max[0] << ' ' << undist.m_max[1] << std::endl;
+  std::cout << "Final centered distortion pixel box: "
+            << dist.m_min[0] << ' ' << dist.m_min[1] << ' '
+            << dist.m_max[0] << ' ' << dist.m_max[1] << std::endl;
   
   int initial_rpc_degree = 1;
   int init_num_params = num_dist_params(initial_rpc_degree);

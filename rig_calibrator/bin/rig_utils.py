@@ -58,23 +58,25 @@ def run_cmd(cmd, quit_on_failure = True):
     # This is a bugfix for not printing quotes around strings with spaces
     fmt_cmd = add_missing_quotes(cmd)
     print(" ".join(fmt_cmd))
-    
-    p = subprocess.Popen(cmd, stdout=subprocess.PIPE, stderr=subprocess.PIPE,
+
+    # Note how we redirect stderr to stdout
+    p = subprocess.Popen(cmd, stdout=subprocess.PIPE, stderr=subprocess.STDOUT,
                          universal_newlines=True)
 
     # Print the standard output in real time
     status = 0
     while True:
         out = p.stdout.readline()
-        status = p.poll()
         if not out:
             break # finished the run
 
         # Print the line but wipe the extra whitespace
         print(out.rstrip())
 
+    status = p.poll()
+
     if status != 0 and quit_on_failure:
-        print("Failed execution of: " + " ".join(cmd))
+        print("Failed execution of: " + " ".join(cmd) + " with status " + str(status))
         sys.exit(1)
 
     return status

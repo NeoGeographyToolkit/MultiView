@@ -285,6 +285,20 @@ void ReadNVM(std::string const& input_filename,
              std::vector<Eigen::Vector3d> * pid_to_xyz,
              std::vector<Eigen::Affine3d> *
              cid_to_cam_t_global);
+
+// Save the depth clouds and optimized transforms needed to create a mesh with voxblox
+// (if depth clouds exist).
+void exportToVoxblox(std::vector<std::string> const& cam_names,
+                     std::vector<dense_map::cameraImage> const& cam_images,
+                     std::vector<Eigen::Affine3d> const& depth_to_image,
+                     std::vector<Eigen::Affine3d> const& world_to_cam,
+                     std::string const& out_dir);
+
+void saveTransformedDepthClouds(std::vector<std::string> const& cam_names,
+                                std::vector<dense_map::cameraImage> const& cam_images,
+                                std::vector<Eigen::Affine3d> const& depth_to_image,
+                                std::vector<Eigen::Affine3d> const& world_to_cam,
+                                std::string const& out_dir);
   
 }  // namespace dense_map
 

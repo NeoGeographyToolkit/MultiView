@@ -57,8 +57,14 @@
 // and can be set to 0 if desired not to use them.
 
 // These mesh constraints bring in additional information,
-// particularly for the cameras lacking depth, and help get the focal
-// lengths correctly.
+// particularly for the cameras lacking depth, and may help get the
+// focal lengths correctly.
+
+// If no prior mesh exists or is not reliable enough, and one desires
+// to not change the scale of the camera configuration too much
+// (after registration), consider using the --tri_weight parameter,
+// but setting it to just a small value to ensure it does not prevent
+// the algorithm from converging.
 
 // If different camera sensors are on different CPUs, and a time
 // offset exists among their clocks, this program can model that,
@@ -123,10 +129,6 @@
 #include <iostream>
 #include <fstream>
 
-// TODO(oalexan1): Move this out
-#include <pcl/io/ply_io.h>
-#include <pcl/io/pcd_io.h>
-  
 namespace fs = boost::filesystem;
 
 DEFINE_int32(num_overlaps, 10, "How many images (of all camera types) close and forward in "
@@ -175,13 +177,6 @@ DEFINE_bool(float_scale, false,
 DEFINE_bool(float_timestamp_offsets, false,
             "If to optimize the timestamp offsets among the cameras. This is experimental.");
 
-DEFINE_string(num_exclude_boundary_pixels, "",
-             "Flag as outliers pixels closer than this to image boundary, and ignore "
-             "that boundary region when texturing using the optimized cameras with "
-             "the --out_texture_dir option. Provide one number per sensor, in the same order "
-             "as in the rig config file. Example: '100 0 0'. For fisheye lenses, this "
-             "improves a lot the quality of results.");
-
 DEFINE_double(timestamp_offsets_max_change, 1.0,
               "If floating the timestamp offsets, do not let them change by more than this "
               "(measured in seconds). Existing image bracketing acts as an additional constraint.");
@@ -202,6 +197,15 @@ DEFINE_double(mesh_tri_weight, 0.0,
 DEFINE_double(depth_mesh_weight, 0.0,
               "A larger value will give more weight to the constraint that the depth clouds "
               "stay close to the mesh. Not suggested by default.");
+
+DEFINE_double(tri_weight, 0.0,
+              "The weight to give to the constraint that optimized triangulated "
+              "points stay close to original triangulated points. A positive value will "
+              "help ensure the cameras do not move too far, but a large value may prevent "
+              "convergence.");
+
+DEFINE_double(tri_robust_threshold, 0.0,
+              "The robust threshold to use with the triangulation weight. Must be positive.");
 
 DEFINE_bool(affine_depth_to_image, false, "Assume that the depth-to-image transform "
             "for each depth + image camera is an arbitrary affine transform rather than a "
@@ -287,6 +291,10 @@ DEFINE_bool(save_matches, false,
 DEFINE_bool(export_to_voxblox, false,
             "Save the depth clouds and optimized transforms needed to create a mesh with voxblox "
             "(if depth clouds exist).");
+
+DEFINE_bool(save_transformed_depth_clouds, false,
+            "Save the depth clouds with the camera transform applied to them to make "
+            "them be in world coordinates.");
 
 DEFINE_bool(verbose, false,
             "Print a lot of verbose information about how matching goes.");
@@ -803,7 +811,6 @@ void meshProjectCameras(std::vector<std::string> const& cam_names,
                         std::vector<Eigen::Affine3d> const& world_to_cam,
                         mve::TriangleMesh::Ptr const& mesh,
                         std::shared_ptr<BVHTree> const& bvh_tree,
-                        std::vector<int> const& num_exclude_boundary_pixels,
                         std::string const& out_dir) {
   if (cam_names.size() != cam_params.size())
     LOG(FATAL) << "There must be as many camera names as sets of camera parameters.\n";
@@ -811,8 +818,6 @@ void meshProjectCameras(std::vector<std::string> const& cam_names,
     LOG(FATAL) << "There must be as many camera images as camera poses.\n";
   if (out_dir.empty())
     LOG(FATAL) << "The output directory is empty.\n";
-  if (num_exclude_boundary_pixels.size() != cam_names.size())
-    LOG(FATAL) << "Must have as many values for excluding boundary pixels as cameras.\n";
   
   char filename_buffer[1000];
 
@@ -827,7 +832,7 @@ void meshProjectCameras(std::vector<std::string> const& cam_names,
 
     std::cout << "Creating texture for: " << out_prefix << std::endl;
     meshProject(mesh, bvh_tree, cam_images[cid].image, world_to_cam[cid], cam_params[cam_type],
-                num_exclude_boundary_pixels[cam_type], out_prefix);
+                out_prefix);
   }
 }
 
@@ -956,6 +961,12 @@ void parameterValidation() {
   if (FLAGS_depth_mesh_weight < 0.0)
     LOG(FATAL) << "The depth mesh weight must non-negative.\n";
 
+  if (FLAGS_tri_weight < 0.0)
+    LOG(FATAL) << "The triangulation weight must non-negative.\n";
+
+  if (FLAGS_tri_weight > 0.0 && FLAGS_tri_robust_threshold <= 0.0)
+    LOG(FATAL) << "The triangulation robust threshold must be positive.\n";
+
   if (FLAGS_registration && (FLAGS_xyz_file.empty() || FLAGS_hugin_file.empty()))
     LOG(FATAL) << "In order to register the map, the hugin and xyz file must be specified.";
 
@@ -968,9 +979,6 @@ void parameterValidation() {
 
   if (FLAGS_out_dir == "")
     LOG(FATAL) << "The output directory was not specified.\n";
-
-  if (FLAGS_export_to_voxblox && FLAGS_out_dir == "")
-    LOG(FATAL) << "Cannot save matches if no output directory was provided.\n";
 
   if (FLAGS_use_initial_rig_transforms && FLAGS_no_rig)
     LOG(FATAL) << "Cannot use initial rig transforms if not modeling the rig.\n";
@@ -1246,7 +1254,7 @@ void lookupImagesAndBrackets(  // Inputs
 
   bool is_good = true;
   for (int cam_type_it = 0; cam_type_it < num_cam_types; cam_type_it++) {
-    std::cout << "Number of found images for camera: " << cam_names[cam_type_it] << ": "
+    std::cout << "Number of images for camera: " << cam_names[cam_type_it] << ": "
               << num_images[cam_type_it] << std::endl;
 
     if (num_images[cam_type_it] == 0) is_good = false;
@@ -1353,18 +1361,16 @@ void meshTriangulations(  // Inputs
   return;
 }
 
-void flagOutlierByExclusionDist(  // Inputs
-  int ref_cam_type, std::vector<int> const& num_exclude_boundary_pixels,
-  std::vector<camera::CameraParameters> const& cam_params,
-  std::vector<dense_map::cameraImage> const& cams,
-  std::vector<std::map<int, int>> const& pid_to_cid_fid,
-  std::vector<std::vector<std::pair<float, float>>> const& keypoint_vec,
-  // Outputs
+void flagOutlierByExclusionDist(// Inputs
+                                int ref_cam_type,
+                                std::vector<camera::CameraParameters> const& cam_params,
+                                std::vector<dense_map::cameraImage> const& cams,
+                                std::vector<std::map<int, int>> const& pid_to_cid_fid,
+                                std::vector<std::vector<std::pair<float, float>>>
+                                const& keypoint_vec,
+                                // Outputs
   std::vector<std::map<int, std::map<int, int>>>& pid_cid_fid_inlier) {
 
-  if (num_exclude_boundary_pixels.size() != cam_params.size())
-    LOG(FATAL) << "Must have as many values for excluding boundary pixels as cameras.\n";
-  
   // Initialize the output
   pid_cid_fid_inlier.resize(pid_to_cid_fid.size());
 
@@ -1380,13 +1386,14 @@ void flagOutlierByExclusionDist(  // Inputs
       pid_cid_fid_inlier[pid][cid][fid] = 1;
 
       // Flag as outliers pixels at the image boundary.
-      Eigen::Vector2d dist_ip(keypoint_vec[cid][fid].first, keypoint_vec[cid][fid].second);
+      Eigen::Vector2d dist_pix(keypoint_vec[cid][fid].first, keypoint_vec[cid][fid].second);
       Eigen::Vector2i dist_size = cam_params[cam_type].GetDistortedSize();
-      int excl = num_exclude_boundary_pixels[cam_type];
-      if (dist_ip.x() < excl || dist_ip.x() > dist_size[0] - 1 - excl ||
-          dist_ip.y() < excl || dist_ip.y() > dist_size[1] - 1 - excl) {
+      Eigen::Vector2i dist_crop_size = cam_params[cam_type].GetDistortedCropSize();
+      // Note that if dist_crop_size equals dist_size, which is image
+      // size, no outliers are flagged
+      if (std::abs(dist_pix[0] - dist_size[0] / 2.0) > dist_crop_size[0] / 2.0  ||
+          std::abs(dist_pix[1] - dist_size[1] / 2.0) > dist_crop_size[1] / 2.0) 
         dense_map::setMapValue(pid_cid_fid_inlier, pid, cid, fid, 0);
-      }
     }
   }
   return;
@@ -1592,115 +1599,12 @@ void saveInlinerMatchPairs(// Inputs
                                                       cams[right_index].image_name,
                                                       suffix);
 
-    std::cout << "Writing: " << match_file << std::endl;
+    std::cout << "Writing: " << cams[left_index].image_name << ' ' << cams[right_index].image_name
+              << " " << match_file << std::endl;
     dense_map::writeMatchFile(match_file, match_pair.first, match_pair.second);
   }
 }
 
-// Save the depth clouds and optimized transforms needed to create a mesh with voxblox "
-// (if depth clouds exist).;
-void exportToVoxblox(std::vector<std::string> const& cam_names,
-                     std::vector<dense_map::cameraImage> const& cam_images,
-                     std::vector<Eigen::Affine3d> const& world_to_cam,
-                     std::string const& out_dir) {
-
-  if (cam_images.size() != world_to_cam.size())
-    LOG(FATAL) << "There must be as many camera images as camera poses.\n";
-  if (out_dir.empty())
-    LOG(FATAL) << "The output directory is empty.\n";
-
-  std::string voxblox_dir = out_dir + "/voxblox";
-  dense_map::createDir(voxblox_dir);
-
-  char timestamp_buffer[1000];
-
-  // Must take a pass for each camera type, and then visit
-  // all images while ignoring those of a different type. There are very
-  // few camera types, so this is not unreasonable.
-
-  for (size_t cam_type = 0; cam_type < cam_names.size(); cam_type++) {
-
-    std::string voxblox_subdir = voxblox_dir + "/" + cam_names[cam_type];
-    dense_map::createDir(voxblox_subdir);
-
-    std::string index_file = voxblox_subdir + "/index.txt";
-    std::cout << "Writing: " << index_file << std::endl;
-    std::ofstream ofs(index_file.c_str());
-
-    for (size_t cid = 0; cid < cam_images.size(); cid++) {
-
-      if (cam_images[cid].camera_type != cam_type) 
-        continue;
-
-      int depth_cols = cam_images[cid].depth_cloud.cols;
-      int depth_rows = cam_images[cid].depth_cloud.rows;
-      
-      if (depth_cols == 0 || depth_rows == 0)
-        continue; // skip empty clouds
-
-      // Sanity check
-      if (depth_cols != cam_images[cid].image.cols || 
-          depth_rows != cam_images[cid].image.rows)
-        LOG(FATAL) << "Found a depth cloud and corresponding image with mismatching dimensions.\n";
-        
-      // Must use the 10.7f format for the timestamp as everywhere else in the code,
-      // as it is in double precision.
-      double timestamp = cam_images[cid].timestamp;
-      snprintf(timestamp_buffer, sizeof(timestamp_buffer), "%10.7f", timestamp);
-
-      // Sanity check
-      if (cam_images[cid].image.channels() != 1) 
-        LOG(FATAL) << "Expecting a grayscale input image.\n";
-      
-      // Form a pcl point cloud. Add the first band of the image as an intensity
-      // Later will reduce its dimensions as we will skip invalid pixels.
-      // Use fields as expected by voxblox.
-      // TODO(oalexan1): Make this a subroutine
-      pcl::PointCloud<pcl::PointNormal> pc;
-      pc.width = std::int64_t(depth_cols) * std::int64_t(depth_rows); // int64 to avoid overflow
-      pc.height = 1;
-      pc.points.resize(pc.width * pc.height);
-      int count = 0;
-      for (int row = 0; row < depth_rows; row++) {
-        for (int col = 0; col < depth_cols; col++) {
-          cv::Vec3f xyz = cam_images[cid].depth_cloud.at<cv::Vec3f>(row, col);
-          if (xyz == cv::Vec3f(0, 0, 0)) // skip invalid points
-            continue;
-
-          pc.points[count].x         = xyz[0];
-          pc.points[count].y         = xyz[1];
-          pc.points[count].z         = xyz[2];
-          pc.points[count].normal_x  = cam_images[cid].image.at<uchar>(row, col); // intensity
-          pc.points[count].normal_y  = 1.0; // weight
-          pc.points[count].normal_y  = 1.0; // intersection err
-          pc.points[count].normal_y  = 0.0; // ensure initialization
-          
-          count++;
-        }
-      }
-      // Shrink the cloud as invalid data was skipped
-      if (count > pc.width) 
-        LOG(FATAL) << "Book-keeping error in processing point clouds.\n";
-      pc.width = count;
-      pc.height = 1;
-      pc.points.resize(pc.width * pc.height);
-
-      // Save the transform
-      std::string transform_file = voxblox_subdir + "/" + timestamp_buffer + "_cam2world.txt";
-      std::cout << "Writing: " << transform_file << std::endl;
-      ofs << transform_file << "\n"; // save its name in the index
-      dense_map::writeMatrix(world_to_cam[cid].inverse().matrix(), transform_file);
-
-      // Save the pcd file
-      std::string cloud_file = voxblox_subdir + "/" + timestamp_buffer + ".pcd";
-      std::cout << "Writing: " << cloud_file << std::endl;
-      ofs << cloud_file << "\n"; // save its name in the index
-      pcl::io::savePCDFileBinary(cloud_file, pc); // writing binary is much faster than ascii
-    }
-  }
-  
-}
-  
 // A function to copy image data from maps to vectors with the data stored
 // chronologically in them, to speed up traversal.
 void ImageDataToVectors
@@ -2473,24 +2377,6 @@ Eigen::Affine3d registerTransforms(std::string const& hugin_file, std::string co
   return registration_trans;
 }
 
-// From the string '100 0 0' extract three values. If the string is empty,
-// produce as many zeros as there are cameras.
-std::vector<int> parseNumExcludePixels(size_t num_cams, std::string num_excl_str) {
-  std::istringstream iss(num_excl_str);
-  std::vector<int> vals;
-  int val = 0;
-  while (iss >> val)
-    vals.push_back(val);
-
-  if (vals.empty())
-      vals = std::vector<int>(num_cams, 0);
-  
-  if (vals.size() != num_cams) 
-    LOG(FATAL) << "Must have as many values for excluding boundary pixels as cameras.\n";
-
-  return vals;
-}
-  
 }  // namespace dense_map
 
 int main(int argc, char** argv) {
@@ -2553,11 +2439,6 @@ int main(int argc, char** argv) {
                                ref_timestamps, world_to_ref, ref_image_files,
                                image_data, depth_data); // out
 
-  std::vector<int> num_exclude_boundary_pixels =
-    dense_map::parseNumExcludePixels(cam_params.size(), FLAGS_num_exclude_boundary_pixels);
-  if (num_exclude_boundary_pixels.size() != cam_params.size())
-    LOG(FATAL) << "Must have as many values for excluding boundary pixels as cameras.\n";
-  
   // Keep here the images, timestamps, and bracketing information
   std::vector<dense_map::cameraImage> cams;
   //  The range of ref_to_cam_timestamp_offsets[cam_type] before
@@ -2661,7 +2542,8 @@ int main(int argc, char** argv) {
   std::vector<std::set<std::string>> intrinsics_to_float;
   dense_map::parse_intrinsics_to_float(FLAGS_intrinsics_to_float, cam_names,
                                        intrinsics_to_float);
-  
+
+  // TODO(oalexan1): When --no_rig is on, these must be empty!
   std::set<std::string> rig_transforms_to_float;
   dense_map::parse_rig_transforms_to_float(cam_names, ref_cam_type,
                                            FLAGS_rig_transforms_to_float, rig_transforms_to_float);
@@ -2754,11 +2636,11 @@ int main(int argc, char** argv) {
   
   // TODO(oalexan1): Must initialize all points as inliers outside this function,
   // as now this function resets those.
-  dense_map::flagOutlierByExclusionDist(  // Inputs
-    ref_cam_type, num_exclude_boundary_pixels, cam_params, cams, pid_to_cid_fid,
-    keypoint_vec,
-    // Outputs
-    pid_cid_fid_inlier);
+  dense_map::flagOutlierByExclusionDist(// Inputs
+                                        ref_cam_type, cam_params, cams, pid_to_cid_fid,
+                                        keypoint_vec,
+                                        // Outputs
+                                        pid_cid_fid_inlier);
 
   // Structures needed to intersect rays with the mesh
   std::vector<std::map<int, std::map<int, Eigen::Vector3d>>> pid_cid_fid_mesh_xyz;
@@ -2784,6 +2666,18 @@ int main(int argc, char** argv) {
                                       // Outputs
                                       pid_cid_fid_inlier, xyz_vec);
 
+    // This is a copy which won't change
+    std::vector<Eigen::Vector3d> xyz_vec_orig;
+    if (FLAGS_tri_weight > 0.0) {
+      // Better copy manually to ensure no shallow copy
+      xyz_vec_orig.resize(xyz_vec.size());
+      for (size_t pt_it = 0; pt_it < xyz_vec.size(); pt_it++) {
+        for (int coord_it = 0; coord_it < 3; coord_it++) {
+          xyz_vec_orig[pt_it][coord_it] = xyz_vec[pt_it][coord_it];
+        }
+      } 
+    }
+    
     // Compute where each ray intersects the mesh
     if (FLAGS_mesh != "")
       dense_map::meshTriangulations(  // Inputs
@@ -2800,6 +2694,16 @@ int main(int argc, char** argv) {
     std::vector<std::map<int, std::map<int, int>>> pid_cid_fid_to_residual_index;
     pid_cid_fid_to_residual_index.resize(pid_to_cid_fid.size());
 
+    // If distortion can be floated, and the RPC distortion model is
+    // used, must forbid undistortion until its updated value is
+    // computed later.
+    // TODO(oalexan1): Need to have an actual flag for when we use RPC.
+    for (int cam_type = 0; cam_type < num_cam_types; cam_type++) {
+      if (intrinsics_to_float[cam_type].find("distortion")
+          != intrinsics_to_float[cam_type].end() && distortions[cam_type].size() > 5)
+        cam_params[cam_type].m_rpc.set_can_undistort(false);
+    }
+    
     // For when we don't have distortion but must get a pointer to distortion for the interface
     double distortion_placeholder = 0.0;
     
@@ -2918,15 +2822,17 @@ int main(int argc, char** argv) {
           // There is no rig. Then beg_cam_ptr refers to camera
           // for cams[cid], and not to its ref bracketing cam.
           // See if the user wants it floated.
-          if (camera_poses_to_float.find(cam_names[cam_type]) == camera_poses_to_float.end())
+          if (camera_poses_to_float.find(cam_names[cam_type]) == camera_poses_to_float.end()) {
             problem.SetParameterBlockConstant(beg_cam_ptr);
+          }
         }
 
         // The end cam floats only if told to, and if it brackets
         // a given non-ref cam.
         if (camera_poses_to_float.find(cam_names[ref_cam_type]) == camera_poses_to_float.end() ||
-            cam_type == ref_cam_type || FLAGS_no_rig)
+            cam_type == ref_cam_type || FLAGS_no_rig) {
           problem.SetParameterBlockConstant(end_cam_ptr);
+        }
         
         if (!FLAGS_float_timestamp_offsets || cam_type == ref_cam_type || FLAGS_no_rig) {
           // Either we don't float timestamp offsets at all, or the cam is the ref type,
@@ -3060,6 +2966,24 @@ int main(int argc, char** argv) {
         residual_scales.push_back(FLAGS_mesh_tri_weight);
         residual_scales.push_back(FLAGS_mesh_tri_weight);
       }
+
+      if (FLAGS_tri_weight > 0.0) {
+        // Try to make the triangulated points (and hence cameras) not move too far
+        ceres::CostFunction* tri_cost_function =
+          dense_map::XYZError::Create(xyz_vec_orig[pid], mesh_block_sizes, FLAGS_tri_weight);
+        ceres::LossFunction* tri_loss_function =
+          dense_map::GetLossFunction("cauchy", FLAGS_tri_robust_threshold);
+        problem.AddResidualBlock(tri_cost_function, tri_loss_function,
+                                 &xyz_vec[pid][0]);
+
+        residual_names.push_back("tri_x_m");
+        residual_names.push_back("tri_y_m");
+        residual_names.push_back("tri_z_m");
+        residual_scales.push_back(FLAGS_tri_weight);
+        residual_scales.push_back(FLAGS_tri_weight);
+        residual_scales.push_back(FLAGS_tri_weight);
+      }
+      
     }  // end iterating over pid
 
     // Evaluate the residuals before optimization
@@ -3104,15 +3028,17 @@ int main(int argc, char** argv) {
     }
 
     // Copy back the optimized intrinsics
-    for (int it = 0; it < num_cam_types; it++) {
-      cam_params[it].SetFocalLength(Eigen::Vector2d(focal_lengths[it], focal_lengths[it]));
-      cam_params[it].SetOpticalOffset(optical_centers[it]);
-      cam_params[it].SetDistortion(distortions[it]);
+    for (int cam_type = 0; cam_type < num_cam_types; cam_type++) {
+      cam_params[cam_type].SetFocalLength(Eigen::Vector2d(focal_lengths[cam_type],
+                                                          focal_lengths[cam_type]));
+      cam_params[cam_type].SetOpticalOffset(optical_centers[cam_type]);
+      cam_params[cam_type].SetDistortion(distortions[cam_type]);
 
-      // This is needed for RPC, as that one has undistortion coeffs which must
-      // be synced up with new distortion coeffs
-      if (distortions[it].size() > 5) 
-        cam_params[it].updateRpcUndistortion(num_exclude_boundary_pixels[it]);
+      // This is needed for RPC, as that one has undistortion coeffs
+      // which must be synced up with new distortion coeffs.
+      if (intrinsics_to_float[cam_type].find("distortion")
+          != intrinsics_to_float[cam_type].end() && distortions[cam_type].size() > 5)
+        cam_params[cam_type].updateRpcUndistortion(FLAGS_num_opt_threads);
     }
 
     // Copy back the optimized extrinsics, whether it was optimized or fixed
@@ -3172,7 +3098,6 @@ int main(int argc, char** argv) {
   // necessary since world_to_cam has been updated by now.
   if (FLAGS_out_texture_dir != "")
     dense_map::meshProjectCameras(cam_names, cam_params, cams, world_to_cam, mesh, bvh_tree,
-                                  num_exclude_boundary_pixels,
                                   FLAGS_out_texture_dir);
 
   dense_map::writeImageList(FLAGS_out_dir, cams, world_to_cam);
@@ -3183,7 +3108,11 @@ int main(int argc, char** argv) {
                             ref_to_cam_timestamp_offsets);
 
   if (FLAGS_export_to_voxblox)
-    exportToVoxblox(cam_names, cams, world_to_cam, FLAGS_out_dir);
+    dense_map::exportToVoxblox(cam_names, cams, depth_to_image, world_to_cam, FLAGS_out_dir);
+
+  if (FLAGS_save_transformed_depth_clouds)
+    dense_map::saveTransformedDepthClouds(cam_names, cams, depth_to_image,
+                                          world_to_cam, FLAGS_out_dir);
 
   return 0;
 } // NOLINT // TODO(oalexan1): Remove this, after making the code more modular

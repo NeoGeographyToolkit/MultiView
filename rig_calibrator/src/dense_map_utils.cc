@@ -23,12 +23,17 @@
 #include <rig_calibrator/dense_map_utils.h>
 #include <rig_calibrator/camera_image.h>
 #include <rig_calibrator/transform_utils.h>
+#include <rig_calibrator/happly.h> // for saving ply files as meshes
 
 #include <boost/filesystem.hpp>
 
 #include <iostream>
 #include <fstream>
 #include <iomanip>
+
+#include <pcl/io/ply_io.h>
+#include <pcl/io/pcd_io.h>
+
 // TODO(oalexan1): This file needs to be broken up
 
 namespace dense_map {
@@ -1220,4 +1225,307 @@ void ReadNVM(std::string const& input_filename,
   }
 }
 
+// Check if first three coordinates of a vector are 0. That would make it invalid.
+bool invalidXyz(cv::Vec3f const& p) { return (p[0] == 0) && (p[1] == 0) && (p[2] == 0); }
+
+// Add a given vertex to the ply file unless already present
+void add_vertex(cv::Vec3f const& V, double intensity,
+                std::pair<int, int> const& pix,    // NOLINT
+                std::map<std::pair<int, int>, size_t>& pix_to_vertex,  // NOLINT
+                size_t& vertex_count,                                  // NOLINT
+                std::vector<std::array<double, 3>>& vertices,          // NOLINT
+                std::vector<std::array<double, 3>>& colors) {          // NOLINT
+  // Do not add the invalid zero vertex
+  if (invalidXyz(V)) return;
+
+  if (pix_to_vertex.find(pix) != pix_to_vertex.end()) return;  // Vertex already exists
+
+  std::array<double, 3> point = {V[0], V[1], V[2]};
+  std::array<double, 3> color = {intensity/255.0, intensity/255.0, intensity/255.0};
+
+  vertices.push_back(point);
+  colors.push_back(color);
+
+  // Record the map from the pixel to its location
+  pix_to_vertex[pix] = vertex_count;
+  vertex_count++;
+}
+
+void applyTransformToCloud(cv::Mat const& in_cloud,
+                           Eigen::Affine3d const& cam_to_world,
+                           cv::Mat & out_cloud) {
+
+  if (in_cloud.channels() != 3) 
+    LOG(FATAL) << "Expecting an xyz point cloud.\n";
+  
+  out_cloud = cv::Mat::zeros(in_cloud.rows, in_cloud.cols, CV_32FC3);
+  for (int row = 0; row < in_cloud.rows; row++) {
+    for (int col = 0; col < in_cloud.cols; col++) {
+      cv::Vec3f xyz = in_cloud.at<cv::Vec3f>(row, col);
+      
+      if (invalidXyz(xyz)) {
+        // Invalid points stay invalid
+        out_cloud.at<cv::Vec3f>(row, col) = xyz;
+        continue;
+      }
+
+      // Transform to world coordinates
+      Eigen::Vector3d P(xyz[0], xyz[1], xyz[2]);
+      P = cam_to_world * P;
+      for (size_t c = 0; c < 3; c++)
+        out_cloud.at<cv::Vec3f>(row, col)[c] = P[c];
+    }
+  }
+}
+  
+// Apply a transform to a point cloud to make it go from camera coordinates to world
+// coordinates and save it as a ply file.
+void saveTransformedMesh(cv::Mat const& depthMat, cv::Mat const& intensity,
+                         Eigen::Affine3d const& depth_to_world,
+                         std::string const& plyFileName) {
+
+  // Sanity check
+  if (depthMat.cols != intensity.cols || depthMat.rows != intensity.rows)
+    LOG(FATAL) << "The depth cloud and its intensity must have same size.\n";
+  
+  // Apply the transform.
+  cv::Mat transMat;
+  applyTransformToCloud(depthMat, depth_to_world, transMat);
+
+  size_t vertex_count = 0;
+  std::map<std::pair<int, int>, size_t> pix_to_vertex;  // map from pixel to vertex indices
+  std::vector<std::array<double, 3>> vertices;
+  std::vector<std::array<double, 3>> colors;
+  std::vector<std::vector<size_t>> faces;
+
+  for (int row = 0; row < transMat.rows - 1; row++) {
+    for (int col = 0; col < transMat.cols - 1; col++) {
+      std::pair<int, int> pix_ul = std::make_pair(row, col);
+      std::pair<int, int> pix_ur = std::make_pair(row + 1, col);
+      std::pair<int, int> pix_ll = std::make_pair(row, col + 1);
+      std::pair<int, int> pix_lr = std::make_pair(row + 1, col + 1);
+      cv::Vec3f UL = transMat.at<cv::Vec3f>(pix_ul.first, pix_ul.second);
+      cv::Vec3f UR = transMat.at<cv::Vec3f>(pix_ur.first, pix_ur.second);
+      cv::Vec3f LL = transMat.at<cv::Vec3f>(pix_ll.first, pix_ll.second);
+      cv::Vec3f LR = transMat.at<cv::Vec3f>(pix_lr.first, pix_lr.second);
+
+      double inten_UL = intensity.at<uchar>(pix_ul.first, pix_ul.second);
+      double inten_UR = intensity.at<uchar>(pix_ur.first, pix_ur.second);
+      double inten_LL = intensity.at<uchar>(pix_ll.first, pix_ll.second);
+      double inten_LR = intensity.at<uchar>(pix_lr.first, pix_lr.second);
+
+      // Add three vertices of a face
+      add_vertex(UL, inten_UL, pix_ul, pix_to_vertex, vertex_count, vertices, colors);
+      add_vertex(UR, inten_UR, pix_ur, pix_to_vertex, vertex_count, vertices, colors);
+      add_vertex(LL, inten_LL, pix_ll, pix_to_vertex, vertex_count, vertices, colors);
+
+      // Note how we add only valid faces, so all three vertices must be valid (non-zero)
+      if (!invalidXyz(UL) && !invalidXyz(UR) && !invalidXyz(LL) &&
+          inten_UL >= 0 && inten_UR >= 0 && inten_LL >= 0) {
+        std::vector<size_t> face = {pix_to_vertex[pix_ul], pix_to_vertex[pix_ur],
+                                    pix_to_vertex[pix_ll]};
+        faces.push_back(face);
+      }
+
+      // Add the other face, forming a full grid cell
+      add_vertex(UR, inten_UR, pix_ur, pix_to_vertex, vertex_count, vertices, colors);
+      add_vertex(LR, inten_LR, pix_lr, pix_to_vertex, vertex_count, vertices, colors);
+      add_vertex(LL, inten_LL, pix_ll, pix_to_vertex, vertex_count, vertices, colors);
+      if (!invalidXyz(UR) && !invalidXyz(LR) && !invalidXyz(LL) &&
+          inten_UR >= 0 && inten_LR >= 0 && inten_LL >= 0) {
+        std::vector<size_t> face = {pix_to_vertex[pix_ur], pix_to_vertex[pix_lr],
+                                    pix_to_vertex[pix_ll]};
+        faces.push_back(face);
+      }
+    }
+  }
+
+  // Form and save the ply
+  happly::PLYData ply;
+  ply.addVertexPositions(vertices);
+  ply.addVertexColors(colors);
+  ply.addFaceIndices(faces);
+  std::cout << "Writing: " << plyFileName << std::endl;
+  ply.write(plyFileName, happly::DataFormat::ASCII);
+}
+
+// Save the depth clouds and optimized transforms needed to create a mesh with voxblox
+// (if depth clouds exist).
+void exportToVoxblox(std::vector<std::string> const& cam_names,
+                     std::vector<dense_map::cameraImage> const& cam_images,
+                     std::vector<Eigen::Affine3d> const& depth_to_image,
+                     std::vector<Eigen::Affine3d> const& world_to_cam,
+                     std::string const& out_dir) {
+
+  if (cam_images.size() != world_to_cam.size())
+    LOG(FATAL) << "There must be as many camera images as camera poses.\n";
+  if (cam_names.size() != depth_to_image.size()) 
+    LOG(FATAL) << "Must have as many camera types as depth-to-image transforms.\n";
+  if (out_dir.empty())
+    LOG(FATAL) << "The output directory is empty.\n";
+
+  std::string voxblox_dir = out_dir + "/voxblox";
+  dense_map::createDir(voxblox_dir);
+
+  char timestamp_buffer[1000];
+
+  // Must take a pass for each camera type, and then visit
+  // all images while ignoring those of a different type. There are very
+  // few camera types, so this is not unreasonable.
+  for (size_t cam_type = 0; cam_type < cam_names.size(); cam_type++) {
+
+    std::string voxblox_subdir = voxblox_dir + "/" + cam_names[cam_type];
+    dense_map::createDir(voxblox_subdir);
+
+    std::string index_file = voxblox_subdir + "/index.txt";
+    std::cout << "Writing: " << index_file << std::endl;
+    std::ofstream ofs(index_file.c_str());
+
+    for (size_t cid = 0; cid < cam_images.size(); cid++) {
+
+      if (cam_images[cid].camera_type != cam_type) 
+        continue;
+
+      int depth_cols = cam_images[cid].depth_cloud.cols;
+      int depth_rows = cam_images[cid].depth_cloud.rows;
+      
+      if (depth_cols == 0 || depth_rows == 0)
+        continue; // skip empty clouds
+
+      // Sanity check
+      if (depth_cols != cam_images[cid].image.cols || 
+          depth_rows != cam_images[cid].image.rows)
+        LOG(FATAL) << "Found a depth cloud and corresponding image with mismatching dimensions.\n";
+        
+      // Must use the 10.7f format for the timestamp as everywhere else in the code,
+      // as it is in double precision.
+      double timestamp = cam_images[cid].timestamp;
+      snprintf(timestamp_buffer, sizeof(timestamp_buffer), "%10.7f", timestamp);
+
+      // Sanity check
+      if (cam_images[cid].image.channels() != 1) 
+        LOG(FATAL) << "Expecting a grayscale input image.\n";
+      
+      // Form a pcl point cloud. Add the first band of the image as an intensity
+      // Later will reduce its dimensions as we will skip invalid pixels.
+      // Use fields as expected by voxblox.
+      // TODO(oalexan1): Make this a subroutine
+      pcl::PointCloud<pcl::PointNormal> pc;
+      pc.width = std::int64_t(depth_cols) * std::int64_t(depth_rows); // int64 to avoid overflow
+      pc.height = 1;
+      pc.points.resize(pc.width * pc.height);
+      int count = 0;
+      for (int row = 0; row < depth_rows; row++) {
+        for (int col = 0; col < depth_cols; col++) {
+          cv::Vec3f xyz = cam_images[cid].depth_cloud.at<cv::Vec3f>(row, col);
+          if (xyz == cv::Vec3f(0, 0, 0)) // skip invalid points
+            continue;
+
+          // Transform from depth cloud coordinates to camera coordinates
+          // (later voxblox will transform to world coordinates)
+          Eigen::Vector3d P(xyz[0], xyz[1], xyz[2]);
+          P = depth_to_image[cam_images[cid].camera_type] * P;
+          
+          pc.points[count].x         = P[0];
+          pc.points[count].y         = P[1];
+          pc.points[count].z         = P[2];
+          pc.points[count].normal_x  = cam_images[cid].image.at<uchar>(row, col); // intensity
+          pc.points[count].normal_y  = 1.0; // weight
+          pc.points[count].normal_y  = 1.0; // intersection err
+          pc.points[count].normal_y  = 0.0; // ensure initialization
+          
+          count++;
+        }
+      }
+      // Shrink the cloud as invalid data was skipped
+      if (count > pc.width) 
+        LOG(FATAL) << "Book-keeping error in processing point clouds.\n";
+      pc.width = count;
+      pc.height = 1;
+      pc.points.resize(pc.width * pc.height);
+
+      // Save the transform
+      std::string transform_file = voxblox_subdir + "/" + timestamp_buffer + "_cam2world.txt";
+      ofs << transform_file << "\n"; // save its name in the index
+      dense_map::writeMatrix(world_to_cam[cid].inverse().matrix(), transform_file);
+
+      // Save the pcd file
+      std::string cloud_file = voxblox_subdir + "/" + timestamp_buffer + ".pcd";
+      std::cout << "Writing: " << cloud_file << std::endl;
+      ofs << cloud_file << "\n"; // save its name in the index
+      pcl::io::savePCDFileBinary(cloud_file, pc); // writing binary is much faster than ascii
+    }
+  }
+  
+}
+  
+// Save the depth clouds and optimized transforms needed to create a mesh with voxblox
+// (if depth clouds exist).
+void saveTransformedDepthClouds(std::vector<std::string> const& cam_names,
+                                std::vector<dense_map::cameraImage> const& cam_images,
+                                std::vector<Eigen::Affine3d> const& depth_to_image,
+                                std::vector<Eigen::Affine3d> const& world_to_cam,
+                                std::string const& out_dir) {
+  if (cam_images.size() != world_to_cam.size())
+    LOG(FATAL) << "There must be as many camera images as camera poses.\n";
+  if (cam_names.size() != depth_to_image.size()) 
+    LOG(FATAL) << "Must have as many camera types as depth-to-image transforms.\n";
+  
+  if (out_dir.empty())
+    LOG(FATAL) << "The output directory is empty.\n";
+
+  std::string trans_depth_dir = out_dir + "/trans_depth";
+  dense_map::createDir(trans_depth_dir);
+
+  char timestamp_buffer[1000];
+
+  // Must take a pass for each camera type, and then visit
+  // all images while ignoring those of a different type. There are very
+  // few camera types, so this is not unreasonable.
+
+  for (size_t cam_type = 0; cam_type < cam_names.size(); cam_type++) {
+
+    std::string trans_depth_subdir = trans_depth_dir + "/" + cam_names[cam_type];
+    dense_map::createDir(trans_depth_subdir);
+
+    for (size_t cid = 0; cid < cam_images.size(); cid++) {
+
+      if (cam_images[cid].camera_type != cam_type) 
+        continue;
+
+      int depth_cols = cam_images[cid].depth_cloud.cols;
+      int depth_rows = cam_images[cid].depth_cloud.rows;
+      
+      if (depth_cols == 0 || depth_rows == 0)
+        continue; // skip empty clouds
+
+      // Sanity check
+      if (depth_cols != cam_images[cid].image.cols || 
+          depth_rows != cam_images[cid].image.rows)
+        LOG(FATAL) << "Found a depth cloud and corresponding image with mismatching dimensions.\n";
+        
+      // Must use the 10.7f format for the timestamp as everywhere else in the code,
+      // as it is in double precision.
+      double timestamp = cam_images[cid].timestamp;
+      snprintf(timestamp_buffer, sizeof(timestamp_buffer), "%10.7f", timestamp);
+
+      // Sanity check
+      if (cam_images[cid].image.channels() != 1) 
+        LOG(FATAL) << "Expecting a grayscale input image.\n";
+
+      // Save the pcd file
+      std::string cloud_file = trans_depth_subdir + "/" + timestamp_buffer + ".ply";
+
+      // To go from the depth cloud to world coordinates need to first to go from depth
+      // to image coordinates, then from image to world. 
+      Eigen::Affine3d depth_to_world = (world_to_cam[cid].inverse())
+        * depth_to_image[cam_images[cid].camera_type];
+      saveTransformedMesh(cam_images[cid].depth_cloud, cam_images[cid].image,
+                          depth_to_world, cloud_file);
+      
+    }
+  }
+  
+}
+  
 }  // end namespace dense_map

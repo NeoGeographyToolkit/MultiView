@@ -225,6 +225,25 @@ def run_pair(left_image, right_image, left_cam, right_cam, args, tools_base_dir,
 
     return pcd_file
 
+def fuse_clouds(args, tools_base_dir, undistorted_images, cam_to_world_files):
+    
+    # Fuse the results in a mesh with voxblox
+    voxblox_index =  args.out_dir + "/" + args.rig_sensor + "/voxblox_index.txt"
+    fused_mesh = args.out_dir + "/" + args.rig_sensor + "/fused_mesh.ply"
+    print("Writing: " + voxblox_index)
+    with open(voxblox_index, "w") as handle:
+        for t in range(len(undistorted_images) - 1):
+            handle.write(cam_to_world_files[t] + "\n")
+            handle.write(pcd_files[t] + "\n")
+
+    args.mesh_gen_options = args.mesh_gen_options.replace('\\', ' ')
+    mesh_gen_options = shlex.split(args.mesh_gen_options) 
+    cmd = [tools_base_dir + "/bin/voxblox_mesh",
+           '--index', voxblox_index,
+           '--output_mesh', fused_mesh] + \
+           mesh_gen_options
+    rig_utils.run_cmd(cmd, quit_on_failure = True)
+
 if __name__ == "__main__":
 
     args = process_args(sys.argv)
@@ -262,19 +281,4 @@ if __name__ == "__main__":
         pcd_files.append(pcd_file)
         
     if step_dict[args.first_step] <= 2 and step_dict[args.last_step] >= 2:
-        # Fuse the results in a mesh with voxblox
-        voxblox_index =  args.out_dir + "/" + args.rig_sensor + "/voxblox_index.txt"
-        fused_mesh = args.out_dir + "/" + args.rig_sensor + "/fused_mesh.ply"
-        print("Writing: " + voxblox_index)
-        with open(voxblox_index, "w") as handle:
-            for t in range(len(undistorted_images) - 1):
-                handle.write(cam_to_world_files[t] + "\n")
-                handle.write(pcd_files[t] + "\n")
-            
-        args.mesh_gen_options = args.mesh_gen_options.replace('\\', ' ')
-        mesh_gen_options = shlex.split(args.mesh_gen_options) 
-        cmd = [tools_base_dir + "/bin/voxblox_mesh",
-               '--index', voxblox_index,
-               '--output_mesh', fused_mesh] + \
-               mesh_gen_options
-        rig_utils.run_cmd(cmd, quit_on_failure = True)
+        fuse_clouds(args, tools_base_dir, undistorted_images, cam_to_world_files)

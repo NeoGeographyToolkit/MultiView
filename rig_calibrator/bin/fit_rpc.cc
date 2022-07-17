@@ -54,6 +54,8 @@
 
 namespace fs = boost::filesystem;
 
+// TODO(oalexan1): Must have sensor name as an option. For now it defaults to sensor 0.
+
 DEFINE_int32(rpc_degree, -1,
              "The degree of the RPC model to fit.");
 
@@ -99,7 +101,7 @@ int main(int argc, char** argv) {
   std::vector<camera::CameraParameters> cam_params;
   std::vector<Eigen::Affine3d>          ref_to_cam_trans;
   std::vector<double>                   ref_to_cam_timestamp_offsets;
-  bool use_initial_rig_transforms = false; // dictated by the api
+  bool use_initial_rig_transforms = true; // dictated by the api
   dense_map::readRigConfig(FLAGS_camera_config, use_initial_rig_transforms, ref_cam_type, cam_names,
                            cam_params, ref_to_cam_trans, depth_to_image,
                            ref_to_cam_timestamp_offsets);

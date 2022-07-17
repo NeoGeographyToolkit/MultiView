@@ -1023,7 +1023,7 @@ void adjustImageSize(camera::CameraParameters const& cam_params, cv::Mat & image
 // Project texture and find the UV coordinates
 void projectTexture(mve::TriangleMesh::ConstPtr mesh, std::shared_ptr<BVHTree> bvh_tree,
                     cv::Mat const& image,
-                    camera::CameraModel const& cam, double num_exclude_boundary_pixels,
+                    camera::CameraModel const& cam,
                     // outputs
                     std::vector<double>& smallest_cost_per_face,
                     std::vector<Eigen::Vector3i>& face_vec,
@@ -1052,9 +1052,6 @@ void projectTexture(mve::TriangleMesh::ConstPtr mesh, std::shared_ptr<BVHTree> b
                << calib_image_cols << ' ' << calib_image_rows << "\n"
                << "These must be equal up to an integer factor.\n";
   }
-
-  // To compensate for calibration being done at lower resolution
-  num_exclude_boundary_pixels /= static_cast<double>(factor);
 
   Eigen::Vector3d cam_ctr = cam.GetPosition();
 
@@ -1151,15 +1148,20 @@ void projectTexture(mve::TriangleMesh::ConstPtr mesh, std::shared_ptr<BVHTree> b
       cam.GetParameters().Convert<camera::UNDISTORTED_C, camera::DISTORTED>
         (undist_centered_pix, &dist_pix);
 
-      // Skip pixels that don't project in the image
-      if (dist_pix.x() < num_exclude_boundary_pixels ||
-          dist_pix.x() > calib_image_cols - 1 - num_exclude_boundary_pixels ||
-          dist_pix.y() < num_exclude_boundary_pixels ||
-          dist_pix.y() > calib_image_rows - 1 - num_exclude_boundary_pixels) {
+      // Skip pixels that don't project in the window of dimensions
+      // dist_crop_size centered at the image center. Note that
+      // dist_crop_size is read from the camera configuration, and is
+      // normally either the full image or something smaller if the
+      // user restricts the domain of validity of the distortion
+      // model.
+      Eigen::Vector2i dist_size      = cam.GetParameters().GetDistortedSize();
+      Eigen::Vector2i dist_crop_size = cam.GetParameters().GetDistortedCropSize();
+      if (std::abs(dist_pix[0] - dist_size[0] / 2.0) > dist_crop_size[0] / 2.0  ||
+          std::abs(dist_pix[1] - dist_size[1] / 2.0) > dist_crop_size[1] / 2.0) {
         visible = false;
         break;
       }
-
+      
       // Find the u, v coordinates of each vertex
       double u = dist_pix.x() / calib_image_cols;
       // TODO(oalexan1): Maybe use:
@@ -1178,7 +1180,8 @@ void projectTexture(mve::TriangleMesh::ConstPtr mesh, std::shared_ptr<BVHTree> b
 
       // Sanity check, to ensure nothing got mixed up with the multiple
       // threads
-      if (cost_val >= smallest_cost_per_face[face_id]) LOG(FATAL) << "Book-keeping error in estimating cost per face.";
+      if (cost_val >= smallest_cost_per_face[face_id])
+        LOG(FATAL) << "Book-keeping error in estimating cost per face.";
 
       smallest_cost_per_face[face_id] = cost_val;
 
@@ -1513,7 +1516,7 @@ bool ray_mesh_intersect(Eigen::Vector2d const& dist_pix,
 void meshProject(mve::TriangleMesh::Ptr const& mesh, std::shared_ptr<BVHTree> const& bvh_tree,
                  cv::Mat const& image, Eigen::Affine3d const& world_to_cam,
                  camera::CameraParameters const& cam_params,
-                 int64_t num_exclude_boundary_pixels, std::string const& out_prefix) {
+                 std::string const& out_prefix) {
   // Create the output directory, if needed
   std::string out_dir = boost::filesystem::path(out_prefix).parent_path().string();
   if (out_dir != "") dense_map::createDir(out_dir);
@@ -1528,8 +1531,7 @@ void meshProject(mve::TriangleMesh::Ptr const& mesh, std::shared_ptr<BVHTree> co
   camera::CameraModel cam(world_to_cam, cam_params);
 
   // Find the UV coordinates and the faces having them
-  dense_map::projectTexture(mesh, bvh_tree, image, cam, num_exclude_boundary_pixels,
-                            smallest_cost_per_face, face_vec, uv_map);
+  dense_map::projectTexture(mesh, bvh_tree, image, cam, smallest_cost_per_face, face_vec, uv_map);
 
   // Strip the directory name, according to .obj file conventions.
   std::string suffix = boost::filesystem::path(out_prefix).filename().string();

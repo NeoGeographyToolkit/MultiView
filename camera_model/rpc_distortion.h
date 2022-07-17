@@ -63,8 +63,7 @@ class RPCLensDistortion {
 
   void scale(double scale);
 
-  bool set_can_undistort(bool flag) { m_can_undistort = flag; }
-  
+  void set_can_undistort(bool flag) { m_can_undistort = flag; }
   bool can_undistort() const { return m_can_undistort; }
   static void init_as_identity(Eigen::VectorXd & params);
   static void increment_degree(Eigen::VectorXd & params);

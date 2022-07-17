@@ -94,8 +94,10 @@ def genTheiaCalibFile(rig_config, args):
     images = {}
     extensions = set()
     for image_wildcard in args.images.split():
+        # TODO(oalexan1): This is very fragile!
+        # Better glob them all, then divide them later by sensor name
         sensor_name = os.path.basename(os.path.dirname(image_wildcard))
-        images[sensor_name] = glob.glob(image_wildcard)
+        images[sensor_name] = sorted(glob.glob(image_wildcard))
         ext = rig_utils.imageExtension(images[sensor_name])
         extensions.add(ext)
         
