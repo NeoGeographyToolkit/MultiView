@@ -301,6 +301,8 @@ DEFINE_bool(verbose, false,
 
 namespace dense_map {
 
+// TODO(oalexan1): Move to transform_utils.cc.
+  
 Eigen::Affine3d calc_interp_world_to_ref(const double* beg_world_to_ref_t,
                                          const double* end_world_to_ref_t,
                                          double beg_ref_stamp,
@@ -371,6 +373,8 @@ Eigen::Affine3d calc_world_to_cam_trans(const double* beg_world_to_ref_t,
   return interp_world_to_cam_aff;
 }
 
+// TODO(oalexan1): Move to a separate file named costFunctions.h
+
 ceres::LossFunction* GetLossFunction(std::string cost_fun, double th) {
   // Convert to lower-case
   std::transform(cost_fun.begin(), cost_fun.end(), cost_fun.begin(), ::tolower);
@@ -390,6 +394,8 @@ ceres::LossFunction* GetLossFunction(std::string cost_fun, double th) {
   return loss_function;
 }
 
+// TODO(oalexan1): Move to a separate file named costFunctions.h
+  
 // An error function minimizing the error of projecting
 // an xyz point into a camera that is bracketed by
 // two reference cameras. The precise timestamp offset
@@ -999,12 +1005,12 @@ void set_up_block_sizes(int num_depth_params,
                         std::vector<int> & bracketed_cam_block_sizes,
                         std::vector<int> & bracketed_depth_block_sizes,
                         std::vector<int> & bracketed_depth_mesh_block_sizes,
-                        std::vector<int> & mesh_block_sizes) {
+                        std::vector<int> & xyz_block_sizes) {
   // Wipe the outputs
   bracketed_cam_block_sizes.clear();
   bracketed_depth_block_sizes.clear();
   bracketed_depth_mesh_block_sizes.clear();
-  mesh_block_sizes.clear();
+  xyz_block_sizes.clear();
 
   int num_focal_lengths = 1;      // The x and y focal length are assumed to be the same
   int num_distortion_params = 1;  // will be overwritten later
@@ -1038,7 +1044,7 @@ void set_up_block_sizes(int num_depth_params,
   bracketed_depth_mesh_block_sizes.push_back(dense_map::NUM_SCALAR_PARAMS);
 
   // Set up the variable blocks to optimize for the mesh xyz
-  mesh_block_sizes.push_back(dense_map::NUM_XYZ_PARAMS);
+  xyz_block_sizes.push_back(dense_map::NUM_XYZ_PARAMS);
 }
 
 // Look up each ref cam image by timestamp. In between any two ref cam timestamps,
@@ -2623,10 +2629,10 @@ int main(int argc, char** argv) {
   std::vector<int> bracketed_cam_block_sizes;
   std::vector<int> bracketed_depth_block_sizes;
   std::vector<int> bracketed_depth_mesh_block_sizes;
-  std::vector<int> mesh_block_sizes;
+  std::vector<int> xyz_block_sizes;
   dense_map::set_up_block_sizes(num_depth_params,
                                 bracketed_cam_block_sizes, bracketed_depth_block_sizes,
-                                bracketed_depth_mesh_block_sizes, mesh_block_sizes);
+                                bracketed_depth_mesh_block_sizes, xyz_block_sizes);
 
   // For a given fid = pid_to_cid_fid[pid][cid], the value
   // pid_cid_fid_inlier[pid][cid][fid] will be non-zero only if this
@@ -2940,18 +2946,33 @@ int main(int argc, char** argv) {
         }
       }  // end iterating over all cid for given pid
 
-      // This constraint will be for the pid
+      // The constraints below will be for each triangulated point. Skip such a point
+      // if all rays converging to it come from outliers.
+      bool isTriInlier = false;
+      for (auto cid_fid = pid_to_cid_fid[pid].begin();
+           cid_fid != pid_to_cid_fid[pid].end(); cid_fid++) {
+        int cid = cid_fid->first;
+        int fid = cid_fid->second;
+        
+        if (dense_map::getMapValue(pid_cid_fid_inlier, pid, cid, fid)) {
+          isTriInlier = true;
+          break; // found it to be an inlier, no need to do further checking
+        }
+      }
+
+      // Add mesh-to-triangulated point constraint
       bool have_mesh_tri_constraint = false;
       Eigen::Vector3d avg_mesh_xyz(0, 0, 0);
-      if (FLAGS_mesh != "") {
+      if (FLAGS_mesh != "" && isTriInlier) {
         avg_mesh_xyz = pid_mesh_xyz.at(pid);
-        if (FLAGS_mesh_tri_weight > 0 && avg_mesh_xyz != bad_xyz) have_mesh_tri_constraint = true;
+        if (FLAGS_mesh_tri_weight > 0 && avg_mesh_xyz != bad_xyz)
+          have_mesh_tri_constraint = true;
       }
       if (have_mesh_tri_constraint) {
         // Try to make the triangulated point agree with the mesh intersection
 
         ceres::CostFunction* mesh_cost_function =
-          dense_map::XYZError::Create(avg_mesh_xyz, mesh_block_sizes, FLAGS_mesh_tri_weight);
+          dense_map::XYZError::Create(avg_mesh_xyz, xyz_block_sizes, FLAGS_mesh_tri_weight);
 
         ceres::LossFunction* mesh_loss_function =
           dense_map::GetLossFunction("cauchy", FLAGS_robust_threshold);
@@ -2967,10 +2988,11 @@ int main(int argc, char** argv) {
         residual_scales.push_back(FLAGS_mesh_tri_weight);
       }
 
-      if (FLAGS_tri_weight > 0.0) {
+      // Add the constraint that the triangulated point does not go too far
+      if (FLAGS_tri_weight > 0.0 && isTriInlier) {
         // Try to make the triangulated points (and hence cameras) not move too far
         ceres::CostFunction* tri_cost_function =
-          dense_map::XYZError::Create(xyz_vec_orig[pid], mesh_block_sizes, FLAGS_tri_weight);
+          dense_map::XYZError::Create(xyz_vec_orig[pid], xyz_block_sizes, FLAGS_tri_weight);
         ceres::LossFunction* tri_loss_function =
           dense_map::GetLossFunction("cauchy", FLAGS_tri_robust_threshold);
         problem.AddResidualBlock(tri_cost_function, tri_loss_function,

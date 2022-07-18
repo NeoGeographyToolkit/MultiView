@@ -641,11 +641,12 @@ void detectMatchFeatures(// Inputs
 }
 
 void multiViewTriangulation(// Inputs
-                            std::vector<camera::CameraParameters>             const& cam_params,
-                            std::vector<dense_map::cameraImage>               const& cams,
-                            std::vector<Eigen::Affine3d>                      const& world_to_cam,
-                            std::vector<std::map<int, int>>                   const& pid_to_cid_fid,
-                            std::vector<std::vector<std::pair<float, float>>> const& keypoint_vec,
+                            std::vector<camera::CameraParameters>   const& cam_params,
+                            std::vector<dense_map::cameraImage>     const& cams,
+                            std::vector<Eigen::Affine3d>            const& world_to_cam,
+                            std::vector<std::map<int, int>>         const& pid_to_cid_fid,
+                            std::vector<std::vector<std::pair<float, float>>>
+                            const& keypoint_vec,
                             // Outputs
                             std::vector<std::map<int, std::map<int, int>>>& pid_cid_fid_inlier,
                             std::vector<Eigen::Vector3d>& xyz_vec) {
@@ -693,8 +694,24 @@ void multiViewTriangulation(// Inputs
 
     // Triangulate n rays emanating from given undistorted and centered pixels
     xyz_vec[pid] = dense_map::Triangulate(focal_length_vec, world_to_cam_aff_vec, pix_vec);
-  }
 
+    bool bad_xyz = false;
+    for (int c = 0; c < xyz_vec[pid].size(); c++) {
+      if (std::isinf(xyz_vec[pid][c]) || std::isnan(xyz_vec[pid][c])) 
+        bad_xyz = true;
+    }
+    if (bad_xyz) {
+      // if triangulation failed, must set all features for this pid to outliers.
+      for (auto cid_fid = pid_to_cid_fid[pid].begin(); cid_fid != pid_to_cid_fid[pid].end();
+           cid_fid++) {
+        int cid = cid_fid->first;
+        int fid = cid_fid->second;
+        dense_map::setMapValue(pid_cid_fid_inlier, pid, cid, fid, 0);
+      }
+    }
+    
+  } // end iterating over triangulated points
+  
   return;
 }
   
