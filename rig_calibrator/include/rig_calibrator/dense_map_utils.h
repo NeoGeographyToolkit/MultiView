@@ -103,10 +103,6 @@ void writeMatrix(Eigen::MatrixXd const& M, std::string const& filename);
 
 void writeCloud(std::vector<float> const& points, size_t point_size, std::string const& filename);
 
-// Two minor and local utility functions
-std::string print_vec(double a);
-std::string print_vec(Eigen::Vector3d a);
-
 // Return the type of an opencv matrix
 std::string matType(cv::Mat const& mat);
 
@@ -224,6 +220,13 @@ void saveXyzImage(std::string const& filename, cv::Mat const& img);
 // Read an image with 3 floats per pixel. OpenCV's imread() cannot do that.
 void readXyzImage(std::string const& filename, cv::Mat & img);
 
+// Find the depth measurement. Use nearest neighbor interpolation
+// to look into the depth cloud.
+bool depthValue(// Inputs
+                cv::Mat const& depth_cloud, Eigen::Vector2d const& dist_ip,
+                // Output
+                Eigen::Vector3d& depth_xyz);
+  
 // Forward declaration
 struct cameraImage;
 
@@ -253,6 +256,22 @@ struct ImageMessage {
 bool lookupImage(double desired_time, std::vector<ImageMessage> const& msgs,
                  cv::Mat& image, std::string & image_name, int& beg_pos, double& found_time);
 
+// Look up images, with or without the rig constraint. See individual functions
+// below for more details.
+void lookupImages(// Inputs
+                  int ref_cam_type, bool no_rig, double bracket_len,
+                  double timestamp_offsets_max_change,
+                  std::vector<std::string> const& cam_names,
+                  std::vector<camera::CameraParameters> const& cam_params,
+                  std::vector<double> const& ref_timestamps,
+                  std::vector<std::vector<ImageMessage>> const& image_data,
+                  std::vector<std::vector<ImageMessage>> const& depth_data,
+                  std::vector<double> const& ref_to_cam_timestamp_offsets,
+                  // Outputs
+                  std::vector<dense_map::cameraImage>& cams,
+                  std::vector<double>& min_timestamp_offset,
+                  std::vector<double>& max_timestamp_offset);
+  
 // Convert a string of space-separated numbers to a vector
 void strToVec(std::string const& str, std::vector<double> & vec);
   

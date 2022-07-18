@@ -187,6 +187,28 @@ Eigen::Vector3d Triangulate(std::vector<double> const& focal_length_vec,
                             std::vector<Eigen::Affine3d> const& world_to_cam_vec,
                             std::vector<Eigen::Vector2d> const& pix_vec);
 
+// Apply a given transform to the given set of cameras.
+// We assume that the transform is of the form
+// T(x) = scale * rotation * x + translation
+void TransformCameras(Eigen::Affine3d const& T, std::vector<Eigen::Affine3d> &world_to_cam);
+  
+// Apply same transform as above to points
+void TransformPoints(Eigen::Affine3d const& T, std::vector<Eigen::Vector3d> *xyz);
+
+// Apply a registration transform to a rig. The only thing that
+// changes is scale, as the rig transforms are between coordinate
+// systems of various cameras.
+void TransformRig(Eigen::Affine3d const& T, std::vector<Eigen::Affine3d> & ref_to_cam_trans);
+  
+// Find the 3D transform from an abstract coordinate system to the
+// world, given control points (pixel matches) and corresponding 3D
+// measurements. It is assumed all images are from the reference
+// camera.
+Eigen::Affine3d registrationTransform(std::string const& hugin_file, std::string const& xyz_file,
+                                      camera::CameraParameters const& ref_cam_params,
+                                      std::vector<std::string> const& cid_to_filename,
+                                      std::vector<Eigen::Affine3d>  & world_to_cam_trans); 
+  
 struct cameraImage;
 
 void detectMatchFeatures(// Inputs
@@ -209,7 +231,19 @@ void multiViewTriangulation(// Inputs
                             // Outputs
                             std::vector<std::map<int, std::map<int, int>>>& pid_cid_fid_inlier,
                             std::vector<Eigen::Vector3d>& xyz_vec);
-  
+
+// Given all the merged and filtered tracks in pid_cid_fid, for each
+// image pair cid1 and cid2 with cid1 < cid2 < cid1 + num_overlaps + 1,
+// save the matches of this pair which occur in the set of tracks.
+void saveInlinerMatchPairs(// Inputs
+                           std::vector<dense_map::cameraImage> const& cams,
+                           int num_overlaps,
+                           std::vector<std::map<int, int>> const& pid_to_cid_fid,
+                           std::vector<std::vector<std::pair<float, float>>>
+                           const& keypoint_vec,
+                           std::vector<std::map<int, std::map<int, int>>>
+                           const& pid_cid_fid_inlier,
+                           std::string const& out_dir);
 }  // namespace dense_map
 
 #endif  // INTEREST_POINT_H_

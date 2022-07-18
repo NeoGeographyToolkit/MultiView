@@ -363,10 +363,6 @@ void formObjCustomUV(mve::TriangleMesh::ConstPtr mesh, std::vector<Eigen::Vector
 
 void formMtl(std::string const& out_prefix, std::string& mtl_str);
 
-// The images from the bag may need to be resized to be the same
-// size as in the calibration file.
-void adjustImageSize(camera::CameraParameters const& cam_params, cv::Mat & image);
-
 // Project texture and find the UV coordinates
 void projectTexture(mve::TriangleMesh::ConstPtr mesh, std::shared_ptr<BVHTree> bvh_tree,
                     cv::Mat const& image, camera::CameraModel const& cam,
@@ -403,6 +399,27 @@ void meshProject(mve::TriangleMesh::Ptr const& mesh, std::shared_ptr<BVHTree> co
 // Save a model
 void isaac_save_model(IsaacObjModel* obj_model, std::string const& prefix);
 
+void meshProjectCameras(std::vector<std::string> const& cam_names,
+                        std::vector<camera::CameraParameters> const& cam_params,
+                        std::vector<dense_map::cameraImage> const& cam_images,
+                        std::vector<Eigen::Affine3d> const& world_to_cam,
+                        mve::TriangleMesh::Ptr const& mesh,
+                        std::shared_ptr<BVHTree> const& bvh_tree,
+                        std::string const& out_dir);
+
+void meshTriangulations(// Inputs
+  std::vector<camera::CameraParameters> const& cam_params,
+  std::vector<dense_map::cameraImage> const& cams,
+  std::vector<Eigen::Affine3d> const& world_to_cam,
+  std::vector<std::map<int, int>> const& pid_to_cid_fid,
+  std::vector<std::map<int, std::map<int, int>>> const& pid_cid_fid_inlier,
+  std::vector<std::vector<std::pair<float, float>>> const& keypoint_vec,
+  Eigen::Vector3d const& bad_xyz, double min_ray_dist, double max_ray_dist,
+  mve::TriangleMesh::Ptr const& mesh, std::shared_ptr<BVHTree> const& bvh_tree,
+  // Outputs
+  std::vector<std::map<int, std::map<int, Eigen::Vector3d>>>& pid_cid_fid_mesh_xyz,
+  std::vector<Eigen::Vector3d>& pid_mesh_xyz);
+  
 }  // namespace dense_map
 
 #endif  // TEXTURE_PROCESSING_H_

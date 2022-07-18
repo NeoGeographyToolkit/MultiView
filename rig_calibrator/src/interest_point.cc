@@ -715,4 +715,530 @@ void multiViewTriangulation(// Inputs
   return;
 }
   
+// Given all the merged and filtered tracks in pid_cid_fid, for each
+// image pair cid1 and cid2 with cid1 < cid2 < cid1 + num_overlaps + 1,
+// save the matches of this pair which occur in the set of tracks.
+void saveInlinerMatchPairs(// Inputs
+                           std::vector<dense_map::cameraImage> const& cams,
+                           int num_overlaps,
+                           std::vector<std::map<int, int>> const& pid_to_cid_fid,
+                           std::vector<std::vector<std::pair<float, float>>>
+                           const& keypoint_vec,
+                           std::vector<std::map<int, std::map<int, int>>>
+                           const& pid_cid_fid_inlier,
+                           std::string const& out_dir) {
+  MATCH_MAP matches;
+
+  for (size_t pid = 0; pid < pid_to_cid_fid.size(); pid++) {
+    for (auto cid_fid1 = pid_to_cid_fid[pid].begin();
+         cid_fid1 != pid_to_cid_fid[pid].end(); cid_fid1++) {
+      int cid1 = cid_fid1->first;
+      int fid1 = cid_fid1->second;
+
+      for (auto cid_fid2 = pid_to_cid_fid[pid].begin();
+           cid_fid2 != pid_to_cid_fid[pid].end(); cid_fid2++) {
+        int cid2 = cid_fid2->first;
+        int fid2 = cid_fid2->second;
+
+        bool is_good = (cid1 < cid2 && cid2 < cid1 + num_overlaps + 1);
+        if (!is_good)
+          continue;
+
+        // Consider inliers only
+        if (!dense_map::getMapValue(pid_cid_fid_inlier, pid, cid1, fid1) ||
+            !dense_map::getMapValue(pid_cid_fid_inlier, pid, cid2, fid2))
+          continue;
+
+        auto index_pair = std::make_pair(cid1, cid2);
+
+        InterestPoint ip1(keypoint_vec[cid1][fid1].first, keypoint_vec[cid1][fid1].second);
+        InterestPoint ip2(keypoint_vec[cid2][fid2].first, keypoint_vec[cid2][fid2].second);
+
+        matches[index_pair].first.push_back(ip1);
+        matches[index_pair].second.push_back(ip2);
+      }
+    }
+  }  // End iterations over pid
+
+  for (auto it = matches.begin(); it != matches.end(); it++) {
+    auto & index_pair = it->first;
+    dense_map::MATCH_PAIR const& match_pair = it->second;
+
+    int left_index = index_pair.first;
+    int right_index = index_pair.second;
+
+    std::string match_dir = out_dir + "/matches";
+    dense_map::createDir(match_dir);
+
+    std::string suffix = "-inliers";
+    std::string match_file = dense_map::matchFileName(match_dir,
+                                                      cams[left_index].image_name,
+                                                      cams[right_index].image_name,
+                                                      suffix);
+
+    std::cout << "Writing: " << cams[left_index].image_name << ' ' << cams[right_index].image_name
+              << " " << match_file << std::endl;
+    dense_map::writeMatchFile(match_file, match_pair.first, match_pair.second);
+  }
+}
+
+// TODO(oalexan1):  Move to utils!
+// Given a set of points in 3D, heuristically estimate what it means
+// for two points to be "not far" from each other. The logic is to
+// find a bounding box of an inner cluster and multiply that by 0.2.
+double estimateCloseDistance(std::vector<Eigen::Vector3d> const& vec) {
+  Eigen::Vector3d range;
+  int num_pts = vec.size();
+  if (num_pts <= 0)
+    LOG(FATAL) << "Empty set of points.\n";  // to avoid a segfault
+
+  std::vector<double> vals(num_pts);
+  for (int it = 0; it < range.size(); it++) {  // iterate in each coordinate
+    // Sort all values in given coordinate
+    for (int p = 0; p < num_pts; p++)
+      vals[p] = vec[p][it];
+    std::sort(vals.begin(), vals.end());
+
+    // Find some percentiles
+    int min_p = round(num_pts*0.25);
+    int max_p = round(num_pts*0.75);
+    if (min_p >= num_pts) min_p = num_pts - 1;
+    if (max_p >= num_pts) max_p = num_pts - 1;
+    double min_val = vals[min_p], max_val = vals[max_p];
+    range[it] = 0.2*(max_val - min_val);
+  }
+
+  // Find the average of all ranges
+  double range_val = 0.0;
+  for (int it = 0; it < range.size(); it++)
+    range_val += range[it];
+  range_val /= range.size();
+
+  return range_val;
+}
+
+// Given two sets of 3D points, find the rotation + translation + scale
+// which best maps the first set to the second.
+// Source: http://en.wikipedia.org/wiki/Kabsch_algorithm
+
+// TODO(oalexan1): Move to utils!
+// TODO(oalexan1): Use robust version!  
+void Find3DAffineTransform(Eigen::Matrix3Xd const & in,
+                           Eigen::Matrix3Xd const & out,
+                           Eigen::Affine3d* result) {
+  // Default output
+  result->linear() = Eigen::Matrix3d::Identity(3, 3);
+  result->translation() = Eigen::Vector3d::Zero();
+
+  if (in.cols() != out.cols())
+    throw "Find3DAffineTransform(): input data mis-match";
+
+  // Local copies we can modify
+  Eigen::Matrix3Xd local_in = in, local_out = out;
+
+  // First find the scale, by finding the ratio of sums of some distances,
+  // then bring the datasets to the same scale.
+  double dist_in = 0, dist_out = 0;
+  for (int col = 0; col < local_in.cols()-1; col++) {
+    dist_in  += (local_in.col(col+1) - local_in.col(col)).norm();
+    dist_out += (local_out.col(col+1) - local_out.col(col)).norm();
+  }
+  if (dist_in <= 0 || dist_out <= 0)
+    return;
+  double scale = dist_out/dist_in;
+  local_out /= scale;
+
+  // Find the centroids then shift to the origin
+  Eigen::Vector3d in_ctr = Eigen::Vector3d::Zero();
+  Eigen::Vector3d out_ctr = Eigen::Vector3d::Zero();
+  for (int col = 0; col < local_in.cols(); col++) {
+    in_ctr  += local_in.col(col);
+    out_ctr += local_out.col(col);
+  }
+  in_ctr /= local_in.cols();
+  out_ctr /= local_out.cols();
+  for (int col = 0; col < local_in.cols(); col++) {
+    local_in.col(col)  -= in_ctr;
+    local_out.col(col) -= out_ctr;
+  }
+
+  // SVD
+  Eigen::Matrix3d Cov = local_in * local_out.transpose();
+  Eigen::JacobiSVD<Eigen::Matrix3d> svd(Cov, Eigen::ComputeFullU | Eigen::ComputeFullV);
+
+  // Find the rotation
+  double d = (svd.matrixV() * svd.matrixU().transpose()).determinant();
+  if (d > 0)
+    d = 1.0;
+  else
+    d = -1.0;
+  Eigen::Matrix3d I = Eigen::Matrix3d::Identity(3, 3);
+  I(2, 2) = d;
+  Eigen::Matrix3d R = svd.matrixV() * I * svd.matrixU().transpose();
+
+  // The final transform
+  result->linear() = scale * R;
+  result->translation() = scale*(out_ctr - R*in_ctr);
+}
+  
+// TODO(oalexan1): Move to utils
+  
+// Extract control points and the images they correspond 2 from
+// a hugin project file
+void ParseHuginControlPoints(std::string const& hugin_file,
+                             std::vector<std::string> * images,
+                             Eigen::MatrixXd * points) {
+  
+  // Initialize the outputs
+  (*images).clear();
+  *points = Eigen::MatrixXd(6, 1);
+
+  std::ifstream hf(hugin_file.c_str());
+  if (!hf.good())
+    LOG(FATAL) << "ParseHuginControlPoints(): Could not open hugin file: " << hugin_file;
+
+  int num_points = 0;
+  std::string line;
+  while (getline(hf, line)) {
+    // Parse for images
+    if (line.find("i ") == 0) {
+      size_t it = line.find("n\"");
+      if (it == std::string::npos)
+        LOG(FATAL) << "ParseHuginControlPoints(): Invalid line: " << line;
+      it += 2;
+      std::string image;
+      while (it < line.size() && line[it] != '"') {
+        image += line[it];
+        it++;
+      }
+      (*images).push_back(image);
+    }
+
+    // Parse control points
+    if (line.find("c ") == 0) {
+      // First wipe all letters
+      std::string orig_line = line;
+      char * ptr = const_cast<char*>(line.c_str());
+      for (size_t i = 0; i < line.size(); i++) {
+        // Wipe some extra chars
+        if ( (ptr[i] >= 'a' && ptr[i] <= 'z') ||
+             (ptr[i] >= 'A' && ptr[i] <= 'Z') )
+          ptr[i] = ' ';
+      }
+
+      // Out of a line like:
+      // c n0 N1 x367 y240 X144.183010710425 Y243.04008545843 t0
+      // we store the numbers, 0, 1, 367, 240, 144.183010710425 243.04008545843
+      // as a column.
+      // The stand for left image index, right image index,
+      // left image x, left image y, right image x, right image y.
+      double a, b, c, d, e, f;
+      if (sscanf(ptr, "%lf %lf %lf %lf %lf %lf", &a, &b, &c, &d, &e, &f) != 6)
+        LOG(FATAL) << "ParseHuginControlPoints(): Could not scan line: " << line;
+
+      // The left and right images must be different
+      if (a == b)
+        LOG(FATAL) << "The left and right images must be distinct. "
+                   << "Offending line in " << hugin_file << " is:\n"
+                   << orig_line << "\n";
+
+      num_points++;
+      (*points).conservativeResize(Eigen::NoChange_t(), num_points);
+      (*points).col(num_points-1) << a, b, c, d, e, f;
+    }
+  }
+}
+
+// A little helper function
+bool is_blank(std::string const& line) {
+  return (line.find_first_not_of(" \t\n\v\f\r") == std::string::npos);
+}
+
+// Parse a file having on each line xyz coordinates
+void ParseXYZ(std::string const& xyz_file,
+                              Eigen::MatrixXd * xyz) {
+  // Initialize the outputs
+  *xyz = Eigen::MatrixXd(3, 1);
+
+  std::ifstream hf(xyz_file.c_str());
+  if (!hf.good())
+    LOG(FATAL) << "ParseXYZ(): Could not open hugin file: " << xyz_file;
+
+  int num_points = 0;
+  std::string line;
+  while (getline(hf, line)) {
+    // Ignore lines starting with comments and empty lines
+    if (line.find("#") == 0 || is_blank(line)) continue;
+
+    // Apparently sometimes empty lines show up as if of length 1
+    if (line.size() == 1)
+      continue;
+
+    // Replace commas with spaces
+    char * ptr = const_cast<char*>(line.c_str());
+    for (size_t c = 0; c < line.size(); c++)
+      if (ptr[c] == ',') ptr[c] = ' ';
+    double x, y, z;
+    if (sscanf(line.c_str(), "%lf %lf %lf", &x, &y, &z) != 3)
+      LOG(FATAL) << "ParseXYZ(): Could not scan line: '" << line << "'\n";
+
+    num_points++;
+    (*xyz).conservativeResize(Eigen::NoChange_t(), num_points);
+    (*xyz).col(num_points-1) << x, y, z;
+  }
+}
+
+// Apply a given transform to the given set of cameras.
+// We assume that the transform is of the form
+// T(x) = scale * rotation * x + translation
+void TransformCameras(Eigen::Affine3d const& T, std::vector<Eigen::Affine3d> &world_to_cam) {
+  
+  // Inverse of rotation component
+  double scale = pow(T.linear().determinant(), 1.0 / 3.0);
+  Eigen::MatrixXd Tinv = (T.linear()/scale).inverse();
+
+  for (size_t cid = 0; cid < world_to_cam.size(); cid++) {
+    world_to_cam[cid].linear() = world_to_cam[cid].linear()*Tinv;
+    world_to_cam[cid].translation() = scale*world_to_cam[cid].translation() -
+      world_to_cam[cid].linear()*T.translation();
+  }
+}
+
+// Apply same transform as above to points
+void TransformPoints(Eigen::Affine3d const& T, std::vector<Eigen::Vector3d> *xyz) {
+  for (size_t pid = 0; pid < (*xyz).size(); pid++)
+    (*xyz)[pid] = T * (*xyz)[pid];
+}
+
+// Apply a registration transform to a rig. The only thing that
+// changes is scale, as the rig transforms are between coordinate
+// systems of various cameras.
+void TransformRig(Eigen::Affine3d const& T, std::vector<Eigen::Affine3d> & ref_to_cam_trans) {
+  double scale = pow(T.linear().determinant(), 1.0 / 3.0);
+  for (size_t cam_type = 0; cam_type < ref_to_cam_trans.size(); cam_type++) 
+    ref_to_cam_trans[cam_type].translation() *= scale;
+}
+
+// Two minor and local utility functions
+std::string print_vec(double a) {
+  char st[256];
+  snprintf(st, sizeof(st), "%7.4f", a);
+  return std::string(st);
+}
+std::string print_vec(Eigen::Vector3d a) {
+  char st[256];
+  snprintf(st, sizeof(st), "%7.4f %7.4f %7.4f", a[0], a[1], a[2]);
+  return std::string(st);
+}
+  
+// Find the 3D transform from an abstract coordinate system to the
+// world, given control points (pixel matches) and corresponding 3D
+// measurements. It is assumed all images are from the reference
+// camera.
+Eigen::Affine3d registrationTransform(std::string const& hugin_file, std::string const& xyz_file,
+                                  camera::CameraParameters const& ref_cam_params,
+                                  std::vector<std::string> const& cid_to_filename,
+                                  std::vector<Eigen::Affine3d>  & world_to_cam_trans) { 
+  
+  // Get the interest points in the images, and their positions in
+  // the world coordinate system, as supplied by a user.
+  // Parse and concatenate that information from multiple files.
+  std::vector<std::string> images;
+  Eigen::MatrixXd user_ip;
+  Eigen::MatrixXd user_xyz;
+  
+  ParseHuginControlPoints(hugin_file, &images, &user_ip);
+  ParseXYZ(xyz_file, &user_xyz);
+
+  int num_points = user_ip.cols();
+  if (num_points != user_xyz.cols())
+    LOG(FATAL) << "Could not parse an equal number of control "
+               << "points and xyz coordinates. Their numbers are "
+               << num_points << " vs " << user_xyz.cols() << ".\n";
+
+
+  std::map<std::string, int> filename_to_cid;
+  for (size_t cid = 0; cid < cid_to_filename.size(); cid++)
+    filename_to_cid[cid_to_filename[cid]] = cid;
+
+  // Wipe images that are missing from the map
+  std::map<int, int> cid2cid;
+  int good_cid = 0;
+  for (size_t cid = 0; cid < images.size(); cid++) {
+    std::string image = images[cid];
+    if (filename_to_cid.find(image) == filename_to_cid.end()) {
+      LOG(WARNING) << "Will ignore image missing from map: " << image;
+      continue;
+    }
+    cid2cid[cid] = good_cid;
+    images[good_cid] = images[cid];
+    good_cid++;
+  }
+  images.resize(good_cid);
+
+  // Remove points corresponding to images missing from map
+  int good_pid = 0;
+  for (int pid = 0; pid < num_points; pid++) {
+    int id1 = user_ip(0, pid);
+    int id2 = user_ip(1, pid);
+    if (cid2cid.find(id1) == cid2cid.end() || cid2cid.find(id2) == cid2cid.end()) {
+      continue;
+    }
+    user_ip.col(good_pid) = user_ip.col(pid);
+    user_xyz.col(good_pid) = user_xyz.col(pid);
+    good_pid++;
+  }
+  user_ip.conservativeResize(Eigen::NoChange_t(), good_pid);
+  user_xyz.conservativeResize(Eigen::NoChange_t(), good_pid);
+  num_points = good_pid;
+  for (int pid = 0; pid < num_points; pid++) {
+    int id1 = user_ip(0, pid);
+    int id2 = user_ip(1, pid);
+    if (cid2cid.find(id1) == cid2cid.end() || cid2cid.find(id2) == cid2cid.end())
+      LOG(FATAL) << "Book-keeping failure in registration.";
+    user_ip(0, pid) = cid2cid[id1];
+    user_ip(1, pid) = cid2cid[id2];
+  }
+
+
+  if (num_points < 3) 
+    LOG(FATAL) << "Must have at least 3 points to apply registration. Got: "
+               << num_points << "\n";
+  
+  // Iterate over the control points in the hugin file. Copy the
+  // control points to the list of user keypoints, and create the
+  // corresponding user_pid_to_cid_fid.
+  std::vector<Eigen::Matrix2Xd> user_cid_to_keypoint_map;
+  std::vector<std::map<int, int> > user_pid_to_cid_fid;
+  user_cid_to_keypoint_map.resize(cid_to_filename.size());
+  user_pid_to_cid_fid.resize(num_points);
+  for (int pid = 0; pid < num_points; pid++) {
+    // Left and right image indices
+    int id1 = user_ip(0, pid);
+    int id2 = user_ip(1, pid);
+
+    // Sanity check
+    if (id1 < 0 || id2 < 0 ||
+        id1 >= static_cast<int>(images.size()) ||
+        id2 >= static_cast<int>(images.size()) )
+      LOG(FATAL) << "Invalid image indices in the hugin file: " << id1 << ' ' << id2;
+
+    // Find the corresponding indices in the map where these keypoints will go to
+    if (filename_to_cid.find(images[id1]) == filename_to_cid.end())
+      LOG(FATAL) << "File missing from map: " << images[id1];
+    if (filename_to_cid.find(images[id2]) == filename_to_cid.end())
+      LOG(FATAL) << "File missing from map: " << images[id2];
+    int cid1 = filename_to_cid[images[id1]];
+    int cid2 = filename_to_cid[images[id2]];
+
+    // Append to the keypoints for cid1
+    Eigen::Matrix<double, 2, -1> &M1 = user_cid_to_keypoint_map[cid1];  // alias
+    Eigen::Matrix<double, 2, -1> N1(M1.rows(), M1.cols()+1);
+    N1 << M1, user_ip.block(2, pid, 2, 1);  // left image pixel x and pixel y
+    M1.swap(N1);
+
+    // Append to the keypoints for cid2
+    Eigen::Matrix<double, 2, -1> &M2 = user_cid_to_keypoint_map[cid2];  // alias
+    Eigen::Matrix<double, 2, -1> N2(M2.rows(), M2.cols()+1);
+    N2 << M2, user_ip.block(4, pid, 2, 1);  // right image pixel x and pixel y
+    M2.swap(N2);
+
+    // The corresponding user_pid_to_cid_fid
+    user_pid_to_cid_fid[pid][cid1] = user_cid_to_keypoint_map[cid1].cols()-1;
+    user_pid_to_cid_fid[pid][cid2] = user_cid_to_keypoint_map[cid2].cols()-1;
+  }
+
+  // Apply undistortion
+  Eigen::Vector2d output;
+  for (size_t cid = 0; cid < user_cid_to_keypoint_map.size(); cid++) {
+    for (int i = 0; i < user_cid_to_keypoint_map[cid].cols(); i++) {
+      ref_cam_params.Convert<camera::DISTORTED, camera::UNDISTORTED_C>
+        (user_cid_to_keypoint_map[cid].col(i), &output);
+      user_cid_to_keypoint_map[cid].col(i) = output;
+    }
+  }
+
+  // Triangulate to find the coordinates of the current points
+  // in the virtual coordinate system
+  std::vector<Eigen::Vector3d> unreg_pid_to_xyz;
+  bool rm_invalid_xyz = false;  // there should be nothing to remove hopefully
+  Triangulate(rm_invalid_xyz,
+              ref_cam_params.GetFocalLength(),
+              world_to_cam_trans,
+              user_cid_to_keypoint_map,
+              &user_pid_to_cid_fid,
+              &unreg_pid_to_xyz);
+
+  double mean_err = 0;
+  for (int i = 0; i < user_xyz.cols(); i++) {
+    Eigen::Vector3d a = unreg_pid_to_xyz[i];
+    Eigen::Vector3d b = user_xyz.col(i);
+    mean_err += (a-b).norm();
+  }
+  mean_err /= user_xyz.cols();
+  std::cout << "Mean absolute error before registration: " << mean_err << " meters" << std::endl;
+  std::cout << "Un-transformed computed xyz -- measured xyz -- error diff -- error norm (meters)"
+            << std::endl;
+
+  for (int i = 0; i < user_xyz.cols(); i++) {
+    Eigen::Vector3d a = unreg_pid_to_xyz[i];
+    Eigen::Vector3d b = user_xyz.col(i);
+    std::cout << print_vec(a) << " -- "
+              << print_vec(b) << " -- "
+              << print_vec(a-b) << " -- "
+              << print_vec((a - b).norm())
+              << std::endl;
+  }
+
+
+  // Find the transform from the computed map coordinate system
+  // to the world coordinate system.
+  int np = unreg_pid_to_xyz.size();
+  Eigen::Matrix3Xd in(3, np);
+  for (int i = 0; i < np; i++)
+    in.col(i) = unreg_pid_to_xyz[i];
+
+  Eigen::Affine3d registration_trans;  
+  Find3DAffineTransform(in, user_xyz, &registration_trans);
+
+  // Transform the map to the world coordinate system
+  TransformCameras(registration_trans, world_to_cam_trans);
+  
+  mean_err = 0.0;
+  for (int i = 0; i < user_xyz.cols(); i++)
+    mean_err += (registration_trans*in.col(i) - user_xyz.col(i)).norm();
+  mean_err /= user_xyz.cols();
+
+  // We don't use LOG(INFO) below, as it does not play well with
+  // Eigen.
+  double scale = pow(registration_trans.linear().determinant(), 1.0 / 3.0);
+  std::cout << "Registration transform (to measured world coordinates)." << std::endl;
+  std::cout << "Rotation:\n" << registration_trans.linear() / scale << std::endl;
+  std::cout << "Scale:\n" << scale << std::endl;
+  std::cout << "Translation:\n" << registration_trans.translation().transpose()
+            << std::endl;
+
+  std::cout << "Mean absolute error after registration: "
+            << mean_err << " meters" << std::endl;
+
+  std::cout << "Transformed computed xyz -- measured xyz -- "
+            << "error diff - error norm (meters)" << std::endl;
+  for (int i = 0; i < user_xyz.cols(); i++) {
+    Eigen::Vector3d a = registration_trans*in.col(i);
+    Eigen::Vector3d b = user_xyz.col(i);
+    int id1 = user_ip(0, i);
+    int id2 = user_ip(1, i);
+
+    std::cout << print_vec(a) << " -- "
+              << print_vec(b) << " -- "
+              << print_vec(a - b) << " -- "
+              << print_vec((a - b).norm()) << " -- "
+              << images[id1] << ' '
+              << images[id2] << std::endl;
+  }
+
+
+  return registration_trans;
+}
+  
 }  // end namespace dense_map

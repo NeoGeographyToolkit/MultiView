@@ -30,6 +30,8 @@
 
 #include <camera_model/camera_model.h>
 #include <rig_calibrator/system_utils.h>
+#include <rig_calibrator/camera_image.h>
+#include <rig_calibrator/basic_algs.h>
 
 #include <glog/logging.h>
 
@@ -985,41 +987,6 @@ void formObj(IsaacObjModel& texture_model, std::string const& out_prefix, std::s
   obj_str = out.str();
 }
 
-// The images from the bag may need to be resized to be the same
-// size as in the calibration file. Sometimes the full-res images
-// can be so blurry that interest point matching fails, hence the
-// resizing.
-// Similar logic to deal with differences between image size and calibrated size
-// is used further down this code.
-void adjustImageSize(camera::CameraParameters const& cam_params, cv::Mat & image) {
-  int64_t raw_image_cols = image.cols;
-  int64_t raw_image_rows = image.rows;
-  int64_t calib_image_cols = cam_params.GetDistortedSize()[0];
-  int64_t calib_image_rows = cam_params.GetDistortedSize()[1];
-
-  int64_t factor = raw_image_cols / calib_image_cols;
-
-  if ((raw_image_cols != calib_image_cols * factor) ||
-      (raw_image_rows != calib_image_rows * factor)) {
-    LOG(FATAL) << "Image width and height are: " << raw_image_cols << ' ' << raw_image_rows
-               << "\n"
-               << "Calibrated image width and height are: "
-               << calib_image_cols << ' ' << calib_image_rows << "\n"
-               << "These must be equal up to an integer factor.\n";
-  }
-
-  if (factor != 1) {
-    // TODO(oalexan1): This kind of resizing may be creating aliased images.
-    cv::Mat local_image;
-    cv::resize(image, local_image, cv::Size(), 1.0/factor, 1.0/factor, cv::INTER_AREA);
-    local_image.copyTo(image);
-  }
-
-  // Check
-  if (image.cols != calib_image_cols || image.rows != calib_image_rows)
-    LOG(FATAL) << "Sci cam images have the wrong size.";
-}
-
 // Project texture and find the UV coordinates
 void projectTexture(mve::TriangleMesh::ConstPtr mesh, std::shared_ptr<BVHTree> bvh_tree,
                     cv::Mat const& image,
@@ -1559,4 +1526,103 @@ void meshProject(mve::TriangleMesh::Ptr const& mesh, std::shared_ptr<BVHTree> co
   cv::imwrite(texture_file, image);
 }
 
+// Project given images with optimized cameras onto mesh. It is
+// assumed that the most up-to-date cameras were copied/interpolated
+// form the optimizer structures into the world_to_cam vector.
+void meshProjectCameras(std::vector<std::string> const& cam_names,
+                        std::vector<camera::CameraParameters> const& cam_params,
+                        std::vector<dense_map::cameraImage> const& cam_images,
+                        std::vector<Eigen::Affine3d> const& world_to_cam,
+                        mve::TriangleMesh::Ptr const& mesh,
+                        std::shared_ptr<BVHTree> const& bvh_tree,
+                        std::string const& out_dir) {
+  if (cam_names.size() != cam_params.size())
+    LOG(FATAL) << "There must be as many camera names as sets of camera parameters.\n";
+  if (cam_images.size() != world_to_cam.size())
+    LOG(FATAL) << "There must be as many camera images as camera poses.\n";
+  if (out_dir.empty())
+    LOG(FATAL) << "The output directory is empty.\n";
+  
+  char filename_buffer[1000];
+
+  for (size_t cid = 0; cid < cam_images.size(); cid++) {
+    double timestamp = cam_images[cid].timestamp;
+    int cam_type = cam_images[cid].camera_type;
+
+    // Must use the 10.7f format for the timestamp as everywhere else in the code
+    snprintf(filename_buffer, sizeof(filename_buffer), "%s/%10.7f_%s",
+             out_dir.c_str(), timestamp, cam_names[cam_type].c_str());
+    std::string out_prefix = filename_buffer;  // convert to string
+
+    std::cout << "Creating texture for: " << out_prefix << std::endl;
+    meshProject(mesh, bvh_tree, cam_images[cid].image, world_to_cam[cid], cam_params[cam_type],
+                out_prefix);
+  }
+}
+
+//  Consider several rays which are supposed to intersect at a 3D point.
+// Intersect them with a mesh instead, and average those intersections.
+// This will be used to for a mesh-to-triangulated-points constraint.
+void meshTriangulations(// Inputs
+  std::vector<camera::CameraParameters> const& cam_params,
+  std::vector<dense_map::cameraImage> const& cams,
+  std::vector<Eigen::Affine3d> const& world_to_cam,
+  std::vector<std::map<int, int>> const& pid_to_cid_fid,
+  std::vector<std::map<int, std::map<int, int>>> const& pid_cid_fid_inlier,
+  std::vector<std::vector<std::pair<float, float>>> const& keypoint_vec,
+  Eigen::Vector3d const& bad_xyz, double min_ray_dist, double max_ray_dist,
+  mve::TriangleMesh::Ptr const& mesh, std::shared_ptr<BVHTree> const& bvh_tree,
+  // Outputs
+  std::vector<std::map<int, std::map<int, Eigen::Vector3d>>>& pid_cid_fid_mesh_xyz,
+  std::vector<Eigen::Vector3d>& pid_mesh_xyz) {
+  // Initialize the outputs
+  pid_cid_fid_mesh_xyz.resize(pid_to_cid_fid.size());
+  pid_mesh_xyz.resize(pid_to_cid_fid.size());
+
+  for (size_t pid = 0; pid < pid_to_cid_fid.size(); pid++) {
+    Eigen::Vector3d avg_mesh_xyz(0, 0, 0);
+    int num_intersections = 0;
+
+    for (auto cid_fid = pid_to_cid_fid[pid].begin(); cid_fid != pid_to_cid_fid[pid].end();
+         cid_fid++) {
+      int cid = cid_fid->first;
+      int fid = cid_fid->second;
+
+      // Initialize this
+      pid_cid_fid_mesh_xyz[pid][cid][fid] = bad_xyz;
+
+      // Deal with inliers only
+      if (!dense_map::getMapValue(pid_cid_fid_inlier, pid, cid, fid))
+        continue;
+
+      // Intersect the ray with the mesh
+      Eigen::Vector2d dist_ip(keypoint_vec[cid][fid].first, keypoint_vec[cid][fid].second);
+      Eigen::Vector3d mesh_xyz(0.0, 0.0, 0.0);
+      bool have_mesh_intersection
+        = dense_map::ray_mesh_intersect(dist_ip, cam_params[cams[cid].camera_type],
+                                        world_to_cam[cid], mesh, bvh_tree,
+                                        min_ray_dist, max_ray_dist,
+                                        // Output
+                                        mesh_xyz);
+
+      if (have_mesh_intersection) {
+        pid_cid_fid_mesh_xyz[pid][cid][fid] = mesh_xyz;
+        avg_mesh_xyz += mesh_xyz;
+        num_intersections += 1;
+      }
+    }
+
+    // Average the intersections of all rays with the mesh
+    if (num_intersections >= 1)
+      avg_mesh_xyz /= num_intersections;
+    else
+      avg_mesh_xyz = bad_xyz;
+
+    pid_mesh_xyz[pid] = avg_mesh_xyz;
+  }
+
+  return;
+}
+
+  
 }  // namespace dense_map
