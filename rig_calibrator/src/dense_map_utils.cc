@@ -814,7 +814,8 @@ bool lookupImage(// Inputs
     prev_image_time = found_time;
 
     if (found_time >= desired_time) {
-      // Found the desired data. Do a deep copy, to not depend on the original structure.
+      // Found the desired data. Do a deep copy, to not depend on the
+      // original structure.
       msgs[local_pos].image.copyTo(image);
       image_name = msgs[local_pos].name;
       return true;

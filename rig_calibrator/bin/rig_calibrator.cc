@@ -134,10 +134,6 @@ namespace fs = boost::filesystem;
 DEFINE_int32(num_overlaps, 10, "How many images (of all camera types) close and forward in "
              "time to match to given image.");
 
-DEFINE_double(max_image_to_depth_timestamp_diff, 0.2,
-              "Use a depth cloud only if it is within this distance in time "
-              "from the nearest image with the same camera. Measured in seconds.");
-
 DEFINE_double(robust_threshold, 3.0,
               "Residual pixel errors and 3D point residuals (the latter multiplied "
               "by corresponding weight) much larger than this will be "
@@ -1047,30 +1043,36 @@ void set_up_block_sizes(int num_depth_params,
   xyz_block_sizes.push_back(dense_map::NUM_XYZ_PARAMS);
 }
 
-// Look up each ref cam image by timestamp. In between any two ref cam timestamps,
-// which are no further from each other than the bracket length, look up an image
-// of each of the other camera types. If more than one choice, try to stay as close
-// as possible to the midpoint of the two bracketing ref cam timestamps. This way
-// there's more wiggle room later if one attempts to modify the timestamp offset.
-// TODO(oalexan1): This function is too big and hard to understand.
-// It needs to be broken up, with the bracketing being in its own function.  
-void lookupImagesAndBrackets(  // Inputs
-  int ref_cam_type, double bracket_len, double timestamp_offsets_max_change,
-  double max_image_to_depth_timestamp_diff,
-  std::vector<std::string> const& cam_names,
-  std::vector<camera::CameraParameters> const& cam_params,
-  std::vector<double> const& ref_timestamps,
-  std::vector<std::vector<ImageMessage>> const& image_data,
-  std::vector<std::vector<ImageMessage>> const& depth_data,
-  std::vector<double> const& ref_to_cam_timestamp_offsets,
-  // Outputs
-  std::vector<dense_map::cameraImage>& cams, std::vector<double>& min_timestamp_offset,
-  std::vector<double>& max_timestamp_offset) {
-  std::cout << "Looking up the images and bracketing the timestamps." << std::endl;
+// Look up each ref cam image by timestamp, with the rig
+// assumption. In between any two ref cam timestamps, which are no
+// further from each other than the bracket length, look up an image
+// of each of the other camera types. If more than one choice, try to
+// stay as close as possible to the midpoint of the two bracketing ref
+// cam timestamps. This way there's more wiggle room later if one
+// attempts to modify the timestamp offset. If there is no rig, keep
+// all the images.
+void lookupImagesAndBrackets(// Inputs
+                             int ref_cam_type, double bracket_len,
+                             double timestamp_offsets_max_change,
+                             std::vector<std::string> const& cam_names,
+                             std::vector<camera::CameraParameters> const& cam_params,
+                             std::vector<double> const& ref_timestamps,
+                             std::vector<std::vector<ImageMessage>> const& image_data,
+                             std::vector<std::vector<ImageMessage>> const& depth_data,
+                             std::vector<double> const& ref_to_cam_timestamp_offsets,
+                             // Outputs
+                             std::vector<dense_map::cameraImage>& cams,
+                             std::vector<double>& min_timestamp_offset,
+                             std::vector<double>& max_timestamp_offset) {
 
+  std::cout << "Looking up the images and bracketing the timestamps." << std::endl;
+  
+  if (ref_cam_type != 0)
+    LOG(FATAL) << "It is assumed that the ref sensor id is 0.";
+  
   int num_ref_cams = ref_timestamps.size();
   int num_cam_types = cam_names.size();
-
+  
   // Initialize the outputs
   cams.clear();
   min_timestamp_offset.resize(num_cam_types, -1.0e+100);
@@ -1084,10 +1086,6 @@ void lookupImagesAndBrackets(  // Inputs
 
   // Populate the data for each camera image
   for (int beg_ref_it = 0; beg_ref_it < num_ref_cams; beg_ref_it++) {
-    if (ref_cam_type != 0)
-      LOG(FATAL) << "It is assumed that the ref sensor id is 0.";
-
-    bool save_grayscale = true; // for matching we will need grayscale
 
     // For when we have last ref timestamp and last other cam timestamp and they are equal
     int end_ref_it = beg_ref_it + 1;
@@ -1111,8 +1109,7 @@ void lookupImagesAndBrackets(  // Inputs
         // Start looking up the image timestamp from this position. Some care
         // is needed here as we advance in time in image_start_positions[cam_type].
         double found_time = -1.0;
-        // This has to succeed since this timestamp originally came from an existing image
-        // Read from images/depth clouds stored in files
+        // This has to succeed since this timestamp came from an existing image
         bool have_lookup =  
           dense_map::lookupImage(cam.timestamp, image_data[cam_type],
                                  // Outputs
@@ -1165,7 +1162,6 @@ void lookupImagesAndBrackets(  // Inputs
 
           cv::Mat image;
           std::string image_name;
-            // Read from images/depth clouds stored in files
           bool have_lookup =
             dense_map::lookupImage(curr_timestamp, image_data[cam_type],
                                    // Outputs
@@ -1237,7 +1233,6 @@ void lookupImagesAndBrackets(  // Inputs
 
       // Look up the closest cloud in time (either before or after cam.timestamp)
       // This need not succeed.
-      // Read from images/depth clouds stored in files
       cam.cloud_timestamp = -1.0;  // will change
       if (!depth_data.empty()) 
         dense_map::lookupImage(cam.timestamp,  // start looking from this time forward
@@ -1250,24 +1245,6 @@ void lookupImagesAndBrackets(  // Inputs
       cams.push_back(cam);
     }  // end loop over camera types
   }    // end loop over ref images
-
-  // See how many timestamps we have for each camera
-  std::map<int, int> num_images;
-  for (int cam_type_it = 0; cam_type_it < num_cam_types; cam_type_it++)
-    num_images[cam_type_it] = 0;
-  for (size_t cam_it = 0; cam_it < cams.size(); cam_it++)
-    num_images[cams[cam_it].camera_type]++;
-
-  bool is_good = true;
-  for (int cam_type_it = 0; cam_type_it < num_cam_types; cam_type_it++) {
-    std::cout << "Number of images for camera: " << cam_names[cam_type_it] << ": "
-              << num_images[cam_type_it] << std::endl;
-
-    if (num_images[cam_type_it] == 0) is_good = false;
-  }
-
-  if (!is_good)
-    LOG(FATAL) << "Could not bracket all images. Cannot continue.\n";
 
   std::cout << "Timestamp offset allowed ranges based on current bracketing:\n";
   // Adjust for timestamp_offsets_max_change
@@ -1291,6 +1268,140 @@ void lookupImagesAndBrackets(  // Inputs
               << ", " << max_timestamp_offset[cam_type] << "]\n";
   }
 
+}
+
+// Assuming that the rig constraint is not used, initialize the 'cams' structure
+// by copying each image and its other data in that structure as expected
+// by later code. See also lookupImagesAndBrackets() when some selection based
+// on bracketing takes place.
+void lookupImagesNoBrackets(// Inputs
+                           int ref_cam_type, 
+                           std::vector<std::string> const& cam_names,
+                           std::vector<camera::CameraParameters> const& cam_params,
+                           std::vector<std::vector<ImageMessage>> const& image_data,
+                           std::vector<std::vector<ImageMessage>> const& depth_data,
+                           // Outputs
+                           std::vector<dense_map::cameraImage>& cams,
+                           std::vector<double>& min_timestamp_offset,
+                           std::vector<double>& max_timestamp_offset) {
+
+  std::cout << "Looking up the images." << std::endl;
+  
+  if (ref_cam_type != 0)
+    LOG(FATAL) << "It is assumed that the ref sensor id is 0.";
+  
+  int num_cam_types = cam_names.size();
+  
+  // Initialize the outputs
+  cams.clear();
+  min_timestamp_offset.resize(num_cam_types, -1.0e+100);
+  max_timestamp_offset.resize(num_cam_types,  1.0e+100);
+
+  // A lot of care is needed with positions. This remembers how we travel in time
+  // for each camera type so we have fewer messages to search.
+  // But if a mistake is done below it will mess up this bookkeeping.
+  std::vector<int> image_start_positions(num_cam_types, 0);
+  std::vector<int> cloud_start_positions(num_cam_types, 0);
+
+  // Populate the data for each camera image
+  for (int cam_type = ref_cam_type; cam_type < num_cam_types; cam_type++) {
+
+    for (size_t cam_it = 0; cam_it < image_data[cam_type].size(); cam_it++) {
+
+      dense_map::cameraImage cam;
+      cam.camera_type   = cam_type;
+      cam.timestamp     = image_data[cam_type][cam_it].timestamp;
+      cam.ref_timestamp = cam.timestamp; // no rig, so no timestamp offset
+      // These two values below should not be needed with no rig
+      cam.beg_ref_index = cam_it;
+      cam.end_ref_index = cam_it;
+
+      // Start looking up the image timestamp from this position. Some care
+      // is needed here as we advance in time in image_start_positions[cam_type].
+      double found_time = -1.0;
+      // This has to succeed since this timestamp originally came from an existing image
+      bool have_lookup =  
+        dense_map::lookupImage(cam.timestamp, image_data[cam_type],
+                               // Outputs
+                               cam.image, cam.image_name, 
+                               image_start_positions[cam_type],  // this will move forward
+                               found_time);
+      if (!have_lookup)
+        LOG(FATAL) << std::fixed << std::setprecision(17)
+                   << "Cannot look up camera at time " << cam.timestamp << ".\n";
+
+      // The exact time is expected
+      if (found_time != cam.timestamp)
+        LOG(FATAL) << std::fixed << std::setprecision(17)
+                   << "Cannot look up camera at time " << cam.timestamp << ".\n";
+      
+      // Look up the closest cloud in time (either before or after cam.timestamp)
+      // This need not succeed.
+      cam.cloud_timestamp = -1.0;  // will change
+      if (!depth_data.empty()) 
+        dense_map::lookupImage(cam.timestamp,  // start looking from this time forward
+                               depth_data[cam_type],
+                               // Outputs
+                               cam.depth_cloud, cam.depth_name, 
+                               cloud_start_positions[cam_type],  // this will move forward
+                               cam.cloud_timestamp);             // found time
+
+      // Accept this camera
+      cams.push_back(cam);
+    }  // end loop over camera types
+  }    // end loop over ref images
+  
+}
+
+// Look up images, with or without the rig constraint. See individual functions
+// below for more details.
+void lookupImages(// Inputs
+                  int ref_cam_type, bool no_rig, double bracket_len,
+                  double timestamp_offsets_max_change,
+                  std::vector<std::string> const& cam_names,
+                  std::vector<camera::CameraParameters> const& cam_params,
+                  std::vector<double> const& ref_timestamps,
+                  std::vector<std::vector<ImageMessage>> const& image_data,
+                  std::vector<std::vector<ImageMessage>> const& depth_data,
+                  std::vector<double> const& ref_to_cam_timestamp_offsets,
+                  // Outputs
+                  std::vector<dense_map::cameraImage>& cams,
+                  std::vector<double>& min_timestamp_offset,
+                  std::vector<double>& max_timestamp_offset) {
+
+  if (!no_rig) 
+    lookupImagesAndBrackets(// Inputs
+                            ref_cam_type, bracket_len,  
+                            timestamp_offsets_max_change,  
+                            cam_names, cam_params, ref_timestamps,  
+                            image_data, depth_data,  
+                            ref_to_cam_timestamp_offsets,  
+                            // Outputs
+                            cams, min_timestamp_offset, max_timestamp_offset);
+  else
+    lookupImagesNoBrackets(// Inputs
+                           ref_cam_type, cam_names, cam_params, image_data, depth_data,  
+                           // Outputs
+                           cams, min_timestamp_offset, max_timestamp_offset);
+  
+  // See how many timestamps we have for each camera
+  std::map<int, int> num_images;
+  int num_cam_types = cam_names.size();
+  for (int cam_type_it = ref_cam_type; cam_type_it < num_cam_types; cam_type_it++)
+    num_images[cam_type_it] = 0;
+  for (size_t cam_it = 0; cam_it < cams.size(); cam_it++)
+    num_images[cams[cam_it].camera_type]++;
+  bool is_good = true;
+  for (int cam_type_it = 0; cam_type_it < num_cam_types; cam_type_it++) {
+    std::cout << "Number of images for sensor: " << cam_names[cam_type_it] << ": "
+              << num_images[cam_type_it] << std::endl;
+
+    if (num_images[cam_type_it] == 0)
+      is_good = false;
+  }
+  if (!is_good)
+    LOG(FATAL) << "Could not find images for all sensors. Cannot continue.\n";
+
   // The images may need to be resized to be the same
   // size as in the calibration file. Sometimes the full-res images
   // can be so blurry that interest point matching fails, hence the
@@ -1307,7 +1418,7 @@ void lookupImagesAndBrackets(  // Inputs
 }
 
 // TODO(oalexan1): Move to utils
-void meshTriangulations(  // Inputs
+void meshTriangulations(// Inputs
   std::vector<camera::CameraParameters> const& cam_params,
   std::vector<dense_map::cameraImage> const& cams, std::vector<Eigen::Affine3d> const& world_to_cam,
   std::vector<std::map<int, int>> const& pid_to_cid_fid,
@@ -1709,8 +1820,8 @@ void readImageEntry(// Inputs
     LOG(FATAL) << "Duplicate timestamp " << std::setprecision(17) << timestamp
                << " for sensor id " << cam_type << "\n";
   
-  // Read the image as grayscale
-  // TODO(oalexan1): How about color? But need grayscale for feature matching
+  // Read the image as grayscale, in order for feature matching to work
+  // For texturing, texrecon should use the original images
   std::cout << "Reading: " << image_file << std::endl;
   image_map[timestamp].image        = cv::imread(image_file, cv::IMREAD_GRAYSCALE);
   image_map[timestamp].name         = image_file;
@@ -2450,18 +2561,17 @@ int main(int argc, char** argv) {
   //  The range of ref_to_cam_timestamp_offsets[cam_type] before
   //  getting out of the bracket.
   std::vector<double> min_timestamp_offset, max_timestamp_offset;
-
-  // Select the images to use and bracket them using the ref cam
-  // TODO(oalexan1): This should not be used without the rig
-  // constraint. In that case we need to find from Theia which images to match.
-  dense_map::lookupImagesAndBrackets(  // Inputs
-    ref_cam_type, FLAGS_bracket_len, FLAGS_timestamp_offsets_max_change,
-    FLAGS_max_image_to_depth_timestamp_diff, cam_names, cam_params,
-    ref_timestamps, image_data, depth_data,
-    ref_to_cam_timestamp_offsets,
-    // Outputs
-    cams, min_timestamp_offset, max_timestamp_offset);
-
+  // Select the images to use. If the rig is used, keep non-ref images
+  // only within the bracket.
+  dense_map::lookupImages(// Inputs
+                          ref_cam_type, FLAGS_no_rig, FLAGS_bracket_len,
+                          FLAGS_timestamp_offsets_max_change,
+                          cam_names, cam_params,
+                          ref_timestamps, image_data, depth_data,
+                          ref_to_cam_timestamp_offsets,
+                          // Outputs
+                          cams, min_timestamp_offset, max_timestamp_offset);
+  
   // If we have initial rig transforms, compute the transform from the
   // world to every camera based on the rig transforms and ref_to_cam
   // transforms. It assumes that world_to_ref and ref_to_cam
@@ -2653,6 +2763,8 @@ int main(int argc, char** argv) {
   std::vector<Eigen::Vector3d> pid_mesh_xyz;
   Eigen::Vector3d bad_xyz(1.0e+100, 1.0e+100, 1.0e+100);  // use this to flag invalid xyz
 
+  // TODO(oalexan1): All the logic for one pass should be its own function,
+  // as the block below is too big.
   for (int pass = 0; pass < FLAGS_calibrator_num_passes; pass++) {
     std::cout << "\nOptimization pass " << pass + 1 << " / " << FLAGS_calibrator_num_passes << "\n";
 
