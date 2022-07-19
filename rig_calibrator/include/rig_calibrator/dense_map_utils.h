@@ -29,9 +29,6 @@
 #include <Eigen/Core>
 #include <Eigen/Geometry>
 
-//#include <config_reader/config_reader.h>
-#include <camera_model/camera_params.h>
-
 #include <boost/shared_ptr.hpp>
 
 #include <map>
@@ -39,7 +36,16 @@
 #include <string>
 #include <vector>
 
+namespace camera {
+  // Forward declaration
+  class CameraParameters;
+}
+
 namespace dense_map {
+
+// Forward declarations  
+class cameraImage;
+class ImageMessage;
 
 const int NUM_SCALAR_PARAMS  = 1;  // Used to float single-value params // NOLINT
 const int NUM_OPT_CTR_PARAMS = 2;  // optical center in x and y         // NOLINT
@@ -142,7 +148,7 @@ class StampedPoseStorage {
   bool empty() const;
 
  private:
-  std::map<int, std::map<double, Eigen::Affine3d> > m_poses;
+  std::map<int, std::map<double, Eigen::Affine3d>> m_poses;
 };
 
 // Compute the azimuth and elevation for a (normal) vector
@@ -164,16 +170,20 @@ double fileNameToTimestamp(std::string const& file_name);
 // A little holding structure for nav, sci, and haz poses
 struct CameraPoses {
   std::map<double, double> haz_depth_to_image_timestamps;
-  std::map<std::string, std::map<double, Eigen::Affine3d> > world_to_cam_poses;
+  std::map<std::string, std::map<double, Eigen::Affine3d>> world_to_cam_poses;
 };
 
 // Some small utilities for writing a file having poses for nav, sci, and haz cam,
 // and also the depth timestamp corresponding to given haz intensity timestamp
-void writeCameraPoses(std::string const& filename, std::map<double, double> const& haz_depth_to_image_timestamps,
-                      std::map<std::string, std::map<double, Eigen::Affine3d> > const& world_to_cam_poses);
+void writeCameraPoses(std::string const& filename,
+                      std::map<double, double> const& haz_depth_to_image_timestamps,
+                      std::map<std::string, std::map<double, Eigen::Affine3d>> const&
+                      world_to_cam_poses);
 
-void readCameraPoses(std::string const& filename, std::map<double, double>& haz_depth_to_image_timestamps,
-                     std::map<std::string, std::map<double, Eigen::Affine3d> >& world_to_cam_poses);
+void readCameraPoses(std::string const& filename,
+                     std::map<double, double>& haz_depth_to_image_timestamps,
+                     std::map<std::string, std::map<double, Eigen::Affine3d>>&
+                     world_to_cam_poses);
 
 // Gamma and inverse gamma functions
 // https://en.wikipedia.org/wiki/SRGB#Specification_of_the_transformation
@@ -214,12 +224,6 @@ void saveTsaiCamera(Eigen::MatrixXd const& desired_cam_to_world_trans,
                       std::string const& output_dir,
                       double curr_time, std::string const& suffix);
 
-// Write an image with 3 floats per pixel. OpenCV's imwrite() cannot do that.
-void saveXyzImage(std::string const& filename, cv::Mat const& img);
-
-// Read an image with 3 floats per pixel. OpenCV's imread() cannot do that.
-void readXyzImage(std::string const& filename, cv::Mat & img);
-
 // Find the depth measurement. Use nearest neighbor interpolation
 // to look into the depth cloud.
 bool depthValue(// Inputs
@@ -236,18 +240,6 @@ void genImageAndDepthFileNames(  // Inputs
   std::string const& out_dir,
   // Outputs
   std::vector<std::string>& image_files, std::vector<std::string>& depth_files);
-
-// Save images and depth clouds to disk
-void saveImagesAndDepthClouds(std::vector<cameraImage> const& cams);
-
-// A struct to collect together some attributes of an image or depth cloud
-// (stored as an image with 3 channels)
-struct ImageMessage {
-  cv::Mat image;
-  double timestamp;
-  std::string name;
-  Eigen::Affine3d world_to_cam;
-};
 
 // Find an image at the given timestamp or right after it. We assume
 // that during repeated calls to this function we always travel
@@ -277,7 +269,7 @@ void strToVec(std::string const& str, std::vector<double> & vec);
   
 // Read the images, depth clouds, and their metadata
 // Save the properties of images. Use space as separator.
-void writeImageList(std::string const& out_dir, std::vector<dense_map::cameraImage> const& cams,
+void saveCameraPoses(std::string const& out_dir, std::vector<dense_map::cameraImage> const& cams,
                     std::vector<Eigen::Affine3d> const& world_to_cam);
 
 // Save the optimized rig configuration
@@ -296,14 +288,6 @@ void readRigConfig(std::string const& rig_config, bool have_rig_transforms, int 
                    std::vector<Eigen::Affine3d> & ref_to_cam_trans,
                    std::vector<Eigen::Affine3d> & depth_to_image,
                    std::vector<double> & ref_to_cam_timestamp_offsets);
-  
-void ReadNVM(std::string const& input_filename,
-             std::vector<Eigen::Matrix2Xd> * cid_to_keypoint_map,
-             std::vector<std::string> * cid_to_filename,
-             std::vector<std::map<int, int> > * pid_to_cid_fid,
-             std::vector<Eigen::Vector3d> * pid_to_xyz,
-             std::vector<Eigen::Affine3d> *
-             cid_to_cam_t_global);
 
 // Save the depth clouds and optimized transforms needed to create a mesh with voxblox
 // (if depth clouds exist).

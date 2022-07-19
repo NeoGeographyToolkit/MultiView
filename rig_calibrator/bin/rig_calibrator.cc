@@ -23,7 +23,8 @@
 
 // We assume our camera rig has n camera types. Each can be image or
 // depth + image. One camera must be the reference camera. It is used
-// to bracket other cameras in time.
+// to bracket other cameras in time. The camera rig acquires many
+// sets of pictures.
 
 // We assume we know the precise time every camera image is acquired.
 // Every non-ref camera will be bracketed by two ref cameras very
@@ -131,9 +132,6 @@
 
 namespace fs = boost::filesystem;
 
-DEFINE_int32(num_overlaps, 10, "How many images (of all camera types) close and forward in "
-             "time to match to given image.");
-
 DEFINE_double(robust_threshold, 3.0,
               "Residual pixel errors and 3D point residuals (the latter multiplied "
               "by corresponding weight) much larger than this will be "
@@ -158,7 +156,10 @@ DEFINE_string(rig_transforms_to_float, "",
 // TODO(oalexan1): With the rig constraint on, only ref cam poses can float on their own,
 // as the others are tied to it.
 DEFINE_string(camera_poses_to_float, "",
-              "Specify the cameras of which sensor types can have their poses floated. Note that allowing the cameras for all sensors types to float can invalidate the registration and scale (while making the overall configuration more internally consistent). Hence, one may need to use an external mesh as a constraint, or otherwise subsequent registration may be needed. Example: 'cam1 cam3'.");
+              "Specify the cameras of which sensor types can have their poses floated. "
+              "Allowing the cameras for all sensors types to float can "
+              "invalidate the registration and scale (while making the overall "
+              "configuration more internally consistent). Example: 'cam1 cam3'.");
 
 DEFINE_string(depth_to_image_transforms_to_float, "",
               "Specify for which sensors to float the depth-to-image transform "
@@ -175,7 +176,8 @@ DEFINE_bool(float_timestamp_offsets, false,
 
 DEFINE_double(timestamp_offsets_max_change, 1.0,
               "If floating the timestamp offsets, do not let them change by more than this "
-              "(measured in seconds). Existing image bracketing acts as an additional constraint.");
+              "(measured in seconds). Existing image bracketing acts as an additional "
+              "constraint.");
 
 DEFINE_double(depth_tri_weight, 0.0,
               "The weight to give to the constraint that depth measurements agree with "
@@ -183,8 +185,7 @@ DEFINE_double(depth_tri_weight, 0.0,
               "order of 0.01 meters while reprojection errors are on the order of 1 pixel.");
 
 DEFINE_string(mesh, "",
-              "Use this geometry mapper mesh from a previous geometry mapper run to help constrain "
-              "the calibration (e.g., use fused_mesh.ply).");
+              "Use this mesh to help constrain the calibration (in .ply format).");
 
 DEFINE_double(mesh_tri_weight, 0.0,
               "A larger value will give more weight to the constraint that triangulated points "
@@ -271,18 +272,33 @@ DEFINE_string(rig_config, "",
 DEFINE_string(nvm, "",
               "Read images and camera poses from this nvm file, as exported by Theia.");
 
+DEFINE_bool(no_nvm_matches, false,
+            "Do not read interest point matches from the nvm file. So read only camera poses. "
+            "This implies --num_overlaps is positive, to be able to find new matches.");
+
 DEFINE_string(camera_poses, "",
               "Read the images and world-to-camera poses from this list. "
-              "The same format is used as for when this tool saves the updated poses "
-              "in the output directory.");
+              "The same format is used when this tool saves the updated "
+              "poses in the output directory. It is preferred to read the camera "
+              "poses with the ``--nvm`` option, as then interest point matches will "
+              "be read as well.");  
+
+DEFINE_int32(num_overlaps, 0, "Match an image with this many images (of all camera types) "
+             "following it in increasing order of timestamp value. Set to a positive value "
+             "only if desired to find more interest point matches than read from the input "
+             "nvm file. Not suggested by default. For advanced controls, "
+             "run: rig_calibrator --help | grep -i sift.");
 
 DEFINE_bool(use_initial_rig_transforms, false,
             "Use the transforms among the sensors of the rig specified via --rig_config. "
             "Otherwise derive it from the poses of individual cameras.");
 
+DEFINE_bool(save_nvm, false,
+            "Save the optimized camera poses and inlier interest point matches as "
+            "<out dir>/cameras.nvm. This can be passed in to a new invocation of this tool.");
 DEFINE_bool(save_matches, false,
-            "Save the interest point matches. Stereo Pipeline's viewer can be used for "
-            "visualizing these.");
+            "Save the interest point matches (all matches and inlier matches, after filtering). "
+            "Stereo Pipeline's viewer can be used for visualizing these.");
 
 DEFINE_bool(export_to_voxblox, false,
             "Save the depth clouds and optimized transforms needed to create a mesh with voxblox "
@@ -871,12 +887,15 @@ void calc_world_to_cam_rig_or_not(// Inputs
 }
 
 void parameterValidation() {
+    
   if (FLAGS_robust_threshold <= 0.0)
     LOG(FATAL) << "The robust threshold must be positive.\n";
 
   if (FLAGS_bracket_len <= 0.0) LOG(FATAL) << "Bracket length must be positive.";
 
-  if (FLAGS_num_overlaps < 1) LOG(FATAL) << "Number of overlaps must be positive.";
+  if (FLAGS_num_overlaps < 1 && (FLAGS_nvm == "" || FLAGS_no_nvm_matches))
+    LOG(FATAL) << "No nvm file was specified or it is not desired to read its matches. "
+      "Then must set a positive --num_overlaps to be able to find new interest point matches.";
 
   if (FLAGS_timestamp_offsets_max_change < 0)
     LOG(FATAL) << "The timestamp offsets must be non-negative.";
@@ -921,8 +940,12 @@ void parameterValidation() {
   if (FLAGS_rig_config == "")
     LOG(FATAL) << "Must specify the initial rig configuration via --rig_config.\n";
 
+
+    if (FLAGS_camera_poses != "" && FLAGS_nvm != "")
+      LOG(FATAL) << "Cannot specify both --nvm and --camera_poses.\n";
+
   if (FLAGS_camera_poses == "" && FLAGS_nvm == "")
-    LOG(FATAL) << "Must specify the image list via --camera_poses or --nvm.\n";
+    LOG(FATAL) << "Must specify the cameras via --nvm or --camera_poses.\n";
 
   return;
 }
@@ -1152,244 +1175,6 @@ void evalResiduals(  // Inputs
   return;
 }
 
-// A function to copy image data from maps to vectors with the data stored
-// chronologically in them, to speed up traversal.
-void ImageDataToVectors
-(// Inputs
- int ref_cam_type,
- std::map<int, std::map<double, dense_map::ImageMessage>> const& image_maps,
- std::map<int, std::map<double, dense_map::ImageMessage>> const& depth_maps,
- // Outputs
- std::vector<double>& ref_timestamps,
- std::vector<Eigen::Affine3d> & world_to_ref,
- std::vector<std::string> & ref_image_files,
- std::vector<std::vector<dense_map::ImageMessage>> & image_data,
- std::vector<std::vector<dense_map::ImageMessage>> & depth_data) {
-
-  // Wipe the outputs
-  ref_timestamps.clear();
-  world_to_ref.clear();
-  ref_image_files.clear();
-  image_data.clear();
-  depth_data.clear();
-  
-  // Find the range of sensor ids.
-  int max_cam_type = 0;
-  for (auto it = image_maps.begin(); it != image_maps.end(); it++)
-    max_cam_type = std::max(max_cam_type, it->first);
-  for (auto it = depth_maps.begin(); it != depth_maps.end(); it++)
-    max_cam_type = std::max(max_cam_type, it->first);
-
-  image_data.resize(max_cam_type + 1);
-  depth_data.resize(max_cam_type + 1);
-  for (size_t cam_type = 0; cam_type < image_data.size(); cam_type++) {
-
-    auto image_map_it = image_maps.find(cam_type);
-    if (image_map_it != image_maps.end()) {
-      auto image_map = image_map_it->second; 
-
-      for (auto it = image_map.begin(); it != image_map.end(); it++) {
-        image_data[cam_type].push_back(it->second);
-        
-        // Collect the ref cam timestamps, world_to_ref, and image names,
-        // in chronological order
-        if (cam_type == ref_cam_type) {
-          world_to_ref.push_back(it->second.world_to_cam);
-          ref_timestamps.push_back(it->second.timestamp);
-          ref_image_files.push_back(it->second.name);
-        }
-      }
-    }
-    
-    auto depth_map_it = depth_maps.find(cam_type);
-    if (depth_map_it != depth_maps.end()) {
-      auto depth_map = depth_map_it->second; 
-      for (auto it = depth_map.begin(); it != depth_map.end(); it++)
-        depth_data[cam_type].push_back(it->second);
-    }
-  }
-}
-
-void readImageEntry(// Inputs
-                    std::string const& image_file,
-                    Eigen::Affine3d const& world_to_cam,
-                    std::vector<std::string> const& cam_names,
-                    // Outputs
-                    std::map<int, std::map<double, dense_map::ImageMessage>> & image_maps,
-                    std::map<int, std::map<double, dense_map::ImageMessage>> & depth_maps) {
-  
-  // The cam name is the subdir having the images
-  std::string cam_name =
-    fs::path(image_file).parent_path().filename().string();
-    
-  std::string basename = fs::path(image_file).filename().string();
-  if (basename.empty() || basename[0] < '0' || basename[0] > '9')
-    LOG(FATAL) << "Image name (without directory) must start with digits. Got: "
-               << basename << "\n";
-  double timestamp = atof(basename.c_str());
-
-  // Infer cam type from cam name
-  int cam_type = 0;
-  bool success = false;
-  for (size_t cam_it = 0; cam_it < cam_names.size(); cam_it++) {
-    if (cam_names[cam_it] == cam_name) {
-      cam_type = cam_it;
-      success = true;
-      break;
-    }
-  }
-  if (!success) 
-    LOG(FATAL) << "Could not extract cam_name from path/to/cam_name/image.jpg, "
-               << "given image: " << image_file << "\n";
-    
-  // Aliases
-  std::map<double, ImageMessage> & image_map = image_maps[cam_type];
-  std::map<double, ImageMessage> & depth_map = depth_maps[cam_type];
-
-  if (image_map.find(timestamp) != image_map.end())
-    LOG(FATAL) << "Duplicate timestamp " << std::setprecision(17) << timestamp
-               << " for sensor id " << cam_type << "\n";
-  
-  // Read the image as grayscale, in order for feature matching to work
-  // For texturing, texrecon should use the original images
-  std::cout << "Reading: " << image_file << std::endl;
-  image_map[timestamp].image        = cv::imread(image_file, cv::IMREAD_GRAYSCALE);
-  image_map[timestamp].name         = image_file;
-  image_map[timestamp].timestamp    = timestamp;
-  image_map[timestamp].world_to_cam = world_to_cam;
-
-  // Sanity check
-  if (depth_map.find(timestamp) != depth_map.end())
-    LOG(FATAL) << "Duplicate timestamp " << std::setprecision(17) << timestamp
-               << " for sensor id " << cam_type << "\n";
-
-  // Read the depth data, if present
-  std::string depth_file = fs::path(image_file).replace_extension(".pc").string();
-  if (fs::exists(depth_file)) {
-    std::cout << "Reading: " << depth_file << std::endl;
-    dense_map::readXyzImage(depth_file, depth_map[timestamp].image);
-    depth_map[timestamp].name      = depth_file;
-    depth_map[timestamp].timestamp = timestamp;
-  }
-}
-
-void readDataFromList(// Inputs
-                      std::string const& camera_poses_file, int ref_cam_type,
-                      std::vector<std::string> const& cam_names,
-                      // Outputs
-                      std::vector<double>& ref_timestamps,
-                      std::vector<Eigen::Affine3d>& world_to_ref,
-                      std::vector<std::string> & ref_image_files,
-                      std::vector<std::vector<ImageMessage>>& image_data,
-                      std::vector<std::vector<ImageMessage>>& depth_data) {
-  
-  // Clear the outputs
-  ref_timestamps.clear();
-  world_to_ref.clear();
-  ref_image_files.clear();
-  image_data.clear();
-  depth_data.clear();
-
-  // Open the file
-  std::cout << "Reading: " << camera_poses_file << std::endl;
-  std::ifstream f;
-  f.open(camera_poses_file.c_str(), std::ios::binary | std::ios::in);
-  if (!f.is_open()) LOG(FATAL) << "Cannot open file for reading: " << camera_poses_file << "\n";
-
-  // Read here temporarily the images and depth maps
-  std::map<int, std::map<double, ImageMessage>> image_maps;
-  std::map<int, std::map<double, ImageMessage>> depth_maps;
-
-  std::string line;
-  while (getline(f, line)) {
-    if (line.empty() || line[0] == '#') continue;
-
-    std::string image_file;
-    std::istringstream iss(line);
-    if (!(iss >> image_file))
-      LOG(FATAL) << "Cannot parse the image file in: "
-                 << camera_poses_file << "\n";
-
-    // Read the camera to world transform
-    Eigen::VectorXd vals(12);
-    double val = -1.0;
-    int count = 0;
-    while (iss >> val) {
-      if (count >= 12) break;
-      vals[count] = val;
-      count++;
-    }
-
-    if (count != 12)
-      LOG(FATAL) << "Expecting 12 values for the transform on line:\n" << line << "\n";
-
-    Eigen::Affine3d world_to_cam = vecToAffine(vals);
-    readImageEntry(image_file, world_to_cam, cam_names,  
-                   image_maps, depth_maps); // out 
-  }
-
-  // Put in vectors
-  dense_map::ImageDataToVectors(// Inputs
-                                ref_cam_type, image_maps,  depth_maps,
-                                // Outputs
-                                ref_timestamps, world_to_ref, ref_image_files,
-                                image_data, depth_data);
-  
-  return;
-}
-
-
-
-// Read camera information and images from an NVM file, exported
-// from Theia
-// TODO(oalexan1): Move to utils
-void readDataFromNvm(// Inputs
-                     std::string const& nvm, int ref_cam_type,
-                     std::vector<std::string> const& cam_names,
-                     // Outputs
-                     std::vector<double>& ref_timestamps,
-                     std::vector<Eigen::Affine3d>& world_to_ref,
-                     std::vector<std::string>    & ref_image_files,
-                     std::vector<std::vector<ImageMessage>>& image_data,
-                     std::vector<std::vector<ImageMessage>>& depth_data) {
-
-  std::vector<Eigen::Matrix2Xd> cid_to_keypoint_map;
-  std::vector<std::string> cid_to_filename;
-  std::vector<std::map<int, int> > pid_to_cid_fid;
-  std::vector<Eigen::Vector3d> pid_to_xyz;
-  std::vector<Eigen::Affine3d> cid_to_cam_t_global;
-  
-  // cid_to_cam_t_global has world_to_cam
-  dense_map::ReadNVM(nvm,  
-                     &cid_to_keypoint_map,  
-                     &cid_to_filename,  
-                     &pid_to_cid_fid,  
-                     &pid_to_xyz,  
-                     &cid_to_cam_t_global);
-  
-  // Read here temporarily the images and depth maps
-  std::map<int, std::map<double, dense_map::ImageMessage>> image_maps;
-  std::map<int, std::map<double, dense_map::ImageMessage>> depth_maps;
-  
-  for (size_t it = 0; it < cid_to_filename.size(); it++) {
-
-    // Aliases
-    auto const& image_file = cid_to_filename[it];
-    auto const& world_to_cam = cid_to_cam_t_global[it];
-
-    readImageEntry(image_file, world_to_cam, cam_names,  
-                   image_maps, depth_maps); // out 
-  }
-
-  // This entails some book-keeping
-  // TODO(oalexan1): Just keep image_maps and depth_maps and change the book-keeping
-  // to use std::map rather than std::vector iterators
-  dense_map::ImageDataToVectors(// Inputs
-                                ref_cam_type, image_maps, depth_maps,
-                                // Outputs
-                                ref_timestamps, world_to_ref, ref_image_files,
-                                image_data, depth_data);
-}
   
 // TODO(oalexan1): Move to transforms
   
@@ -1516,27 +1301,23 @@ int main(int argc, char** argv) {
   std::vector<Eigen::Affine3d> world_to_ref, world_to_cam;
 
   // image_data is on purpose stored in vectors of vectors, with each
-  // image_data[i] having data in increasing order of timestamp.  This
+  // image_data[i] having data in increasing order of timestamps. This
   // way it is fast to find next timestamps after a given one.
-  // TODO(oalexan1): It would be better if image_data[i] was an
-  // std::map<double, dense_map::ImageMessage> with the key being a
-  // timestamp, and we would cache and advance the iterator for that key between
-  // successive invocations, rather than caching and advancing the vector index.
-  // Then looking up by a given timestamp would be more direct than now,
-  // while looking up next timestamp after the given one would be as now.
   std::vector<double> ref_timestamps; // Timestamps for the ref cameras
   std::vector<std::vector<dense_map::ImageMessage>> image_data;
   std::vector<std::vector<dense_map::ImageMessage>> depth_data;
   std::vector<std::string> ref_image_files;
-  if (FLAGS_camera_poses != "")
-    dense_map::readDataFromList(FLAGS_camera_poses, ref_cam_type, cam_names, // in
-                                ref_timestamps, world_to_ref, ref_image_files,
-                                image_data, depth_data); // out
-  else if (FLAGS_nvm != "") 
-    dense_map::readDataFromNvm(FLAGS_nvm, ref_cam_type, cam_names, // in
-                               ref_timestamps, world_to_ref, ref_image_files,
-                               image_data, depth_data); // out
+  dense_map::nvmData nvm;
 
+  if (FLAGS_camera_poses != "")
+    dense_map::readCameraPoses(FLAGS_camera_poses, ref_cam_type, cam_names, // in
+                               nvm, ref_timestamps, world_to_ref, ref_image_files,
+                               image_data, depth_data); // out
+  else if (FLAGS_nvm != "") 
+    dense_map::readNvm(FLAGS_nvm, ref_cam_type, cam_names, // in
+                       nvm, ref_timestamps, world_to_ref, ref_image_files,
+                       image_data, depth_data); // out
+  
   // Keep here the images, timestamps, and bracketing information
   std::vector<dense_map::cameraImage> cams;
   //  The range of ref_to_cam_timestamp_offsets[cam_type] before
@@ -1559,8 +1340,7 @@ int main(int argc, char** argv) {
   // are up-to-date. Use the version of calc_world_to_cam_using_rig
   // without world_to_cam_vec, on input which was not computed yet.
 
-  // TODO(oalexan1): Don't use this logic if we have no rig
-  if (use_initial_rig_transforms) {
+  if (use_initial_rig_transforms && !FLAGS_no_rig) {
     // Using the rig transforms in ref_to_cam_vec and transforms from
     // world to each ref cam in world_to_ref, calculate world_to_cam,
     // the transforms from the world to each camera
@@ -1707,16 +1487,30 @@ int main(int argc, char** argv) {
                                           &world_to_cam_vec[dense_map::NUM_RIGID_PARAMS * cid]);
   }
 
-  // Detect and match features
+  // Detect and match features if the user chooses to, so if --num_overlaps > 0. Normally,
+  // these are read from the nvm file only, as below.
   std::vector<std::vector<std::pair<float, float>>> keypoint_vec;
   std::vector<std::map<int, int>> pid_to_cid_fid;
-  dense_map::detectMatchFeatures(  // Inputs
-    cams, cam_params, FLAGS_out_dir, FLAGS_save_matches, world_to_cam,
-    FLAGS_num_overlaps, FLAGS_initial_max_reprojection_error, FLAGS_num_match_threads,
-    FLAGS_verbose,
-    // Outputs
-    keypoint_vec, pid_to_cid_fid);
+  if (FLAGS_num_overlaps > 0)
+    dense_map::detectMatchFeatures(// Inputs
+                                   cams, cam_params, FLAGS_out_dir, FLAGS_save_matches,
+                                   world_to_cam,
+                                   FLAGS_num_overlaps, FLAGS_initial_max_reprojection_error,
+                                   FLAGS_num_match_threads,
+                                   FLAGS_verbose,
+                                   // Outputs
+                                   keypoint_vec, pid_to_cid_fid);
 
+  // Append the interest point matches from the nvm file
+  if (!FLAGS_no_nvm_matches)
+    dense_map::appendMatchesFromNvm(// Inputs
+                                    cam_params, cams, nvm,  
+                                    // Outputs (these get appended to)
+                                    pid_to_cid_fid, keypoint_vec);
+
+  if (pid_to_cid_fid.empty())
+    LOG(FATAL) << "No interest points were found.\n";
+  
   // Set up the block sizes
   std::vector<int> bracketed_cam_block_sizes;
   std::vector<int> bracketed_depth_block_sizes;
@@ -2208,7 +2002,7 @@ int main(int argc, char** argv) {
     dense_map::meshProjectCameras(cam_names, cam_params, cams, world_to_cam, mesh, bvh_tree,
                                   FLAGS_out_texture_dir);
 
-  dense_map::writeImageList(FLAGS_out_dir, cams, world_to_cam);
+  dense_map::saveCameraPoses(FLAGS_out_dir, cams, world_to_cam);
   
   bool model_rig = (!FLAGS_no_rig);
   dense_map::writeRigConfig(FLAGS_out_dir, model_rig, ref_cam_type, cam_names,

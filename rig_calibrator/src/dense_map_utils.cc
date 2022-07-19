@@ -24,6 +24,7 @@
 #include <rig_calibrator/camera_image.h>
 #include <rig_calibrator/transform_utils.h>
 #include <rig_calibrator/happly.h> // for saving ply files as meshes
+#include <camera_model/camera_params.h>
 
 #include <boost/filesystem.hpp>
 
@@ -694,81 +695,6 @@ void saveTsaiCamera(Eigen::MatrixXd const& desired_cam_to_world_trans,
   ofs.close();
 }
 
-// Write an image with 3 floats per pixel. OpenCV's imwrite() cannot do that.
-void saveXyzImage(std::string const& filename, cv::Mat const& img) {
-  if (img.depth() != CV_32F)
-    LOG(FATAL) << "Expecting an image with float values\n";
-  if (img.channels() != 3) LOG(FATAL) << "Expecting 3 channels.\n";
-
-  std::ofstream f;
-  f.open(filename.c_str(), std::ios::binary | std::ios::out);
-  if (!f.is_open()) LOG(FATAL) << "Cannot open file for writing: " << filename << "\n";
-
-  // Assign these to explicit variables so we know their type and size in bytes
-  int rows = img.rows, cols = img.cols, channels = img.channels();
-
-  // TODO(oalexan1): Avoid C-style cast. Test if
-  // reinterpret_cast<char*> does the same thing.
-  f.write((char*)(&rows), sizeof(rows));         // NOLINT
-  f.write((char*)(&cols), sizeof(cols));         // NOLINT
-  f.write((char*)(&channels), sizeof(channels)); // NOLINT
-
-  for (int row = 0; row < rows; row++) {
-    for (int col = 0; col < cols; col++) {
-      cv::Vec3f const& P = img.at<cv::Vec3f>(row, col);  // alias
-      // TODO(oalexan1): See if using reinterpret_cast<char*> does the same
-      // thing.
-      for (int c = 0; c < channels; c++)
-        f.write((char*)(&P[c]), sizeof(P[c])); // NOLINT
-    }
-  }
-
-  return;
-}
-
-// Read an image with 3 floats per pixel. OpenCV's imread() cannot do that.
-void readXyzImage(std::string const& filename, cv::Mat & img) {
-  std::ifstream f;
-  f.open(filename.c_str(), std::ios::binary | std::ios::in);
-  if (!f.is_open()) LOG(FATAL) << "Cannot open file for reading: " << filename << "\n";
-
-  int rows, cols, channels;
-  f.read((char*)(&rows), sizeof(rows));         // NOLINT
-  f.read((char*)(&cols), sizeof(cols));         // NOLINT
-  f.read((char*)(&channels), sizeof(channels)); // NOLINT
-
-  img = cv::Mat::zeros(rows, cols, CV_32FC3);
-
-  for (int row = 0; row < rows; row++) {
-    for (int col = 0; col < cols; col++) {
-      cv::Vec3f P;
-      // TODO(oalexan1): See if using reinterpret_cast<char*> does the same
-      // thing.
-      for (int c = 0; c < channels; c++)
-        f.read((char*)(&P[c]), sizeof(P[c])); // NOLINT
-      img.at<cv::Vec3f>(row, col) = P;
-    }
-  }
-
-  return;
-}
-
-// Save images and depth clouds to disk
-void saveImagesAndDepthClouds(std::vector<dense_map::cameraImage> const& cams) {
-  for (size_t it = 0; it < cams.size(); it++) {
-
-    std::cout << "Writing: " << cams[it].image_name << std::endl;
-    cv::imwrite(cams[it].image_name, cams[it].image);
-
-    if (cams[it].depth_cloud.cols > 0 && cams[it].depth_cloud.rows > 0) {
-      std::cout << "Writing: " << cams[it].depth_name << std::endl;
-      dense_map::saveXyzImage(cams[it].depth_name, cams[it].depth_cloud);
-    }
-  }
-
-  return;
-}
-
 // Find an image at the given timestamp or right after it. We assume
 // that during repeated calls to this function we always travel
 // forward in time, and we keep track of where we are in the bag using
@@ -824,7 +750,7 @@ void strToVec(std::string const& str, std::vector<double> & vec) {
 
 // Read the images, depth clouds, and their metadata
 // Save the properties of images. Use space as separator.
-void writeImageList(std::string const& out_dir, std::vector<dense_map::cameraImage> const& cams,
+void saveCameraPoses(std::string const& out_dir, std::vector<dense_map::cameraImage> const& cams,
                     std::vector<Eigen::Affine3d> const& world_to_cam) {
   dense_map::createDir(out_dir);
   std::string image_list = out_dir + "/cameras.txt";
@@ -1128,90 +1054,6 @@ void readRigConfig(std::string const& rig_config, bool have_rig_transforms, int 
   }
 
   return;
-}
-
-// Reads the NVM control network format.
-void ReadNVM(std::string const& input_filename,
-             std::vector<Eigen::Matrix2Xd> * cid_to_keypoint_map,
-             std::vector<std::string> * cid_to_filename,
-             std::vector<std::map<int, int> > * pid_to_cid_fid,
-             std::vector<Eigen::Vector3d> * pid_to_xyz,
-             std::vector<Eigen::Affine3d> *
-             cid_to_cam_t_global) {
-  std::ifstream f(input_filename, std::ios::in);
-  std::string token;
-  std::getline(f, token);
-  
-  // Assert that we start with our NVM token
-  if (token.compare(0, 6, "NVM_V3") != 0) {
-    LOG(FATAL) << "File doesn't start with NVM token";
-  }
-
-  // Read the number of cameras
-  ptrdiff_t number_of_cid;
-  f >> number_of_cid;
-  if (number_of_cid < 1) {
-    LOG(FATAL) << "NVM file is missing cameras";
-  }
-
-  // Resize all our structures to support the number of cameras we now expect
-  cid_to_keypoint_map->resize(number_of_cid);
-  cid_to_filename->resize(number_of_cid);
-  cid_to_cam_t_global->resize(number_of_cid);
-  for (ptrdiff_t cid = 0; cid < number_of_cid; cid++) {
-    // Clear keypoints from map. We'll read these in shortly
-    cid_to_keypoint_map->at(cid).resize(Eigen::NoChange_t(), 2);
-
-    // Read the line that contains camera information
-    double focal, dist1, dist2;
-    Eigen::Quaterniond q;
-    Eigen::Vector3d c;
-    f >> token >> focal;
-    f >> q.w() >> q.x() >> q.y() >> q.z();
-    f >> c[0] >> c[1] >> c[2] >> dist1 >> dist2;
-    cid_to_filename->at(cid) = token;
-
-    // Solve for t, which is part of the affine transform
-    Eigen::Matrix3d r = q.matrix();
-    cid_to_cam_t_global->at(cid).linear() = r;
-    cid_to_cam_t_global->at(cid).translation() = -r * c;
-  }
-
-  // Read the number of points
-  ptrdiff_t number_of_pid;
-  f >> number_of_pid;
-  if (number_of_pid < 1) {
-    LOG(FATAL) << "The NVM file has no triangulated points.";
-  }
-
-  // Read the point
-  pid_to_cid_fid->resize(number_of_pid);
-  pid_to_xyz->resize(number_of_pid);
-  Eigen::Vector3d xyz;
-  Eigen::Vector3i color;
-  Eigen::Vector2d pt;
-  ptrdiff_t cid, fid;
-  for (ptrdiff_t pid = 0; pid < number_of_pid; pid++) {
-    pid_to_cid_fid->at(pid).clear();
-
-    ptrdiff_t number_of_measures;
-    f >> xyz[0] >> xyz[1] >> xyz[2] >>
-      color[0] >> color[1] >> color[2] >> number_of_measures;
-    pid_to_xyz->at(pid) = xyz;
-    for (ptrdiff_t m = 0; m < number_of_measures; m++) {
-      f >> cid >> fid >> pt[0] >> pt[1];
-
-      pid_to_cid_fid->at(pid)[cid] = fid;
-
-      if (cid_to_keypoint_map->at(cid).cols() <= fid) {
-        cid_to_keypoint_map->at(cid).conservativeResize(Eigen::NoChange_t(), fid + 1);
-      }
-      cid_to_keypoint_map->at(cid).col(fid) = pt;
-    }
-
-    if (!f.good())
-      LOG(FATAL) << "Unable to correctly read PID: " << pid;
-  }
 }
 
 // Check if first three coordinates of a vector are 0. That would make it invalid.

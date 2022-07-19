@@ -60,6 +60,15 @@ struct cameraImage {
   std::string image_name, depth_name;
 };
 
+// A struct to collect together some attributes of an image or depth cloud
+// (stored as an image with 3 channels)
+struct ImageMessage {
+  cv::Mat image;
+  double timestamp;
+  std::string name;
+  Eigen::Affine3d world_to_cam;
+};
+  
 }  // namespace dense_map
 
 #endif  // CAMERA_IMAGE_H_

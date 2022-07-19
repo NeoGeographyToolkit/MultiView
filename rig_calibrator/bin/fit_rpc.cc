@@ -37,6 +37,7 @@
 
 #include <rig_calibrator/dense_map_utils.h>
 #include <camera_model/rpc_distortion.h>
+#include <camera_model/camera_params.h>
 
 #include <gflags/gflags.h>
 #include <glog/logging.h>

@@ -27,6 +27,8 @@
 #include <rig_calibrator/system_utils.h>
 #include <rig_calibrator/thread.h>
 #include <rig_calibrator/matching.h>
+#include <rig_calibrator/transform_utils.h>
+#include <camera_model/camera_params.h>
 
 // Get rid of warnings beyond our control
 #pragma GCC diagnostic ignored "-Wdeprecated-declarations"
@@ -41,9 +43,12 @@
 
 #include <iostream>
 #include <fstream>
+#include <iomanip>
+
+namespace fs = boost::filesystem;
 
 // SIFT is doing so much better than SURF for haz cam images.
-DEFINE_string(refiner_feature_detector, "SIFT", "The feature detector to use. SIFT or SURF.");
+DEFINE_string(feature_detector, "SIFT", "The feature detector to use. SIFT or SURF.");
 DEFINE_int32(sift_nFeatures, 10000, "Number of SIFT features");
 DEFINE_int32(sift_nOctaveLayers, 3, "Number of SIFT octave layers");
 DEFINE_double(sift_contrastThreshold, 0.02,
@@ -68,7 +73,7 @@ void detectFeatures(const cv::Mat& image, bool verbose,
 
   std::vector<cv::KeyPoint> storage;
 
-  if (FLAGS_refiner_feature_detector == "SIFT") {
+  if (FLAGS_feature_detector == "SIFT") {
     cv::Ptr<cv::xfeatures2d::SIFT> sift =
       cv::xfeatures2d::SIFT::create(FLAGS_sift_nFeatures, FLAGS_sift_nOctaveLayers,
                                     FLAGS_sift_contrastThreshold,
@@ -76,7 +81,7 @@ void detectFeatures(const cv::Mat& image, bool verbose,
     sift->detect(image, storage);
     sift->compute(image, storage, *descriptors);
 
-  } else if (FLAGS_refiner_feature_detector == "SURF") {
+  } else if (FLAGS_feature_detector == "SURF") {
     interest_point::FeatureDetector detector("SURF");
     detector.Detect(*image_ptr, &storage, descriptors);
 
@@ -87,7 +92,7 @@ void detectFeatures(const cv::Mat& image, bool verbose,
     }
 
   } else {
-    LOG(FATAL) << "Unknown feature detector: " << FLAGS_refiner_feature_detector;
+    LOG(FATAL) << "Unknown feature detector: " << FLAGS_feature_detector;
   }
 
   if (verbose) std::cout << "Features detected " << storage.size() << std::endl;
@@ -579,7 +584,8 @@ void detectMatchFeatures(// Inputs
   }
 
   if (save_matches) {
-    if (out_dir.empty()) LOG(FATAL) << "Cannot save matches if no output directory was provided.\n";
+    if (out_dir.empty())
+      LOG(FATAL) << "Cannot save matches if no output directory was provided.\n";
 
     std::string match_dir = out_dir + "/matches";
     dense_map::createDir(match_dir);
@@ -740,7 +746,9 @@ void saveInlinerMatchPairs(// Inputs
         int cid2 = cid_fid2->first;
         int fid2 = cid_fid2->second;
 
-        bool is_good = (cid1 < cid2 && cid2 < cid1 + num_overlaps + 1);
+        // When num_overlaps == 0, we save only matches read from nvm rather
+        // ones made wen this tool was run.
+        bool is_good = (cid1 < cid2 && (num_overlaps == 0 || cid2 < cid1 + num_overlaps + 1));
         if (!is_good)
           continue;
 
@@ -1239,6 +1247,527 @@ Eigen::Affine3d registrationTransform(std::string const& hugin_file, std::string
 
 
   return registration_trans;
+}
+  
+// Reads the NVM control network format.
+void ReadNVM(std::string const& input_filename,
+             std::vector<Eigen::Matrix2Xd> * cid_to_keypoint_map,
+             std::vector<std::string> * cid_to_filename,
+             std::vector<std::map<int, int> > * pid_to_cid_fid,
+             std::vector<Eigen::Vector3d> * pid_to_xyz,
+             std::vector<Eigen::Affine3d> *
+             cid_to_cam_t_global) {
+  std::ifstream f(input_filename, std::ios::in);
+  std::string token;
+  std::getline(f, token);
+  
+  // Assert that we start with our NVM token
+  if (token.compare(0, 6, "NVM_V3") != 0) {
+    LOG(FATAL) << "File doesn't start with NVM token";
+  }
+
+  // Read the number of cameras
+  ptrdiff_t number_of_cid;
+  f >> number_of_cid;
+  if (number_of_cid < 1) {
+    LOG(FATAL) << "NVM file is missing cameras";
+  }
+
+  // Resize all our structures to support the number of cameras we now expect
+  cid_to_keypoint_map->resize(number_of_cid);
+  cid_to_filename->resize(number_of_cid);
+  cid_to_cam_t_global->resize(number_of_cid);
+  for (ptrdiff_t cid = 0; cid < number_of_cid; cid++) {
+    // Clear keypoints from map. We'll read these in shortly
+    cid_to_keypoint_map->at(cid).resize(Eigen::NoChange_t(), 2);
+
+    // Read the line that contains camera information
+    double focal, dist1, dist2;
+    Eigen::Quaterniond q;
+    Eigen::Vector3d c;
+    f >> token >> focal;
+    f >> q.w() >> q.x() >> q.y() >> q.z();
+    f >> c[0] >> c[1] >> c[2] >> dist1 >> dist2;
+    cid_to_filename->at(cid) = token;
+
+    // Solve for t, which is part of the affine transform
+    Eigen::Matrix3d r = q.matrix();
+    cid_to_cam_t_global->at(cid).linear() = r;
+    cid_to_cam_t_global->at(cid).translation() = -r * c;
+  }
+
+  // Read the number of points
+  ptrdiff_t number_of_pid;
+  f >> number_of_pid;
+  if (number_of_pid < 1) {
+    LOG(FATAL) << "The NVM file has no triangulated points.";
+  }
+
+  // Read the point
+  pid_to_cid_fid->resize(number_of_pid);
+  pid_to_xyz->resize(number_of_pid);
+  Eigen::Vector3d xyz;
+  Eigen::Vector3i color;
+  Eigen::Vector2d pt;
+  ptrdiff_t cid, fid;
+  for (ptrdiff_t pid = 0; pid < number_of_pid; pid++) {
+    pid_to_cid_fid->at(pid).clear();
+
+    ptrdiff_t number_of_measures;
+    f >> xyz[0] >> xyz[1] >> xyz[2] >>
+      color[0] >> color[1] >> color[2] >> number_of_measures;
+    pid_to_xyz->at(pid) = xyz;
+    for (ptrdiff_t m = 0; m < number_of_measures; m++) {
+      f >> cid >> fid >> pt[0] >> pt[1];
+
+      pid_to_cid_fid->at(pid)[cid] = fid;
+
+      if (cid_to_keypoint_map->at(cid).cols() <= fid) {
+        cid_to_keypoint_map->at(cid).conservativeResize(Eigen::NoChange_t(), fid + 1);
+      }
+      cid_to_keypoint_map->at(cid).col(fid) = pt;
+    }
+
+    if (!f.good())
+      LOG(FATAL) << "Unable to correctly read PID: " << pid;
+  }
+}
+
+// Write an nvm file. Note that a single focal length is assumed and no distortion.
+// Those are ignored, and only camera poses, matches, and keypoints are used.
+// TODO(oalexan1): This was not tested after being copied over.
+void WriteNVM(std::vector<Eigen::Matrix2Xd> const& cid_to_keypoint_map,
+              std::vector<std::string> const& cid_to_filename,
+              std::vector<std::map<int, int>> const& pid_to_cid_fid,
+              std::vector<Eigen::Vector3d> const& pid_to_xyz,
+              std::vector<Eigen::Affine3d> const&
+              cid_to_cam_t_global,
+              double focal_length,
+              std::string const& output_filename) {
+  
+  std::fstream f(output_filename, std::ios::out);
+  f << "NVM_V3\n";
+
+  CHECK(cid_to_filename.size() == cid_to_keypoint_map.size())
+    << "Unequal number of filenames and keypoints";
+  CHECK(pid_to_cid_fid.size() == pid_to_xyz.size())
+    << "Unequal number of pid_to_cid_fid and xyz measurements";
+  CHECK(cid_to_filename.size() == cid_to_cam_t_global.size())
+    << "Unequal number of filename and camera transforms";
+
+  // Write camera information
+  f << cid_to_filename.size() << std::endl;
+  for (size_t cid = 0; cid < cid_to_filename.size(); cid++) {
+    // Decompose cam_t_global so that we can write it into a WXY
+    // quaternion and an XYZ camera position
+    Eigen::Quaterniond q(cid_to_cam_t_global[cid].rotation());
+    Eigen::Vector3d t(cid_to_cam_t_global[cid].translation());
+    Eigen::Vector3d camera_center =
+      - cid_to_cam_t_global[cid].rotation().inverse() * t;
+
+    // The NVM format is a little crazy. When using a quaternion, we
+    // write the camera center instead of the t from camera_t_global.
+    f << cid_to_filename[cid] << " " << focal_length
+      << " " << q.w() << " " << q.x() << " " << q.y() << " " << q.z() << " "
+      << camera_center[0] << " " << camera_center[1] << " "
+      << camera_center[2] << " " << "0.9 0\n";
+  }
+
+  // Write the number of points
+  f << pid_to_cid_fid.size() << std::endl;
+
+  for (size_t pid = 0; pid < pid_to_cid_fid.size(); pid++) {
+    f << pid_to_xyz[pid][0] << " " << pid_to_xyz[pid][1] << " "
+      << pid_to_xyz[pid][2] << " 0 0 0 "
+      << pid_to_cid_fid[pid].size();
+
+    CHECK(pid_to_cid_fid[pid].size() > 1)
+      << "PID " << pid << " has " << pid_to_cid_fid[pid].size() << " measurements";
+
+    for (std::map<int, int>::const_iterator it = pid_to_cid_fid[pid].begin();
+         it != pid_to_cid_fid[pid].end(); it++) {
+      f << " " << it->first << " " << it->second << " "
+        << cid_to_keypoint_map[it->first].col(it->second)[0] << " "
+        << cid_to_keypoint_map[it->first].col(it->second)[1];
+    }
+    f << std::endl;
+  }
+
+  // Close the file
+  f.flush();
+  f.close();
+}
+
+// A function to copy image data from maps to vectors with the data stored
+// chronologically in them, to speed up traversal.
+void ImageDataToVectors
+(// Inputs
+ int ref_cam_type,
+ std::map<int, std::map<double, dense_map::ImageMessage>> const& image_maps,
+ std::map<int, std::map<double, dense_map::ImageMessage>> const& depth_maps,
+ // Outputs
+ std::vector<double>& ref_timestamps,
+ std::vector<Eigen::Affine3d> & world_to_ref,
+ std::vector<std::string> & ref_image_files,
+ std::vector<std::vector<dense_map::ImageMessage>> & image_data,
+ std::vector<std::vector<dense_map::ImageMessage>> & depth_data) {
+
+  // Wipe the outputs
+  ref_timestamps.clear();
+  world_to_ref.clear();
+  ref_image_files.clear();
+  image_data.clear();
+  depth_data.clear();
+  
+  // Find the range of sensor ids.
+  int max_cam_type = 0;
+  for (auto it = image_maps.begin(); it != image_maps.end(); it++)
+    max_cam_type = std::max(max_cam_type, it->first);
+  for (auto it = depth_maps.begin(); it != depth_maps.end(); it++)
+    max_cam_type = std::max(max_cam_type, it->first);
+
+  image_data.resize(max_cam_type + 1);
+  depth_data.resize(max_cam_type + 1);
+  for (size_t cam_type = 0; cam_type < image_data.size(); cam_type++) {
+
+    auto image_map_it = image_maps.find(cam_type);
+    if (image_map_it != image_maps.end()) {
+      auto image_map = image_map_it->second; 
+
+      for (auto it = image_map.begin(); it != image_map.end(); it++) {
+        image_data[cam_type].push_back(it->second);
+        
+        // Collect the ref cam timestamps, world_to_ref, and image names,
+        // in chronological order
+        if (cam_type == ref_cam_type) {
+          world_to_ref.push_back(it->second.world_to_cam);
+          ref_timestamps.push_back(it->second.timestamp);
+          ref_image_files.push_back(it->second.name);
+        }
+      }
+    }
+    
+    auto depth_map_it = depth_maps.find(cam_type);
+    if (depth_map_it != depth_maps.end()) {
+      auto depth_map = depth_map_it->second; 
+      for (auto it = depth_map.begin(); it != depth_map.end(); it++)
+        depth_data[cam_type].push_back(it->second);
+    }
+  }
+}
+
+
+// Write an image with 3 floats per pixel. OpenCV's imwrite() cannot do that.
+void saveXyzImage(std::string const& filename, cv::Mat const& img) {
+  if (img.depth() != CV_32F)
+    LOG(FATAL) << "Expecting an image with float values\n";
+  if (img.channels() != 3) LOG(FATAL) << "Expecting 3 channels.\n";
+
+  std::ofstream f;
+  f.open(filename.c_str(), std::ios::binary | std::ios::out);
+  if (!f.is_open()) LOG(FATAL) << "Cannot open file for writing: " << filename << "\n";
+
+  // Assign these to explicit variables so we know their type and size in bytes
+  int rows = img.rows, cols = img.cols, channels = img.channels();
+
+  // TODO(oalexan1): Avoid C-style cast. Test if
+  // reinterpret_cast<char*> does the same thing.
+  f.write((char*)(&rows), sizeof(rows));         // NOLINT
+  f.write((char*)(&cols), sizeof(cols));         // NOLINT
+  f.write((char*)(&channels), sizeof(channels)); // NOLINT
+
+  for (int row = 0; row < rows; row++) {
+    for (int col = 0; col < cols; col++) {
+      cv::Vec3f const& P = img.at<cv::Vec3f>(row, col);  // alias
+      // TODO(oalexan1): See if using reinterpret_cast<char*> does the same
+      // thing.
+      for (int c = 0; c < channels; c++)
+        f.write((char*)(&P[c]), sizeof(P[c])); // NOLINT
+    }
+  }
+
+  return;
+}
+
+// Save images and depth clouds to disk
+void saveImagesAndDepthClouds(std::vector<dense_map::cameraImage> const& cams) {
+  for (size_t it = 0; it < cams.size(); it++) {
+
+    std::cout << "Writing: " << cams[it].image_name << std::endl;
+    cv::imwrite(cams[it].image_name, cams[it].image);
+
+    if (cams[it].depth_cloud.cols > 0 && cams[it].depth_cloud.rows > 0) {
+      std::cout << "Writing: " << cams[it].depth_name << std::endl;
+      dense_map::saveXyzImage(cams[it].depth_name, cams[it].depth_cloud);
+    }
+  }
+
+  return;
+}
+
+// Read an image with 3 floats per pixel. OpenCV's imread() cannot do that.
+void readXyzImage(std::string const& filename, cv::Mat & img) {
+  std::ifstream f;
+  f.open(filename.c_str(), std::ios::binary | std::ios::in);
+  if (!f.is_open()) LOG(FATAL) << "Cannot open file for reading: " << filename << "\n";
+
+  int rows, cols, channels;
+  f.read((char*)(&rows), sizeof(rows));         // NOLINT
+  f.read((char*)(&cols), sizeof(cols));         // NOLINT
+  f.read((char*)(&channels), sizeof(channels)); // NOLINT
+
+  img = cv::Mat::zeros(rows, cols, CV_32FC3);
+
+  for (int row = 0; row < rows; row++) {
+    for (int col = 0; col < cols; col++) {
+      cv::Vec3f P;
+      // TODO(oalexan1): See if using reinterpret_cast<char*> does the same
+      // thing.
+      for (int c = 0; c < channels; c++)
+        f.read((char*)(&P[c]), sizeof(P[c])); // NOLINT
+      img.at<cv::Vec3f>(row, col) = P;
+    }
+  }
+
+  return;
+}
+  
+void readImageEntry(// Inputs
+                    std::string const& image_file,
+                    Eigen::Affine3d const& world_to_cam,
+                    std::vector<std::string> const& cam_names,
+                    // Outputs
+                    std::map<int, std::map<double, dense_map::ImageMessage>> & image_maps,
+                    std::map<int, std::map<double, dense_map::ImageMessage>> & depth_maps) {
+  
+  // The cam name is the subdir having the images
+  std::string cam_name =
+    fs::path(image_file).parent_path().filename().string();
+    
+  std::string basename = fs::path(image_file).filename().string();
+  if (basename.empty() || basename[0] < '0' || basename[0] > '9')
+    LOG(FATAL) << "Image name (without directory) must start with digits. Got: "
+               << basename << "\n";
+  double timestamp = atof(basename.c_str());
+
+  // Infer cam type from cam name
+  int cam_type = 0;
+  bool success = false;
+  for (size_t cam_it = 0; cam_it < cam_names.size(); cam_it++) {
+    if (cam_names[cam_it] == cam_name) {
+      cam_type = cam_it;
+      success = true;
+      break;
+    }
+  }
+  if (!success) 
+    LOG(FATAL) << "Could not determine sensor name from image path: " << image_file << "\n";
+    
+  // Aliases
+  std::map<double, ImageMessage> & image_map = image_maps[cam_type];
+  std::map<double, ImageMessage> & depth_map = depth_maps[cam_type];
+
+  if (image_map.find(timestamp) != image_map.end())
+    LOG(FATAL) << "Duplicate timestamp " << std::setprecision(17) << timestamp
+               << " for sensor id " << cam_type << "\n";
+  
+  // Read the image as grayscale, in order for feature matching to work
+  // For texturing, texrecon should use the original color images.
+  std::cout << "Reading: " << image_file << std::endl;
+  image_map[timestamp].image        = cv::imread(image_file, cv::IMREAD_GRAYSCALE);
+  image_map[timestamp].name         = image_file;
+  image_map[timestamp].timestamp    = timestamp;
+  image_map[timestamp].world_to_cam = world_to_cam;
+
+  // Sanity check
+  if (depth_map.find(timestamp) != depth_map.end())
+    LOG(FATAL) << "Duplicate timestamp " << std::setprecision(17) << timestamp
+               << " for sensor id " << cam_type << "\n";
+
+  // Read the depth data, if present
+  std::string depth_file = fs::path(image_file).replace_extension(".pc").string();
+  if (fs::exists(depth_file)) {
+    std::cout << "Reading: " << depth_file << std::endl;
+    dense_map::readXyzImage(depth_file, depth_map[timestamp].image);
+    depth_map[timestamp].name      = depth_file;
+    depth_map[timestamp].timestamp = timestamp;
+  }
+}
+
+void readCameraPoses(// Inputs
+                      std::string const& camera_poses_file, int ref_cam_type,
+                      std::vector<std::string> const& cam_names,
+                      // Outputs
+                      nvmData & nvm,
+                      std::vector<double>& ref_timestamps,
+                      std::vector<Eigen::Affine3d>& world_to_ref,
+                      std::vector<std::string> & ref_image_files,
+                      std::vector<std::vector<ImageMessage>>& image_data,
+                      std::vector<std::vector<ImageMessage>>& depth_data) {
+  
+  // Clear the outputs
+  ref_timestamps.clear();
+  world_to_ref.clear();
+  ref_image_files.clear();
+  image_data.clear();
+  depth_data.clear();
+  nvm = nvmData(); // will not be filled in
+  
+  // Open the file
+  std::cout << "Reading: " << camera_poses_file << std::endl;
+  std::ifstream f;
+  f.open(camera_poses_file.c_str(), std::ios::binary | std::ios::in);
+  if (!f.is_open()) LOG(FATAL) << "Cannot open file for reading: " << camera_poses_file << "\n";
+
+  // Read here temporarily the images and depth maps
+  std::map<int, std::map<double, ImageMessage>> image_maps;
+  std::map<int, std::map<double, ImageMessage>> depth_maps;
+
+  std::string line;
+  while (getline(f, line)) {
+    if (line.empty() || line[0] == '#') continue;
+
+    std::string image_file;
+    std::istringstream iss(line);
+    if (!(iss >> image_file))
+      LOG(FATAL) << "Cannot parse the image file in: "
+                 << camera_poses_file << "\n";
+
+    // Read the camera to world transform
+    Eigen::VectorXd vals(12);
+    double val = -1.0;
+    int count = 0;
+    while (iss >> val) {
+      if (count >= 12) break;
+      vals[count] = val;
+      count++;
+    }
+
+    if (count != 12)
+      LOG(FATAL) << "Expecting 12 values for the transform on line:\n" << line << "\n";
+
+    Eigen::Affine3d world_to_cam = vecToAffine(vals);
+    readImageEntry(image_file, world_to_cam, cam_names,  
+                   image_maps, depth_maps); // out 
+  }
+
+  // Put in vectors
+  dense_map::ImageDataToVectors(// Inputs
+                                ref_cam_type, image_maps,  depth_maps,
+                                // Outputs
+                                ref_timestamps, world_to_ref, ref_image_files,
+                                image_data, depth_data);
+  
+  return;
+}
+
+// Read camera information and images from an NVM file, exported
+// from Theia
+void readNvm(// Inputs
+                     std::string const& nvm_file, int ref_cam_type,
+                     std::vector<std::string> const& cam_names,
+                     // Outputs
+                     nvmData & nvm,
+                     std::vector<double>& ref_timestamps,
+                     std::vector<Eigen::Affine3d>& world_to_ref,
+                     std::vector<std::string>    & ref_image_files,
+                     std::vector<std::vector<ImageMessage>>& image_data,
+                     std::vector<std::vector<ImageMessage>>& depth_data) {
+
+  // cid_to_cam_t_global has world_to_cam
+  dense_map::ReadNVM(nvm_file,  
+                     &nvm.cid_to_keypoint_map,  
+                     &nvm.cid_to_filename,  
+                     &nvm.pid_to_cid_fid,  
+                     &nvm.pid_to_xyz,  
+                     &nvm.cid_to_cam_t_global);
+  
+  // Read here temporarily the images and depth maps
+  std::map<int, std::map<double, dense_map::ImageMessage>> image_maps;
+  std::map<int, std::map<double, dense_map::ImageMessage>> depth_maps;
+  
+  for (size_t it = 0; it < nvm.cid_to_filename.size(); it++) {
+
+    // Aliases
+    auto const& image_file = nvm.cid_to_filename[it];
+    auto const& world_to_cam = nvm.cid_to_cam_t_global[it];
+
+    readImageEntry(image_file, world_to_cam, cam_names,  
+                   image_maps, depth_maps); // out 
+  }
+
+  // This entails some book-keeping
+  // TODO(oalexan1): Just keep image_maps and depth_maps and change the book-keeping
+  // to use std::map rather than std::vector iterators
+  dense_map::ImageDataToVectors(// Inputs
+                                ref_cam_type, image_maps, depth_maps,
+                                // Outputs
+                                ref_timestamps, world_to_ref, ref_image_files,
+                                image_data, depth_data);
+}
+
+// Append to existing keypoints and pid_to_cid_fid the entries from the nvm file.  
+// Need to account for the fact that the nvm file will likely have the images
+// in different order than in the 'cams' vector, and may have more such images,
+// as later we may have used bracketing to thin them out. So, some book-keeping is
+// necessary.
+void appendMatchesFromNvm(// Inputs
+                          std::vector<camera::CameraParameters> const& cam_params,
+                          std::vector<dense_map::cameraImage>   const& cams,
+                          nvmData const& nvm,
+                          // Outputs (these get appended to)
+                          std::vector<std::map<int, int>> & pid_to_cid_fid,
+                          std::vector<std::vector<std::pair<float, float>>> & keypoint_vec) {
+    
+  if (!keypoint_vec.empty() && keypoint_vec.size() != cams.size()) 
+    LOG(FATAL) << "There must be as many sets of keypoints as images, or none at all.\n";
+
+  if (keypoint_vec.empty()) 
+    keypoint_vec.resize(cams.size());
+    
+  // First find how to map each cid from nvm to cid in 'cams'.
+  std::map<std::string, int> nvm_image_name_to_cid;
+  for (size_t nvm_cid = 0; nvm_cid < nvm.cid_to_filename.size(); nvm_cid++)
+    nvm_image_name_to_cid[nvm.cid_to_filename[nvm_cid]] = nvm_cid;
+  std::map<int, int> nvm_cid_to_cams_cid;
+  for (size_t cid = 0; cid < cams.size(); cid++) {
+    std::string const& image_name = cams[cid].image_name;
+    auto nvm_it = nvm_image_name_to_cid.find(image_name);
+    if (nvm_it == nvm_image_name_to_cid.end()) 
+      LOG(FATAL) << "Could not look up image: " << image_name << " in the input nvm file.\n";
+    int nvm_cid = nvm_it->second;
+    nvm_cid_to_cams_cid[nvm_cid] = cid;
+  }
+  
+  // Get new pid_to_cid_fid and keypoint_vec. Note that we ignore the triangulated
+  // points in nvm.pid_to_xyz. Triangulation will be redone later.
+  for (size_t pid = 0; pid < nvm.pid_to_cid_fid.size(); pid++) {
+
+    std::map<int, int> out_cid_fid;
+    for (auto cid_fid = nvm.pid_to_cid_fid[pid].begin();
+         cid_fid != nvm.pid_to_cid_fid[pid].end(); cid_fid++) {
+      int nvm_cid = cid_fid->first;
+      int nvm_fid = cid_fid->second;
+      Eigen::Vector2d keypoint = nvm.cid_to_keypoint_map.at(nvm_cid).col(nvm_fid);
+
+      auto it = nvm_cid_to_cams_cid.find(nvm_cid);
+      if (it == nvm_cid_to_cams_cid.end()) 
+        continue; // this image went missing during bracketing
+
+      int cid = it->second; // cid value in 'cams'
+      // Add the offset Theia removes
+      keypoint += cam_params[cams[cid].camera_type].GetOpticalOffset();
+
+      int fid = keypoint_vec[cid].size(); // this is before we add the keypoint
+      keypoint_vec[cid].push_back(std::make_pair(keypoint[0], keypoint[1]));
+      out_cid_fid[cid] = fid;
+    }
+
+    // Keep only the tracks with at least two matches
+    if (out_cid_fid.size() > 1) 
+      pid_to_cid_fid.push_back(out_cid_fid);
+      
+  } // end iterating over nvm pid
 }
   
 }  // end namespace dense_map
