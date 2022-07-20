@@ -259,14 +259,25 @@ void ReadNVM(std::string const& input_filename,
              std::vector<Eigen::Affine3d> *
              cid_to_cam_t_global);
 
+// Write the inliers in nvm format. The keypoints are shifted relative to the optical
+// center, as written by Theia.
+void writeNvm(std::string                                       const& nvm_file,
+              std::vector<camera::CameraParameters>             const& cam_params,
+              std::vector<dense_map::cameraImage>               const& cams,
+              std::vector<Eigen::Affine3d>                      const& world_to_cam,
+              std::vector<std::vector<std::pair<float, float>>> const& keypoint_vec,
+              std::vector<std::map<int, int>>                   const& pid_to_cid_fid,
+              std::vector<std::map<int, std::map<int, int>>>    const& pid_cid_fid_inlier,
+              std::vector<Eigen::Vector3d>                      const& xyz_vec);
+  
 // Write an nvm file. Note that a single focal length is assumed and no distortion.
 // Those are ignored, and only camera poses, matches, and keypoints are used.
 void WriteNVM(std::vector<Eigen::Matrix2Xd> const& cid_to_keypoint_map,
               std::vector<std::string> const& cid_to_filename,
+              std::vector<double> const& focal_lengths,
               std::vector<std::map<int, int>> const& pid_to_cid_fid,
               std::vector<Eigen::Vector3d> const& pid_to_xyz,
               std::vector<Eigen::Affine3d> const& cid_to_cam_t_global,
-              double focal_length,
               std::string const& output_filename);
 
 struct nvmData {

@@ -790,7 +790,6 @@ void saveInlinerMatchPairs(// Inputs
   }
 }
 
-// TODO(oalexan1):  Move to utils!
 // Given a set of points in 3D, heuristically estimate what it means
 // for two points to be "not far" from each other. The logic is to
 // find a bounding box of an inner cluster and multiply that by 0.2.
@@ -828,8 +827,6 @@ double estimateCloseDistance(std::vector<Eigen::Vector3d> const& vec) {
 // Given two sets of 3D points, find the rotation + translation + scale
 // which best maps the first set to the second.
 // Source: http://en.wikipedia.org/wiki/Kabsch_algorithm
-
-// TODO(oalexan1): Move to utils!
 // TODO(oalexan1): Use robust version!  
 void Find3DAffineTransform(Eigen::Matrix3Xd const & in,
                            Eigen::Matrix3Xd const & out,
@@ -888,8 +885,6 @@ void Find3DAffineTransform(Eigen::Matrix3Xd const & in,
   result->linear() = scale * R;
   result->translation() = scale*(out_ctr - R*in_ctr);
 }
-  
-// TODO(oalexan1): Move to utils
   
 // Extract control points and the images they correspond 2 from
 // a hugin project file
@@ -1333,19 +1328,100 @@ void ReadNVM(std::string const& input_filename,
   }
 }
 
+// Write the inliers in nvm format. The keypoints are shifted relative to the optical
+// center, as written by Theia.
+void writeNvm(std::string                                       const& nvm_file,
+              std::vector<camera::CameraParameters>             const& cam_params,
+              std::vector<dense_map::cameraImage>               const& cams,
+              std::vector<Eigen::Affine3d>                      const& world_to_cam,
+              std::vector<std::vector<std::pair<float, float>>> const& keypoint_vec,
+              std::vector<std::map<int, int>>                   const& pid_to_cid_fid,
+              std::vector<std::map<int, std::map<int, int>>>    const& pid_cid_fid_inlier,
+              std::vector<Eigen::Vector3d>                      const& xyz_vec) {
+
+  // Sanity checks
+  if (world_to_cam.size() != cams.size())
+    LOG(FATAL) << "Expecting as many world-to-camera transforms as cameras.\n";
+  if (world_to_cam.size() != keypoint_vec.size()) 
+    LOG(FATAL) << "Expecting as many sets of keypoints as cameras.\n";  
+  if (pid_to_cid_fid.size() != pid_cid_fid_inlier.size())
+    LOG(FATAL) << "Expecting as many inlier flags as there are tracks.\n";
+  if (pid_to_cid_fid.size() != xyz_vec.size()) 
+    LOG(FATAL) << "Expecting as many tracks as there are triangulated points.\n";
+
+  // Initialize the keypoints in expected format. Copy the filenames
+  // and focal lengths.
+  std::vector<Eigen::Matrix2Xd> cid_to_keypoint_map(keypoint_vec.size());
+  std::vector<std::string> cid_to_filename(keypoint_vec.size());
+  std::vector<double> focal_lengths(keypoint_vec.size());
+  for (size_t cid = 0; cid < cams.size(); cid++) {
+    cid_to_keypoint_map[cid] = Eigen::MatrixXd(2, keypoint_vec[cid].size());
+    cid_to_filename[cid] = cams[cid].image_name;
+    focal_lengths[cid] = cam_params[cams[cid].camera_type].GetFocalLength();
+  }
+  
+  // Copy over only inliers
+  std::vector<std::map<int, int>> nvm_pid_to_cid_fid;
+  std::vector<Eigen::Vector3d> nvm_pid_to_xyz;
+
+  // Keep track how many fid we end up having for each cid
+  std::vector<int> fid_count(keypoint_vec.size(), 0);
+  
+  for (size_t pid = 0; pid < pid_to_cid_fid.size(); pid++) {
+
+    std::map<int, int> nvm_cid_fid;
+    for (auto cid_fid = pid_to_cid_fid[pid].begin();
+         cid_fid != pid_to_cid_fid[pid].end(); cid_fid++) {
+      int cid = cid_fid->first;
+      int fid = cid_fid->second;
+
+      // Keep inliers only
+      if (!dense_map::getMapValue(pid_cid_fid_inlier, pid, cid, fid))
+        continue;
+
+      Eigen::Vector2d dist_ip(keypoint_vec[cid][fid].first, keypoint_vec[cid][fid].second);
+      // Offset relative to the optical center
+      dist_ip -= cam_params[cams[cid].camera_type].GetOpticalOffset();
+
+      // Add this to the keypoint map for cid in the location at fid_count[cid]
+      cid_to_keypoint_map.at(cid).col(fid_count[cid]) = dist_ip;
+      nvm_cid_fid[cid] = fid_count[cid];
+      fid_count[cid]++;
+    }
+
+    // Keep only tracks with at least two points
+    if (nvm_cid_fid.size() > 2) {
+      nvm_pid_to_cid_fid.push_back(nvm_cid_fid);
+      nvm_pid_to_xyz.push_back(xyz_vec[pid]);
+    }
+  }    
+
+  // Shrink to keep only the inlier keypoints we added
+  for (size_t cid = 0; cid < cams.size(); cid++)
+    cid_to_keypoint_map.at(cid).conservativeResize(Eigen::NoChange_t(), fid_count[cid]);
+
+  WriteNVM(cid_to_keypoint_map, cid_to_filename, focal_lengths, nvm_pid_to_cid_fid,  
+           nvm_pid_to_xyz, world_to_cam, nvm_file);
+}
+  
 // Write an nvm file. Note that a single focal length is assumed and no distortion.
 // Those are ignored, and only camera poses, matches, and keypoints are used.
-// TODO(oalexan1): This was not tested after being copied over.
 void WriteNVM(std::vector<Eigen::Matrix2Xd> const& cid_to_keypoint_map,
               std::vector<std::string> const& cid_to_filename,
+              std::vector<double> const& focal_lengths,
               std::vector<std::map<int, int>> const& pid_to_cid_fid,
               std::vector<Eigen::Vector3d> const& pid_to_xyz,
-              std::vector<Eigen::Affine3d> const&
-              cid_to_cam_t_global,
-              double focal_length,
+              std::vector<Eigen::Affine3d> const& cid_to_cam_t_global,
               std::string const& output_filename) {
+
+  // Ensure that the output directory exists
+  std::string out_dir = fs::path(output_filename).parent_path().string();
+  dense_map::createDir(out_dir);
+
+  std::cout << "Writing: " << output_filename << std::endl;
   
   std::fstream f(output_filename, std::ios::out);
+  f.precision(17); // double precision
   f << "NVM_V3\n";
 
   CHECK(cid_to_filename.size() == cid_to_keypoint_map.size())
@@ -1358,19 +1434,20 @@ void WriteNVM(std::vector<Eigen::Matrix2Xd> const& cid_to_keypoint_map,
   // Write camera information
   f << cid_to_filename.size() << std::endl;
   for (size_t cid = 0; cid < cid_to_filename.size(); cid++) {
-    // Decompose cam_t_global so that we can write it into a WXY
-    // quaternion and an XYZ camera position
+
+    // World-to-camera rotation quaternion
     Eigen::Quaterniond q(cid_to_cam_t_global[cid].rotation());
+
+    // Camera center in world coordinates
     Eigen::Vector3d t(cid_to_cam_t_global[cid].translation());
     Eigen::Vector3d camera_center =
       - cid_to_cam_t_global[cid].rotation().inverse() * t;
 
-    // The NVM format is a little crazy. When using a quaternion, we
-    // write the camera center instead of the t from camera_t_global.
-    f << cid_to_filename[cid] << " " << focal_length
+    double focal_length = 1.0; // nominal value, not used
+    f << cid_to_filename[cid] << " " << focal_lengths[cid]
       << " " << q.w() << " " << q.x() << " " << q.y() << " " << q.z() << " "
       << camera_center[0] << " " << camera_center[1] << " "
-      << camera_center[2] << " " << "0.9 0\n";
+      << camera_center[2] << " " << "0 0\n"; // zero distortion, not used
   }
 
   // Write the number of points
@@ -1664,16 +1741,16 @@ void readCameraPoses(// Inputs
 // Read camera information and images from an NVM file, exported
 // from Theia
 void readNvm(// Inputs
-                     std::string const& nvm_file, int ref_cam_type,
-                     std::vector<std::string> const& cam_names,
-                     // Outputs
-                     nvmData & nvm,
-                     std::vector<double>& ref_timestamps,
-                     std::vector<Eigen::Affine3d>& world_to_ref,
-                     std::vector<std::string>    & ref_image_files,
-                     std::vector<std::vector<ImageMessage>>& image_data,
-                     std::vector<std::vector<ImageMessage>>& depth_data) {
-
+             std::string const& nvm_file, int ref_cam_type,
+             std::vector<std::string> const& cam_names,
+             // Outputs
+             nvmData & nvm,
+             std::vector<double>& ref_timestamps,
+             std::vector<Eigen::Affine3d>& world_to_ref,
+             std::vector<std::string>    & ref_image_files,
+             std::vector<std::vector<ImageMessage>>& image_data,
+             std::vector<std::vector<ImageMessage>>& depth_data) {
+  
   // cid_to_cam_t_global has world_to_cam
   dense_map::ReadNVM(nvm_file,  
                      &nvm.cid_to_keypoint_map,  
@@ -1759,8 +1836,8 @@ void appendMatchesFromNvm(// Inputs
       keypoint += cam_params[cams[cid].camera_type].GetOpticalOffset();
 
       int fid = keypoint_vec[cid].size(); // this is before we add the keypoint
-      keypoint_vec[cid].push_back(std::make_pair(keypoint[0], keypoint[1]));
       out_cid_fid[cid] = fid;
+      keypoint_vec[cid].push_back(std::make_pair(keypoint[0], keypoint[1])); // size is fid + 1
     }
 
     // Keep only the tracks with at least two matches

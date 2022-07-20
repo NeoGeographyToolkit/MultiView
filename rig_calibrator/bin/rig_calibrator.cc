@@ -295,7 +295,10 @@ DEFINE_bool(use_initial_rig_transforms, false,
 
 DEFINE_bool(save_nvm, false,
             "Save the optimized camera poses and inlier interest point matches as "
-            "<out dir>/cameras.nvm. This can be passed in to a new invocation of this tool.");
+            "<out dir>/cameras.nvm. Interest point matches are offset relative to the optical "
+            "center, to be consistent with Theia. This file can be passed in to a new invocation "
+            "of this tool via --nvm.");
+
 DEFINE_bool(save_matches, false,
             "Save the interest point matches (all matches and inlier matches, after filtering). "
             "Stereo Pipeline's viewer can be used for visualizing these.");
@@ -1260,7 +1263,7 @@ void calc_rig_using_word_to_cam(int ref_cam_type, int num_cam_types,
   return;
 }
 
-}  // namespace dense_map
+} // end namespace dense_map
 
 int main(int argc, char** argv) {
   google::InitGoogleLogging(argv[0]);
@@ -1525,6 +1528,7 @@ int main(int argc, char** argv) {
   // pixel is an inlier. Originally all pixels are inliers. Once an
   // inlier becomes an outlier, it never becomes an inlier again.
   std::vector<std::map<int, std::map<int, int>>> pid_cid_fid_inlier;
+  std::vector<Eigen::Vector3d> xyz_vec; // triangulated points go here
   
   // TODO(oalexan1): Must initialize all points as inliers outside this function,
   // as now this function resets those.
@@ -1555,7 +1559,6 @@ int main(int argc, char** argv) {
       // Output
       world_to_cam);
 
-    std::vector<Eigen::Vector3d> xyz_vec;
     dense_map::multiViewTriangulation(// Inputs
                                       cam_params, cams, world_to_cam, pid_to_cid_fid, keypoint_vec,
                                       // Outputs
@@ -2009,6 +2012,12 @@ int main(int argc, char** argv) {
                             cam_params, ref_to_cam_trans, depth_to_image,
                             ref_to_cam_timestamp_offsets);
 
+  if (FLAGS_save_nvm) {
+    std::string nvm_file = FLAGS_out_dir + "/cameras.nvm";
+    dense_map::writeNvm(nvm_file, cam_params, cams, world_to_cam, keypoint_vec,
+                        pid_to_cid_fid, pid_cid_fid_inlier, xyz_vec);
+  }
+  
   if (FLAGS_export_to_voxblox)
     dense_map::exportToVoxblox(cam_names, cams, depth_to_image, world_to_cam, FLAGS_out_dir);
 
