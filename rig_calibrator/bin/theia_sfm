@@ -63,10 +63,13 @@ def processArgs(args, base_dir):
                         help = "Images, as individual wildcards. Example: 'dir/cam1/*tif dir/cam2/*tif.")
 
     parser.add_argument("--theia_flags", dest="theia_flags",
-                        default="", help="The flags to pass to Theia.")
+                        default="", help="The flags to pass to Theia. By default, " + \
+                        "the file ``share/theia_flags.txt`` in the software "       + \
+                        "distribution is used.")
 
     parser.add_argument("--out_dir", dest="out_dir", default="",
-                        help="The output directory (only the 'cameras.nvm' file in it is needed afterwards).")
+                        help="The output directory (only the 'cameras.nvm' " + \
+                        "file in it is needed afterwards).")
     
     args = parser.parse_args()
 

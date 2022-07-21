@@ -1,6 +1,7 @@
 This software provides a collection of tools for calibration of a rig
 of *N* image and/or depth+image cameras, fusion of point clouds into a
-mesh, and seamless texturing of those meshes with the input images. 
+mesh, and seamless texturing of meshes with the input images and
+optimized cameras.
 
 The software was originally developed as part of the [NASA
 ISAAC](https://github.com/nasa/isaac#readme) project, which uses a
@@ -8,11 +9,11 @@ robot with 3 front-facing cameras to scan and navigate the
 International Space Station. The current version is self-contained
 and does not depend on ROS or other parts of ISAAC.
 
-The key dependencies are [Ceres Solver](http://ceres-solver.org/)
-for solving the calibration problem,
-[VoxBlox](https://github.com/ethz-asl/voxblox) for fusing point clouds
-into a mesh, and [MVS
-Texturing](https://github.com/nmoehrle/mvs-texturing) for creation of
+The key dependencies are [Theia SfM](https://github.com/sweeneychris/TheiaSfM) 
+for finding the initial camera poses, [Ceres Solver](http://ceres-solver.org/)
+for solving the calibration problem, [VoxBlox](https://github.com/ethz-asl/voxblox)
+for fusing point clouds into a mesh, and
+[MVS Texturing](https://github.com/nmoehrle/mvs-texturing) for creation of
 textured meshes. Most of the original work in this package went
 towards the creation of the calibration logic and ensuring that all
 components work together to create high-fidelity results.

@@ -185,7 +185,8 @@ DEFINE_double(depth_tri_weight, 0.0,
               "order of 0.01 meters while reprojection errors are on the order of 1 pixel.");
 
 DEFINE_string(mesh, "",
-              "Use this mesh to help constrain the calibration (in .ply format).");
+              "Use this mesh to help constrain the calibration (in .ply format). "
+              "Must use a positive --mesh_tri_weight.");
 
 DEFINE_double(mesh_tri_weight, 0.0,
               "A larger value will give more weight to the constraint that triangulated points "
