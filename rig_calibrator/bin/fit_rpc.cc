@@ -19,6 +19,8 @@
 
 // TODO(oalexan1): Do not use -out_dir. Use -out_config.
 // TODO(oalexan1): Print an underestimate and overestimate for the undistorted win.
+// TODO(oalexan1): Must have sensor name as an option. For now it defaults to sensor 0.
+// TODO(oalexan1): Must document this tool.
 
 #include <ceres/ceres.h>
 #include <ceres/rotation.h>
@@ -54,8 +56,6 @@
 #include <iomanip>
 
 namespace fs = boost::filesystem;
-
-// TODO(oalexan1): Must have sensor name as an option. For now it defaults to sensor 0.
 
 DEFINE_int32(rpc_degree, -1,
              "The degree of the RPC model to fit.");

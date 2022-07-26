@@ -224,7 +224,7 @@ DEFINE_double(max_reprojection_error, 25.0, "If filtering outliers, remove inter
               "happens after each optimization pass finishes, unless disabled. It is better to not "
               "filter too aggressively unless confident of the solution.");
 
-DEFINE_double(refiner_min_angle, 0.5, "If filtering outliers, remove triangulated points "
+DEFINE_double(min_triangulation_angle, 0.5, "If filtering outliers, remove triangulated points "
               "for which all rays converging to it make an angle (in degrees) less than this. "
               "Note that some cameras in the rig may be very close to each other relative to "
               "the triangulated points, so care is needed here.");
@@ -904,7 +904,7 @@ void parameterValidation() {
   if (FLAGS_timestamp_offsets_max_change < 0)
     LOG(FATAL) << "The timestamp offsets must be non-negative.";
 
-  if (FLAGS_refiner_min_angle <= 0.0)
+  if (FLAGS_min_triangulation_angle <= 0.0)
     LOG(FATAL) << "The min triangulation angle must be positive.\n";
 
   if (FLAGS_depth_tri_weight < 0.0)
@@ -1043,7 +1043,7 @@ void flagOutlierByExclusionDist(// Inputs
 // current state of optimization, and that the residuals (including
 // the reprojection errors) have also been updated beforehand.
 void flagOutliersByTriAngleAndReprojErr(  // Inputs
-  double refiner_min_angle, double max_reprojection_error,
+  double min_triangulation_angle, double max_reprojection_error,
   std::vector<std::map<int, int>> const& pid_to_cid_fid,
   std::vector<std::vector<std::pair<float, float>>> const& keypoint_vec,
   std::vector<Eigen::Affine3d> const& world_to_cam, std::vector<Eigen::Vector3d> const& xyz_vec,
@@ -1097,7 +1097,7 @@ void flagOutliersByTriAngleAndReprojErr(  // Inputs
       }
     }
 
-    if (max_rays_angle >= refiner_min_angle)
+    if (max_rays_angle >= min_triangulation_angle)
       continue;  // This is a good triangulated point, with large angle of convergence
 
     // Flag as outliers all the features for this cid
@@ -1506,14 +1506,15 @@ int main(int argc, char** argv) {
                                    keypoint_vec, pid_to_cid_fid);
 
   // Append the interest point matches from the nvm file
-  if (!FLAGS_no_nvm_matches)
+  if (!FLAGS_no_nvm_matches && FLAGS_nvm != "")
     dense_map::appendMatchesFromNvm(// Inputs
                                     cam_params, cams, nvm,  
                                     // Outputs (these get appended to)
                                     pid_to_cid_fid, keypoint_vec);
 
   if (pid_to_cid_fid.empty())
-    LOG(FATAL) << "No interest points were found.\n";
+    LOG(FATAL) << "No interest points were found. Must specify either "
+               << "--nvm or positive --num_overlaps.\n";
   
   // Set up the block sizes
   std::vector<int> bracketed_cam_block_sizes;
@@ -1977,7 +1978,7 @@ int main(int argc, char** argv) {
 
     // Flag outliers after this pass
     dense_map::flagOutliersByTriAngleAndReprojErr(  // Inputs
-        FLAGS_refiner_min_angle, FLAGS_max_reprojection_error, pid_to_cid_fid, keypoint_vec,
+        FLAGS_min_triangulation_angle, FLAGS_max_reprojection_error, pid_to_cid_fid, keypoint_vec,
         world_to_cam, xyz_vec, pid_cid_fid_to_residual_index, residuals,
         // Outputs
         pid_cid_fid_inlier);
