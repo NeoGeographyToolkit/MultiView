@@ -129,9 +129,25 @@ def genTheiaCalibFile(rig_config, args):
         sensor_name = rig_config[sensor_id]['sensor_name']
         sym_images[sensor_name] = []
         num_images = len(images[sensor_name])
+        timestamps = set() # timestamps for given sensor
         for it in range(num_images):
             image = images[sensor_name][it]
+
+            # Sanity check. Each image file name must be /path/to/<timestamp>.extension.
+            # Also check if the timestamp is unique.
             src_file = os.path.relpath(image, sym_image_dir)
+            base_file = os.path.basename(image)
+            timestamp = os.path.splitext(base_file)[0]
+            try:
+                timestamp = float(timestamp)
+            except:
+                raise Exception("Cannot extract timestamp from image name: " + image)
+            
+            if timestamp in timestamps:
+                raise Exception("Found duplicate timestamp " + str(timestamp) + \
+                                ". Offending image: " + image)
+            timestamps.add(timestamp)
+            
             cam_type = os.path.basename(os.path.dirname(image))
             dst_file = sym_image_dir + "/" + cam_type + "_" + os.path.basename(image)
             
