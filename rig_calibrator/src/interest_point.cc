@@ -1330,15 +1330,16 @@ void ReadNVM(std::string const& input_filename,
 
 // Write the inliers in nvm format. The keypoints are shifted relative to the optical
 // center, as written by Theia.
-void writeNvm(std::string                                       const& nvm_file,
-              std::vector<camera::CameraParameters>             const& cam_params,
-              std::vector<dense_map::cameraImage>               const& cams,
-              std::vector<Eigen::Affine3d>                      const& world_to_cam,
-              std::vector<std::vector<std::pair<float, float>>> const& keypoint_vec,
-              std::vector<std::map<int, int>>                   const& pid_to_cid_fid,
-              std::vector<std::map<int, std::map<int, int>>>    const& pid_cid_fid_inlier,
-              std::vector<Eigen::Vector3d>                      const& xyz_vec) {
-
+void writeInliersToNvm(std::string                                       const& nvm_file,
+                       bool                                                     shift_keypoints, 
+                       std::vector<camera::CameraParameters>             const& cam_params,
+                       std::vector<dense_map::cameraImage>               const& cams,
+                       std::vector<Eigen::Affine3d>                      const& world_to_cam,
+                       std::vector<std::vector<std::pair<float, float>>> const& keypoint_vec,
+                       std::vector<std::map<int, int>>                   const& pid_to_cid_fid,
+                       std::vector<std::map<int, std::map<int, int>>>    const& pid_cid_fid_inlier,
+                       std::vector<Eigen::Vector3d>                      const& xyz_vec) {
+  
   // Sanity checks
   if (world_to_cam.size() != cams.size())
     LOG(FATAL) << "Expecting as many world-to-camera transforms as cameras.\n";
@@ -1380,8 +1381,10 @@ void writeNvm(std::string                                       const& nvm_file,
         continue;
 
       Eigen::Vector2d dist_ip(keypoint_vec[cid][fid].first, keypoint_vec[cid][fid].second);
+
       // Offset relative to the optical center
-      dist_ip -= cam_params[cams[cid].camera_type].GetOpticalOffset();
+      if (shift_keypoints) 
+        dist_ip -= cam_params[cams[cid].camera_type].GetOpticalOffset();
 
       // Add this to the keypoint map for cid in the location at fid_count[cid]
       cid_to_keypoint_map.at(cid).col(fid_count[cid]) = dist_ip;
@@ -1400,13 +1403,13 @@ void writeNvm(std::string                                       const& nvm_file,
   for (size_t cid = 0; cid < cams.size(); cid++)
     cid_to_keypoint_map.at(cid).conservativeResize(Eigen::NoChange_t(), fid_count[cid]);
 
-  WriteNVM(cid_to_keypoint_map, cid_to_filename, focal_lengths, nvm_pid_to_cid_fid,  
+  writeNvm(cid_to_keypoint_map, cid_to_filename, focal_lengths, nvm_pid_to_cid_fid,  
            nvm_pid_to_xyz, world_to_cam, nvm_file);
 }
   
 // Write an nvm file. Note that a single focal length is assumed and no distortion.
 // Those are ignored, and only camera poses, matches, and keypoints are used.
-void WriteNVM(std::vector<Eigen::Matrix2Xd> const& cid_to_keypoint_map,
+void writeNvm(std::vector<Eigen::Matrix2Xd> const& cid_to_keypoint_map,
               std::vector<std::string> const& cid_to_filename,
               std::vector<double> const& focal_lengths,
               std::vector<std::map<int, int>> const& pid_to_cid_fid,

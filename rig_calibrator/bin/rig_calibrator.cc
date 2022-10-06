@@ -17,6 +17,9 @@
  * under the License.
  */
 
+// TODO(oalexan1): Document saving the residuals at each pixels and
+// saving an nvm file with no shift.
+
 // TODO(oalexan1): Modularize this code!
 
 // The algorithm:
@@ -129,6 +132,7 @@
 #include <map>
 #include <iostream>
 #include <fstream>
+#include <tuple>
 
 namespace fs = boost::filesystem;
 
@@ -299,6 +303,13 @@ DEFINE_bool(save_nvm, false,
             "<out dir>/cameras.nvm. Interest point matches are offset relative to the optical "
             "center, to be consistent with Theia. This file can be passed in to a new invocation "
             "of this tool via --nvm.");
+
+DEFINE_bool(save_nvm_no_shift, false,
+            "Save the optimized camera poses and inlier interest point matches as "
+            "<out dir>/cameras_noshift.nvm. Interest point matches are not offset "
+            "relative to the optical center, which is not standard, but which "
+            "allows this file to be self-contained and for the matches to be "
+            "drawn with stereo_gui.");
 
 DEFINE_bool(save_matches, false,
             "Save the interest point matches (all matches and inlier matches, after filtering). "
@@ -1264,6 +1275,69 @@ void calc_rig_using_word_to_cam(int ref_cam_type, int num_cam_types,
   return;
 }
 
+// Write the inlier residuals. Create one output file for each camera type.
+// The format of each file is:
+// dist_pixel_x, dist_pixel_y, norm(residual_x, residual_y)
+typedef std::map<int, std::map<int, int>> Int3Map;
+typedef std::vector<std::vector<std::pair<float, float>>> KeypointVec;  
+void writeResiduals(std::string                           const& out_dir,
+                    std::vector<std::string>              const& cam_names,
+                    std::vector<dense_map::cameraImage>   const& cams,
+                    dense_map::KeypointVec                const& keypoint_vec,
+                    std::vector<std::map<int, int>>       const& pid_to_cid_fid,
+                    std::vector<dense_map::Int3Map>       const& pid_cid_fid_inlier,
+                    std::vector<dense_map::Int3Map>       const& pid_cid_fid_to_residual_index,
+                    std::vector<double>                   const& residuals) {
+
+  if (pid_to_cid_fid.size() != pid_cid_fid_inlier.size())
+    LOG(FATAL) << "Expecting as many inlier flags as there are tracks.\n";
+
+  typedef std::tuple<double, double, double> Triplet;
+  std::vector<std::vector<Triplet>> res_vec(cam_names.size());
+
+  // Create the pixel and residual triplet
+  for (size_t pid = 0; pid < pid_to_cid_fid.size(); pid++) {
+    
+    for (auto cid_fid = pid_to_cid_fid[pid].begin();
+         cid_fid != pid_to_cid_fid[pid].end(); cid_fid++) {
+      int cid = cid_fid->first;
+      int fid = cid_fid->second;
+      
+      // Keep inliers only
+      if (!dense_map::getMapValue(pid_cid_fid_inlier, pid, cid, fid))
+        continue;
+
+      // Pixel value
+      Eigen::Vector2d dist_ip(keypoint_vec[cid][fid].first, keypoint_vec[cid][fid].second);
+
+      // Find the pixel residuals
+      size_t residual_index = dense_map::getMapValue(pid_cid_fid_to_residual_index, pid, cid, fid);
+      if (residuals.size() <= residual_index + 1) LOG(FATAL) << "Too few residuals.\n";
+      double res_x = residuals[residual_index + 0];
+      double res_y = residuals[residual_index + 1];
+      double res = Eigen::Vector2d(res_x, res_y).norm();
+      
+      int cam_type = cams[cid].camera_type;
+      res_vec[cam_type].push_back(Triplet(dist_ip.x(), dist_ip.y(), res));
+    }
+  }    
+
+  // Save these to disk
+  dense_map::createDir(out_dir);
+  for (size_t cam_type  = 0; cam_type < cam_names.size(); cam_type++) {
+    std::string out_file = out_dir + "/" + cam_names[cam_type] + "-residuals.txt";
+    std::cout << "Writing: " << out_file << std::endl;
+    std::ofstream ofs (out_file.c_str());
+    ofs.precision(17);
+    for (size_t rit = 0; rit < res_vec[cam_type].size(); rit++) {
+      auto const& T = res_vec[cam_type][rit];
+      ofs << std::get<0>(T) << ' ' << std::get<1>(T) << ' ' << std::get<2>(T) << std::endl;
+    }
+  }
+  
+  return;
+}
+  
 } // end namespace dense_map
 
 int main(int argc, char** argv) {
@@ -1493,7 +1567,7 @@ int main(int argc, char** argv) {
 
   // Detect and match features if the user chooses to, so if --num_overlaps > 0. Normally,
   // these are read from the nvm file only, as below.
-  std::vector<std::vector<std::pair<float, float>>> keypoint_vec;
+  dense_map::KeypointVec keypoint_vec;
   std::vector<std::map<int, int>> pid_to_cid_fid;
   if (FLAGS_num_overlaps > 0)
     dense_map::detectMatchFeatures(// Inputs
@@ -1982,6 +2056,11 @@ int main(int argc, char** argv) {
         world_to_cam, xyz_vec, pid_cid_fid_to_residual_index, residuals,
         // Outputs
         pid_cid_fid_inlier);
+
+    dense_map::writeResiduals(FLAGS_out_dir, cam_names, cams, keypoint_vec,  
+                              pid_to_cid_fid, pid_cid_fid_inlier, pid_cid_fid_to_residual_index,  
+                              residuals);
+    
   }  // End optimization passes
 
   // Put back the scale in depth_to_image
@@ -2016,10 +2095,20 @@ int main(int argc, char** argv) {
 
   if (FLAGS_save_nvm) {
     std::string nvm_file = FLAGS_out_dir + "/cameras.nvm";
-    dense_map::writeNvm(nvm_file, cam_params, cams, world_to_cam, keypoint_vec,
-                        pid_to_cid_fid, pid_cid_fid_inlier, xyz_vec);
+    bool shift_keypoints = true;
+    dense_map::writeInliersToNvm(nvm_file, shift_keypoints, cam_params, cams,
+                                 world_to_cam, keypoint_vec,
+                                 pid_to_cid_fid, pid_cid_fid_inlier, xyz_vec);
   }
   
+  if (FLAGS_save_nvm_no_shift) {
+    std::string nvm_file = FLAGS_out_dir + "/cameras_no_shift.nvm";
+    bool shift_keypoints = false;
+    dense_map::writeInliersToNvm(nvm_file, shift_keypoints, cam_params, cams,
+                                 world_to_cam, keypoint_vec,
+                                 pid_to_cid_fid, pid_cid_fid_inlier, xyz_vec);
+  }
+
   if (FLAGS_export_to_voxblox)
     dense_map::exportToVoxblox(cam_names, cams, depth_to_image, world_to_cam, FLAGS_out_dir);
 

@@ -68,7 +68,8 @@ def process_args(args):
     # Note how the percent sign below is escaped, by writing: %%
     parser.add_argument("--undistorted_crop_win", dest="undistorted_crop_win", default = "",
                         help = "The dimensions of the central image region to keep after "   + \
-                        "undistorting an image and before using it in stereo. Normally "  + \
+                        "the internal undistortion step and before using it " + \
+                        "in stereo. Normally "  + \
                         "85%% - 90%% of distorted (actual) image dimensions would do. "      + \
                         "Suggested the Astrobee images: "        + \
                         "sci_cam: '1250 1000' nav_cam: '1100 776'. haz_cam: '250 200'.")
@@ -205,7 +206,8 @@ def run_pair(left_image, right_image, left_cam, right_cam, args, tools_base_dir,
 
         # Run point2mesh. This is for debugging purposes, to be able
         # to inspect each cloud.
-        # We use -s 4 as otherwise the .obj file is too big
+        # If we use -s 1 the .obj file is too big. But -s 4 is too coarse.
+        # TODO(oalexan1): Make creating these debug meshes optional.
         cmd = [tools_base_dir + "/bin/point2mesh", "-s", "4",
                "--texture-step-size", "1",
                stereo_prefix + '-PC-filter.tif',
