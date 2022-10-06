@@ -296,13 +296,13 @@ DEFINE_bool(use_initial_rig_transforms, false,
             "Otherwise derive it from the poses of individual cameras.");
 
 DEFINE_bool(save_nvm, false,
-            "Save the optimized camera poses and inlier interest point matches as "
+            "Save the optimized camera poses and inlier interest point matches to "
             "<out dir>/cameras.nvm. Interest point matches are offset relative to the optical "
             "center, to be consistent with Theia. This file can be passed in to a new invocation "
             "of this tool via --nvm.");
 
 DEFINE_bool(save_nvm_no_shift, false,
-            "Save the optimized camera poses and inlier interest point matches as "
+            "Save the optimized camera poses and inlier interest point matches to "
             "<out dir>/cameras_noshift.nvm. Interest point matches are not offset "
             "relative to the optical center, which is not standard, but which "
             "allows this file to be self-contained and for the matches to be "
