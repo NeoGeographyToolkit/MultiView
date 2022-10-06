@@ -17,9 +17,6 @@
  * under the License.
  */
 
-// TODO(oalexan1): Document saving the residuals at each pixels and
-// saving an nvm file with no shift.
-
 // TODO(oalexan1): Modularize this code!
 
 // The algorithm:
