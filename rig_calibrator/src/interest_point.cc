@@ -1244,14 +1244,14 @@ Eigen::Affine3d registrationTransform(std::string const& hugin_file, std::string
   return registration_trans;
 }
   
-// Reads the NVM control network format.
+// Reads the NVM control network format. The interest points may or may not
+// be shifted relative to optical center. The user is responsible for knowing that.
 void ReadNVM(std::string const& input_filename,
              std::vector<Eigen::Matrix2Xd> * cid_to_keypoint_map,
              std::vector<std::string> * cid_to_filename,
              std::vector<std::map<int, int> > * pid_to_cid_fid,
              std::vector<Eigen::Vector3d> * pid_to_xyz,
-             std::vector<Eigen::Affine3d> *
-             cid_to_cam_t_global) {
+             std::vector<Eigen::Affine3d> * cid_to_cam_t_global) {
   std::ifstream f(input_filename, std::ios::in);
   std::string token;
   std::getline(f, token);

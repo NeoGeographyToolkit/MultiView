@@ -1275,6 +1275,7 @@ void calc_rig_using_word_to_cam(int ref_cam_type, int num_cam_types,
   return;
 }
 
+// TODO(oalexan1): Move this to utils
 // Write the inlier residuals. Create one output file for each camera type.
 // The format of each file is:
 // dist_pixel_x, dist_pixel_y, norm(residual_x, residual_y)
