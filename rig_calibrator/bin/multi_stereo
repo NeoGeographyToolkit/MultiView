@@ -79,10 +79,20 @@ def process_args(args):
                         "'stereo', 'pc_filter', or 'mesh_gen'. " + \
                         "This allows resuming a run at a desired step. " + \
                         "The stereo subdirectories are deleted before that step takes place.")
-
+    
     parser.add_argument("--last_step",  dest="last_step", default="mesh_gen",
                         help  = "The last step run by this tool. See ``--first_step`` " + \
                         "for allowed values.")
+    
+    parser.add_argument("--first-image-index",  dest="first_image_index", default = None,
+                        type = int,
+                        help = "The index of the first image to use for stereo, in the "
+                        "list of images. Indices start from 1. By default, use all the images.")
+    
+    parser.add_argument("--last-image-index",  dest="last_image_index", default = None,
+                        type = int, 
+                        help = "The index of the last image to use for stereo, in the "
+                        "list of images. Indices start from 1. By default, use all the images.")
     
     args = parser.parse_args()
 
@@ -255,13 +265,15 @@ if __name__ == "__main__":
 
     # Read the images and camera poses
     (distorted_images, world_to_cam) \
-             = rig_utils.parse_images_and_camera_poses(args.camera_poses, args.rig_sensor)
+             = rig_utils.parse_images_and_camera_poses(args.camera_poses, args.rig_sensor,
+                                                       args.first_image_index,
+                                                       args.last_image_index)
 
     # Write undistorted images
     tools_base_dir = os.path.dirname(os.path.dirname(os.path.abspath(sys.argv[0])))
     extension = '.tif' # use lossless .tif extension for undistorted images
     extra_opts = []
-    suff = "_stereo" 
+    suff = "_stereo"
     (undist_intrinsics_file, undistorted_images, undist_dir) \
                         = rig_utils.undistort_images(args, distorted_images,
                                                      tools_base_dir, extension, extra_opts, suff)

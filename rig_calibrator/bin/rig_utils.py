@@ -198,13 +198,16 @@ def imageExtension(images):
         raise Exception("The input image set is invalid.")
     return list(extensions)[0]
         
-def parse_images_and_camera_poses(image_list, rig_sensor):
+def parse_images_and_camera_poses(image_list, rig_sensor,
+                                  # These indices will start from 1, if specified
+                                  first_image_index = None, last_image_index = None):
 
     with open(image_list, 'r') as f:
         lines = f.readlines()
 
     images = []
     world_to_cam = []
+    image_count = 0 # Below, the count of the first image will be 1
     for line in lines:
         m = re.match("^(.*?)\#", line)
         if m:
@@ -220,23 +223,30 @@ def parse_images_and_camera_poses(image_list, rig_sensor):
 
         image = vals[0]
         vals = vals[1:13]
-
+        
         curr_sensor = os.path.basename(os.path.dirname(image))
         if curr_sensor != rig_sensor:
             continue
 
+        image_count += 1
+
+        # If to use only a range
+        if first_image_index is not None and last_image_index is not None:
+            if image_count < first_image_index or image_count > last_image_index:
+                continue
+        
         # Put the values in a matrix
         M = np.identity(4)
-        count = 0
+        val_count = 0
         # Read rotation
         for row in range(3):
             for col in range(3):
-                M[row][col] = float(vals[count])
-                count = count + 1
+                M[row][col] = float(vals[val_count])
+                val_count = val_count + 1
         # Read translation
         for row in range(3):
-            M[row][3] = float(vals[count])
-            count = count + 1
+            M[row][3] = float(vals[val_count])
+            val_count = val_count + 1
 
         images.append(image)
         world_to_cam.append(M)

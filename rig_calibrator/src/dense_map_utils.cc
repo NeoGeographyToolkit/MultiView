@@ -1208,6 +1208,7 @@ void exportToVoxblox(std::vector<std::string> const& cam_names,
     std::string voxblox_subdir = voxblox_dir + "/" + cam_names[cam_type];
     dense_map::createDir(voxblox_subdir);
 
+    int num_saved_clouds = 0;
     std::string index_file = voxblox_subdir + "/index.txt";
     std::cout << "Writing: " << index_file << std::endl;
     std::ofstream ofs(index_file.c_str());
@@ -1285,9 +1286,17 @@ void exportToVoxblox(std::vector<std::string> const& cam_names,
       std::cout << "Writing: " << cloud_file << std::endl;
       ofs << cloud_file << "\n"; // save its name in the index
       pcl::io::savePCDFileBinary(cloud_file, pc); // writing binary is much faster than ascii
+
+      num_saved_clouds++;
     }
-  }
-  
+    
+    if (num_saved_clouds == 0)
+      std::cout << "No depth clouds were saved for camera: " << cam_names[cam_type]
+                << ". Empty index file: " << index_file << ".\n";
+    
+  } // end loop over camera types
+
+  return;
 }
   
 // Save the depth clouds and optimized transforms needed to create a mesh with voxblox

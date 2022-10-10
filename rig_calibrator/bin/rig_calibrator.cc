@@ -1279,6 +1279,7 @@ void calc_rig_using_word_to_cam(int ref_cam_type, int num_cam_types,
 typedef std::map<int, std::map<int, int>> Int3Map;
 typedef std::vector<std::vector<std::pair<float, float>>> KeypointVec;  
 void writeResiduals(std::string                           const& out_dir,
+                    std::string                           const & prefix,
                     std::vector<std::string>              const& cam_names,
                     std::vector<dense_map::cameraImage>   const& cams,
                     dense_map::KeypointVec                const& keypoint_vec,
@@ -1323,7 +1324,7 @@ void writeResiduals(std::string                           const& out_dir,
   // Save these to disk
   dense_map::createDir(out_dir);
   for (size_t cam_type  = 0; cam_type < cam_names.size(); cam_type++) {
-    std::string out_file = out_dir + "/" + cam_names[cam_type] + "-residuals.txt";
+    std::string out_file = out_dir + "/" + cam_names[cam_type] + "-" + prefix + "-residuals.txt";
     std::cout << "Writing: " << out_file << std::endl;
     std::ofstream ofs (out_file.c_str());
     ofs.precision(17);
@@ -1652,7 +1653,7 @@ int main(int argc, char** argv) {
     
     // Compute where each ray intersects the mesh
     if (FLAGS_mesh != "")
-      dense_map::meshTriangulations(  // Inputs
+      dense_map::meshTriangulations(// Inputs
                                     cam_params, cams, world_to_cam, pid_to_cid_fid,
         pid_cid_fid_inlier, keypoint_vec, bad_xyz, FLAGS_min_ray_dist, FLAGS_max_ray_dist, mesh,
         bvh_tree,
@@ -1978,6 +1979,11 @@ int main(int argc, char** argv) {
     std::vector<double> residuals;
     dense_map::evalResiduals("before opt", residual_names, residual_scales, problem, residuals);
 
+    if (pass == 0)
+      dense_map::writeResiduals(FLAGS_out_dir, "initial", cam_names, cams, keypoint_vec,  
+                                pid_to_cid_fid, pid_cid_fid_inlier, pid_cid_fid_to_residual_index,  
+                                residuals);
+    
     // Solve the problem
     ceres::Solver::Options options;
     ceres::Solver::Summary summary;
@@ -2055,7 +2061,7 @@ int main(int argc, char** argv) {
         // Outputs
         pid_cid_fid_inlier);
 
-    dense_map::writeResiduals(FLAGS_out_dir, cam_names, cams, keypoint_vec,  
+    dense_map::writeResiduals(FLAGS_out_dir, "final", cam_names, cams, keypoint_vec,  
                               pid_to_cid_fid, pid_cid_fid_inlier, pid_cid_fid_to_residual_index,  
                               residuals);
     
