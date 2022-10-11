@@ -334,6 +334,36 @@ void appendMatchesFromNvm(// Inputs
                           // Outputs (these get appended to)
                           std::vector<std::map<int, int>> & pid_to_cid_fid,
                           std::vector<std::vector<std::pair<float, float>>> & keypoint_vec);
+
+void flagOutlierByExclusionDist(// Inputs
+                                int ref_cam_type,
+                                std::vector<camera::CameraParameters> const& cam_params,
+                                std::vector<dense_map::cameraImage> const& cams,
+                                std::vector<std::map<int, int>> const& pid_to_cid_fid,
+                                std::vector<std::vector<std::pair<float, float>>>
+                                const& keypoint_vec,
+                                // Outputs
+                                std::vector<std::map<int, std::map<int, int>>>& pid_cid_fid_inlier);
+
+void flagOutliersByTriAngleAndReprojErr
+(// Inputs
+ double min_triangulation_angle, double max_reprojection_error,
+ std::vector<std::map<int, int>> const& pid_to_cid_fid,
+ std::vector<std::vector<std::pair<float, float>>> const& keypoint_vec,
+ std::vector<Eigen::Affine3d> const& world_to_cam, std::vector<Eigen::Vector3d> const& xyz_vec,
+ std::vector<std::map<int, std::map<int, int>>> const& pid_cid_fid_to_residual_index,
+ std::vector<double> const& residuals,
+ // Outputs
+ std::vector<std::map<int, std::map<int, int>>>& pid_cid_fid_inlier);
+
+void savePairwiseConvergenceAngles(// Inputs
+  std::vector<std::map<int, int>> const& pid_to_cid_fid,
+  std::vector<std::vector<std::pair<float, float>>> const& keypoint_vec,
+  std::vector<dense_map::cameraImage> const& cams,
+  std::vector<Eigen::Affine3d> const& world_to_cam,
+  std::vector<Eigen::Vector3d> const& xyz_vec,
+  std::vector<std::map<int, std::map<int, int>>> const& pid_cid_fid_inlier,
+  std::string const& conv_angles_file);
   
 }  // namespace dense_map
 

@@ -894,7 +894,7 @@ void ParseHuginControlPoints(std::string const& hugin_file,
   
   // Initialize the outputs
   (*images).clear();
-  *points = Eigen::MatrixXd(6, 1);
+  *points = Eigen::MatrixXd(6, 0); // this will be resized as points are added
 
   std::ifstream hf(hugin_file.c_str());
   if (!hf.good())
@@ -947,9 +947,11 @@ void ParseHuginControlPoints(std::string const& hugin_file,
 
       num_points++;
       (*points).conservativeResize(Eigen::NoChange_t(), num_points);
-      (*points).col(num_points-1) << a, b, c, d, e, f;
+      (*points).col(num_points - 1) << a, b, c, d, e, f;
     }
   }
+
+  return;
 }
 
 // A little helper function
@@ -1039,9 +1041,9 @@ std::string print_vec(Eigen::Vector3d a) {
 // measurements. It is assumed all images are from the reference
 // camera.
 Eigen::Affine3d registrationTransform(std::string const& hugin_file, std::string const& xyz_file,
-                                  camera::CameraParameters const& ref_cam_params,
-                                  std::vector<std::string> const& cid_to_filename,
-                                  std::vector<Eigen::Affine3d>  & world_to_cam_trans) { 
+                                      camera::CameraParameters const& ref_cam_params,
+                                      std::vector<std::string> const& cid_to_filename,
+                                      std::vector<Eigen::Affine3d>  & world_to_cam_trans) { 
   
   // Get the interest points in the images, and their positions in
   // the world coordinate system, as supplied by a user.
@@ -1847,6 +1849,239 @@ void appendMatchesFromNvm(// Inputs
       pid_to_cid_fid.push_back(out_cid_fid);
       
   } // end iterating over nvm pid
+}
+
+void flagOutlierByExclusionDist(// Inputs
+                                int ref_cam_type,
+                                std::vector<camera::CameraParameters> const& cam_params,
+                                std::vector<dense_map::cameraImage> const& cams,
+                                std::vector<std::map<int, int>> const& pid_to_cid_fid,
+                                std::vector<std::vector<std::pair<float, float>>>
+                                const& keypoint_vec,
+                                // Outputs
+                                std::vector<std::map<int, std::map<int, int>>>& pid_cid_fid_inlier) {
+
+  // Initialize the output
+  pid_cid_fid_inlier.resize(pid_to_cid_fid.size());
+
+  // Iterate though interest point matches
+  for (size_t pid = 0; pid < pid_to_cid_fid.size(); pid++) {
+    for (auto cid_fid = pid_to_cid_fid[pid].begin(); cid_fid != pid_to_cid_fid[pid].end();
+         cid_fid++) {
+      int cid = cid_fid->first;
+      int fid = cid_fid->second;
+      int cam_type = cams[cid].camera_type;
+
+      // Initially there are inliers only
+      pid_cid_fid_inlier[pid][cid][fid] = 1;
+
+      // Flag as outliers pixels at the image boundary.
+      Eigen::Vector2d dist_pix(keypoint_vec[cid][fid].first, keypoint_vec[cid][fid].second);
+      Eigen::Vector2i dist_size = cam_params[cam_type].GetDistortedSize();
+      Eigen::Vector2i dist_crop_size = cam_params[cam_type].GetDistortedCropSize();
+      // Note that if dist_crop_size equals dist_size, which is image
+      // size, no outliers are flagged
+      if (std::abs(dist_pix[0] - dist_size[0] / 2.0) > dist_crop_size[0] / 2.0  ||
+          std::abs(dist_pix[1] - dist_size[1] / 2.0) > dist_crop_size[1] / 2.0) 
+        dense_map::setMapValue(pid_cid_fid_inlier, pid, cid, fid, 0);
+    }
+  }
+  return;
+}
+
+// Flag outliers by triangulation angle and reprojection error.  It is
+// assumed that the cameras in world_to_cam are up-to-date given the
+// current state of optimization, and that the residuals (including
+// the reprojection errors) have also been updated beforehand.
+void flagOutliersByTriAngleAndReprojErr(// Inputs
+  double min_triangulation_angle, double max_reprojection_error,
+  std::vector<std::map<int, int>> const& pid_to_cid_fid,
+  std::vector<std::vector<std::pair<float, float>>> const& keypoint_vec,
+  std::vector<Eigen::Affine3d> const& world_to_cam, std::vector<Eigen::Vector3d> const& xyz_vec,
+  std::vector<std::map<int, std::map<int, int>>> const& pid_cid_fid_to_residual_index,
+  std::vector<double> const& residuals,
+  // Outputs
+  std::vector<std::map<int, std::map<int, int>>>& pid_cid_fid_inlier) {
+  // Must deal with outliers by triangulation angle before
+  // removing outliers by reprojection error, as the latter will
+  // exclude some rays which form the given triangulated points.
+  int num_outliers_by_angle = 0, num_total_features = 0;
+  for (size_t pid = 0; pid < pid_to_cid_fid.size(); pid++) {
+    // Find the largest angle among any two intersecting rays
+    double max_rays_angle = 0.0;
+
+    for (auto cid_fid1 = pid_to_cid_fid[pid].begin();
+         cid_fid1 != pid_to_cid_fid[pid].end(); cid_fid1++) {
+      int cid1 = cid_fid1->first;
+      int fid1 = cid_fid1->second;
+
+      // Deal with inliers only
+      if (!dense_map::getMapValue(pid_cid_fid_inlier, pid, cid1, fid1)) continue;
+
+      num_total_features++;
+
+      Eigen::Vector3d cam_ctr1 = (world_to_cam[cid1].inverse()) * Eigen::Vector3d(0, 0, 0);
+      Eigen::Vector3d ray1 = xyz_vec[pid] - cam_ctr1;
+      ray1.normalize();
+
+      for (auto cid_fid2 = pid_to_cid_fid[pid].begin();
+           cid_fid2 != pid_to_cid_fid[pid].end(); cid_fid2++) {
+        int cid2 = cid_fid2->first;
+        int fid2 = cid_fid2->second;
+
+        // Look at each cid and next cids
+        if (cid2 <= cid1)
+          continue;
+
+        // Deal with inliers only
+        if (!dense_map::getMapValue(pid_cid_fid_inlier, pid, cid2, fid2)) continue;
+
+        Eigen::Vector3d cam_ctr2 = (world_to_cam[cid2].inverse()) * Eigen::Vector3d(0, 0, 0);
+        Eigen::Vector3d ray2 = xyz_vec[pid] - cam_ctr2;
+        ray2.normalize();
+
+        double curr_angle = (180.0 / M_PI) * acos(ray1.dot(ray2));
+
+        if (std::isnan(curr_angle) || std::isinf(curr_angle)) continue;
+
+        max_rays_angle = std::max(max_rays_angle, curr_angle);
+      }
+    }
+
+    if (max_rays_angle >= min_triangulation_angle)
+      continue;  // This is a good triangulated point, with large angle of convergence
+
+    // Flag as outliers all the features for this cid
+    for (auto cid_fid = pid_to_cid_fid[pid].begin();
+         cid_fid != pid_to_cid_fid[pid].end(); cid_fid++) {
+      int cid = cid_fid->first;
+      int fid = cid_fid->second;
+
+      // Deal with inliers only
+      if (!dense_map::getMapValue(pid_cid_fid_inlier, pid, cid, fid)) continue;
+
+      num_outliers_by_angle++;
+      dense_map::setMapValue(pid_cid_fid_inlier, pid, cid, fid, 0);
+    }
+  }
+  std::cout << std::setprecision(4) << "Removed " << num_outliers_by_angle
+            << " outlier features with small angle of convergence, out of "
+            << num_total_features << " ("
+            << (100.0 * num_outliers_by_angle) / num_total_features << " %)\n";
+
+  int num_outliers_reproj = 0;
+  num_total_features = 0;  // reusing this variable
+  for (size_t pid = 0; pid < pid_to_cid_fid.size(); pid++) {
+    for (auto cid_fid = pid_to_cid_fid[pid].begin();
+         cid_fid != pid_to_cid_fid[pid].end(); cid_fid++) {
+      int cid = cid_fid->first;
+      int fid = cid_fid->second;
+
+      // Deal with inliers only
+      if (!dense_map::getMapValue(pid_cid_fid_inlier, pid, cid, fid)) continue;
+
+      num_total_features++;
+
+      // Find the pixel residuals
+      size_t residual_index = dense_map::getMapValue(pid_cid_fid_to_residual_index, pid, cid, fid);
+      if (residuals.size() <= residual_index + 1) LOG(FATAL) << "Too few residuals.\n";
+
+      double res_x = residuals[residual_index + 0];
+      double res_y = residuals[residual_index + 1];
+      // NaN values will never be inliers if the comparison is set as below
+      bool is_good = (Eigen::Vector2d(res_x, res_y).norm() <= max_reprojection_error);
+      if (!is_good) {
+        num_outliers_reproj++;
+        dense_map::setMapValue(pid_cid_fid_inlier, pid, cid, fid, 0);
+      }
+    }
+  }
+
+  std::cout << std::setprecision(4) << "Removed " << num_outliers_reproj
+            << " outlier features using reprojection error, out of " << num_total_features
+            << " (" << (100.0 * num_outliers_reproj) / num_total_features << " %)\n";
+
+  return;
+}
+
+// Find convergence angles between every pair of images and save to disk their percentiles
+// assumed that the cameras in world_to_cam are up-to-date given the
+// current state of optimization, and that the residuals (including
+// the reprojection errors) have also been updated beforehand.
+void savePairwiseConvergenceAngles(// Inputs
+  std::vector<std::map<int, int>> const& pid_to_cid_fid,
+  std::vector<std::vector<std::pair<float, float>>> const& keypoint_vec,
+  std::vector<dense_map::cameraImage> const& cams,
+  std::vector<Eigen::Affine3d> const& world_to_cam,
+  std::vector<Eigen::Vector3d> const& xyz_vec,
+  std::vector<std::map<int, std::map<int, int>>> const& pid_cid_fid_inlier,
+  std::string const& conv_angles_file) {
+
+  std::map<std::pair<int, int>, std::vector<double>> conv_angles;
+  
+  for (size_t pid = 0; pid < pid_to_cid_fid.size(); pid++) {
+
+    for (auto cid_fid1 = pid_to_cid_fid[pid].begin();
+         cid_fid1 != pid_to_cid_fid[pid].end(); cid_fid1++) {
+      int cid1 = cid_fid1->first;
+      int fid1 = cid_fid1->second;
+
+      // Deal with inliers only
+      if (!dense_map::getMapValue(pid_cid_fid_inlier, pid, cid1, fid1)) continue;
+
+      Eigen::Vector3d cam_ctr1 = (world_to_cam[cid1].inverse()) * Eigen::Vector3d(0, 0, 0);
+      Eigen::Vector3d ray1 = xyz_vec[pid] - cam_ctr1;
+      ray1.normalize();
+
+      for (auto cid_fid2 = pid_to_cid_fid[pid].begin();
+           cid_fid2 != pid_to_cid_fid[pid].end(); cid_fid2++) {
+        int cid2 = cid_fid2->first;
+        int fid2 = cid_fid2->second;
+
+        // Look at each cid and next cids
+        if (cid2 <= cid1)
+          continue;
+
+        // Deal with inliers only
+        if (!dense_map::getMapValue(pid_cid_fid_inlier, pid, cid2, fid2)) continue;
+
+        Eigen::Vector3d cam_ctr2 = (world_to_cam[cid2].inverse()) * Eigen::Vector3d(0, 0, 0);
+        Eigen::Vector3d ray2 = xyz_vec[pid] - cam_ctr2;
+        ray2.normalize();
+
+        // Calculate the convergence angle
+        double conv_angle = (180.0 / M_PI) * acos(ray1.dot(ray2));
+        if (std::isnan(conv_angle) || std::isinf(conv_angle)) continue;
+
+        // Add to the image pair
+        std::pair<int, int> pair(cid1, cid2);
+        conv_angles[pair].push_back(conv_angle);
+      }
+    }
+  }
+
+  // Sort the convergence angles per pair
+  std::cout << "Writing: " << conv_angles_file << std::endl;
+  std::ofstream ofs(conv_angles_file.c_str());
+  ofs << "# Convergence angle percentiles (in degrees) for each image pair having matches\n";
+  ofs << "# left_image right_image 25% 50% 75% num_angles_per_pair\n";
+  ofs.precision(17);
+  for (auto it = conv_angles.begin(); it != conv_angles.end(); it++) {
+
+    // Sort the values first
+    std::vector<double> & vals = it->second; // alias
+    std::sort(vals.begin(), vals.end());
+    int len = vals.size();
+    
+    int cid1 = (it->first).first;
+    int cid2 = (it->first).second;
+    ofs << cams[cid1].image_name << ' ' << cams[cid2].image_name << ' '
+        << vals[0.25 * len] << ' ' << vals[0.5 * len] << ' ' << vals[0.75*len] << ' '
+        << len << std::endl;
+  }
+  ofs.close();
+
+  return;
 }
   
 }  // end namespace dense_map

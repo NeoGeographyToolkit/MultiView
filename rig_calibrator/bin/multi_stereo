@@ -93,7 +93,7 @@ def process_args(args):
                         type = int, 
                         help = "The index of the last image to use for stereo, in the "
                         "list of images. Indices start from 1. By default, use all the images.")
-    
+
     args = parser.parse_args()
 
     return args
@@ -184,9 +184,10 @@ def run_pair(left_image, right_image, left_cam, right_cam, args, tools_base_dir,
     if first_step <= 0 and last_step >= 0:
         # Run stereo
         if os.path.isdir(stereo_dir):
-            # Wipe the existing directory
-            print("Removing recursively old directory: " + stereo_dir)
-            shutil.rmtree(stereo_dir)
+            print("Will run stereo in existing directory: " + stereo_dir)
+            ## Wipe the existing directory
+            #print("Removing recursively old directory: " + stereo_dir)
+            #shutil.rmtree(stereo_dir)
 
         # Split on spaces but keep quoted parts together. Wipe stray
         # continuation lines.
@@ -273,7 +274,7 @@ if __name__ == "__main__":
     tools_base_dir = os.path.dirname(os.path.dirname(os.path.abspath(sys.argv[0])))
     extension = '.tif' # use lossless .tif extension for undistorted images
     extra_opts = []
-    suff = "_stereo"
+    suff = ""
     (undist_intrinsics_file, undistorted_images, undist_dir) \
                         = rig_utils.undistort_images(args, distorted_images,
                                                      tools_base_dir, extension, extra_opts, suff)
