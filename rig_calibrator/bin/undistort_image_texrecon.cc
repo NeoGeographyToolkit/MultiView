@@ -260,7 +260,7 @@ int main(int argc, char ** argv) {
     int widy = vals[1];
 
     // A couple of sanity checks
-    if (widx % 2 != 0 || widy % 2 != 0 )
+    if (widx % 2 != 0 || widy % 2 != 0)
       LOG(FATAL) << "The cropped undistorted image dimensions must be even.";
     if (undist_size[0] % 2 != 0 || undist_size[1] % 2 != 0 )
       LOG(FATAL) << "The undistorted image dimensions must be even.";

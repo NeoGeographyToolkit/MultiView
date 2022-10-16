@@ -75,7 +75,10 @@ def run_cmd(cmd, quit_on_failure = True):
 
     status = p.poll()
 
-    if status != 0 and quit_on_failure:
+    # Sometimes status is None which appears to be a bug in Python.
+    # Let that pass. Only if the status is a valid integer and non-zero,
+    # then quit on failure if requested to do so.
+    if status is not None and status != 0 and quit_on_failure:
         print("Failed execution of: " + " ".join(cmd) + " with status " + str(status))
         sys.exit(1)
 
