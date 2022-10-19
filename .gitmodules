@@ -20,3 +20,6 @@
 [submodule "oiio"]
 	path = OpenImageIO
 	url = git@github.com:oleg-alexandrov/oiio.git
+[submodule "cgal_tools"]
+	path = cgal_tools
+	url = git@github.com:oleg-alexandrov/cgal_tools.git

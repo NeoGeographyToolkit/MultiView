@@ -152,6 +152,10 @@ else (PCL_FOUND)
 endif (PCL_FOUND)
 include_directories("${PCL_COMMON_INCLUDE_DIR}")
 
+# CGAL
+set(CGAL_TOOLS_INSTALL_DIR ${CMAKE_INSTALL_PREFIX})
+add_subdirectory(cgal_tools)
+
 # Build voxblox, which provides the voxblox_mesh tool for fusing point clouds into meshes
 add_subdirectory(voxblox)
 
