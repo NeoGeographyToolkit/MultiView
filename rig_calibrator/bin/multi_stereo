@@ -37,7 +37,7 @@ def process_args(args):
     Set up the parser and parse the args.
     """
 
-    parser = argparse.ArgumentParser(description = "Parameters for texrecon.")
+    parser = argparse.ArgumentParser(description = "Parameters for multi_stereo.")
     
     parser.add_argument("--rig_config",  dest="rig_config", default="",
                         help = "Rig configuration file.")

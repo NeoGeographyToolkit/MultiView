@@ -50,6 +50,11 @@ def process_args(args):
 
     parser.add_argument("--mesh", dest="mesh",
                         default="", help="The mesh to use for texturing, in .ply format.")
+
+    parser.add_argument("--max_texture_size", dest="max_texture_size",
+                        default="2048",
+                        help="The maximum size (in pixels) of each texture file created " + \
+                        "for the produced textured mesh.")
     
     parser.add_argument("--out_dir", dest="out_dir",
                         default="", help="The directory where to write the textured mesh " + \
@@ -141,7 +146,8 @@ def run_texrecon(tools_base_dir, undist_dir, mesh, texture_dir):
     cmd = [texrecon_path, undist_dir, mesh, texture_dir,
            "-o", "gauss_clamping",
            "-d", "view_dir_dot_face_dir", # TODO(oalexan1): The -d option needs study
-           "--keep_unseen_faces"]
+           "--keep_unseen_faces",
+           "--max_texture_size=" + str(args.max_texture_size)]
 
     log_file = os.path.join(texture_dir, "texrecon_log.txt")
     print("Running texrecon.\n")
