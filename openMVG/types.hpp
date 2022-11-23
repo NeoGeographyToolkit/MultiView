@@ -15,34 +15,6 @@
 #include <set>
 #include <vector>
 
-#ifdef __clang__
-
-#include "openMVG/stl/hash.hpp"
-
-#include <unordered_map>
-#include <utility>
-
-#define OPENMVG_STD_UNORDERED_MAP 1
-
-namespace std {
-  template<typename T1, typename T2>
-  struct hash<std::pair<T1, T2>> {
-    std::size_t operator()(std::pair<T1, T2> const &p) const {
-      std::size_t seed1(0);
-      stl::hash_combine(seed1, p.first);
-      stl::hash_combine(seed1, p.second);
-
-      std::size_t seed2(0);
-      stl::hash_combine(seed2, p.second);
-      stl::hash_combine(seed2, p.first);
-
-      return std::min(seed1, seed2);
-    }
-  };
-}
-
-#endif // __clang__
-
 /**
 * @brief Main namespace of openMVG API
 */
@@ -63,29 +35,6 @@ using Pair_Set = std::set<Pair>;
 
 /// Vector of Pair
 using Pair_Vec = std::vector<Pair>;
-
-#if defined OPENMVG_STD_UNORDERED_MAP
-
-/**
-* @brief Standard Hash_Map class
-* @tparam K type of the keys
-* @tparam V type of the values
-*/
-template<typename Key, typename Value>
-using Hash_Map = std::unordered_map<Key, Value>;
-
-#else
-
-/**
-* @brief Standard Hash_Map class
-* @tparam K type of the keys
-* @tparam V type of the values
-*/
-template<typename K, typename V>
-using Hash_Map = std::map<K, V, std::less<K>,
-  Eigen::aligned_allocator<std::pair<const K, V> > >;
-
-#endif // OPENMVG_STD_UNORDERED_MAP
 
 } // namespace openMVG
 
