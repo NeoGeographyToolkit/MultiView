@@ -1175,6 +1175,7 @@ void writeResiduals(std::string                           const& out_dir,
     std::cout << "Writing: " << out_file << std::endl;
     std::ofstream ofs (out_file.c_str());
     ofs.precision(17);
+    ofs << "# pixel_x pixel_y residual\n"; // stereo_gui will use this
     for (size_t rit = 0; rit < res_vec[cam_type].size(); rit++) {
       auto const& T = res_vec[cam_type][rit];
       ofs << std::get<0>(T) << ' ' << std::get<1>(T) << ' ' << std::get<2>(T) << std::endl;

@@ -526,11 +526,13 @@ void detectMatchFeatures(// Inputs
   // them in a vector with the id corresponding to the interest point
   std::vector<std::map<std::pair<float, float>, int>> keypoint_map(cams.size());
   for (auto it = matches.begin(); it != matches.end(); it++) {
-    std::pair<int, int> const& index_pair = it->first;     // alias
+    std::pair<int, int> const& cid_pair = it->first;     // alias
 
-    int left_index = index_pair.first;
-    int right_index = index_pair.second;
+    int left_cid = cid_pair.first;
+    int right_cid = cid_pair.second;
 
+    // Since we use a map, an interest point which shows up as part of
+    // several pairs of interest point matches will be counted just once.
     dense_map::MATCH_PAIR const& match_pair = it->second;  // alias
     std::vector<dense_map::InterestPoint> const& left_ip_vec = match_pair.first;
     std::vector<dense_map::InterestPoint> const& right_ip_vec = match_pair.second;
@@ -538,8 +540,8 @@ void detectMatchFeatures(// Inputs
       auto dist_left_ip  = std::make_pair(left_ip_vec[ip_it].x,  left_ip_vec[ip_it].y);
       auto dist_right_ip = std::make_pair(right_ip_vec[ip_it].x, right_ip_vec[ip_it].y);
       // Initialize to zero for the moment
-      keypoint_map[left_index][dist_left_ip] = 0;
-      keypoint_map[right_index][dist_right_ip] = 0;
+      keypoint_map[left_cid][dist_left_ip] = 0;
+      keypoint_map[right_cid][dist_right_ip] = 0;
     }
   }
   keypoint_vec.resize(cams.size());
@@ -561,10 +563,10 @@ void detectMatchFeatures(// Inputs
 
   openMVG::matching::PairWiseMatches match_map;
   for (auto it = matches.begin(); it != matches.end(); it++) {
-    std::pair<int, int> const& index_pair = it->first;     // alias
+    std::pair<int, int> const& cid_pair = it->first;     // alias
 
-    int left_index = index_pair.first;
-    int right_index = index_pair.second;
+    int left_cid = cid_pair.first;
+    int right_cid = cid_pair.second;
 
     dense_map::MATCH_PAIR const& match_pair = it->second;  // alias
     std::vector<dense_map::InterestPoint> const& left_ip_vec = match_pair.first;
@@ -576,11 +578,11 @@ void detectMatchFeatures(// Inputs
       auto dist_left_ip  = std::make_pair(left_ip_vec[ip_it].x,  left_ip_vec[ip_it].y);
       auto dist_right_ip = std::make_pair(right_ip_vec[ip_it].x, right_ip_vec[ip_it].y);
 
-      int left_id = keypoint_map[left_index][dist_left_ip];
-      int right_id = keypoint_map[right_index][dist_right_ip];
+      int left_id = keypoint_map[left_cid][dist_left_ip];
+      int right_id = keypoint_map[right_cid][dist_right_ip];
       mvg_matches.push_back(openMVG::matching::IndMatch(left_id, right_id));
     }
-    match_map[index_pair] = mvg_matches;
+    match_map[cid_pair] = mvg_matches;
   }
 
   if (save_matches) {
@@ -591,14 +593,14 @@ void detectMatchFeatures(// Inputs
     dense_map::createDir(match_dir);
 
     for (auto it = matches.begin(); it != matches.end(); it++) {
-      std::pair<int, int> index_pair = it->first;
+      std::pair<int, int> cid_pair = it->first;
       dense_map::MATCH_PAIR const& match_pair = it->second;
 
-      int left_index = index_pair.first;
-      int right_index = index_pair.second;
+      int left_cid = cid_pair.first;
+      int right_cid = cid_pair.second;
 
-      std::string const& left_image = cams[left_index].image_name; // alias
-      std::string const& right_image = cams[right_index].image_name; // alias
+      std::string const& left_image = cams[left_cid].image_name; // alias
+      std::string const& right_image = cams[right_cid].image_name; // alias
 
       std::string suffix = "";
       std::string match_file = matchFileName(match_dir, left_image, right_image, suffix);
@@ -757,34 +759,34 @@ void saveInlinerMatchPairs(// Inputs
             !dense_map::getMapValue(pid_cid_fid_inlier, pid, cid2, fid2))
           continue;
 
-        auto index_pair = std::make_pair(cid1, cid2);
+        auto cid_pair = std::make_pair(cid1, cid2);
 
         InterestPoint ip1(keypoint_vec[cid1][fid1].first, keypoint_vec[cid1][fid1].second);
         InterestPoint ip2(keypoint_vec[cid2][fid2].first, keypoint_vec[cid2][fid2].second);
 
-        matches[index_pair].first.push_back(ip1);
-        matches[index_pair].second.push_back(ip2);
+        matches[cid_pair].first.push_back(ip1);
+        matches[cid_pair].second.push_back(ip2);
       }
     }
   }  // End iterations over pid
 
   for (auto it = matches.begin(); it != matches.end(); it++) {
-    auto & index_pair = it->first;
+    auto & cid_pair = it->first;
     dense_map::MATCH_PAIR const& match_pair = it->second;
 
-    int left_index = index_pair.first;
-    int right_index = index_pair.second;
+    int left_cid = cid_pair.first;
+    int right_cid = cid_pair.second;
 
     std::string match_dir = out_dir + "/matches";
     dense_map::createDir(match_dir);
 
     std::string suffix = "-inliers";
     std::string match_file = dense_map::matchFileName(match_dir,
-                                                      cams[left_index].image_name,
-                                                      cams[right_index].image_name,
+                                                      cams[left_cid].image_name,
+                                                      cams[right_cid].image_name,
                                                       suffix);
 
-    std::cout << "Writing: " << cams[left_index].image_name << ' ' << cams[right_index].image_name
+    std::cout << "Writing: " << cams[left_cid].image_name << ' ' << cams[right_cid].image_name
               << " " << match_file << std::endl;
     dense_map::writeMatchFile(match_file, match_pair.first, match_pair.second);
   }
@@ -933,7 +935,7 @@ void ParseHuginControlPoints(std::string const& hugin_file,
       // c n0 N1 x367 y240 X144.183010710425 Y243.04008545843 t0
       // we store the numbers, 0, 1, 367, 240, 144.183010710425 243.04008545843
       // as a column.
-      // The stand for left image index, right image index,
+      // The stand for left image cid, right image cid,
       // left image x, left image y, right image x, right image y.
       double a, b, c, d, e, f;
       if (sscanf(ptr, "%lf %lf %lf %lf %lf %lf", &a, &b, &c, &d, &e, &f) != 6)
