@@ -478,12 +478,13 @@ void detectMatchFeatures(// Inputs
 
   std::vector<cv::Mat> cid_to_descriptor_map;
   std::vector<Eigen::Matrix2Xd> cid_to_keypoint_map;
-  cid_to_descriptor_map.resize(cams.size());
-  cid_to_keypoint_map.resize(cams.size());
+  int num_images = cams.size();
+  cid_to_descriptor_map.resize(num_images);
+  cid_to_keypoint_map.resize(num_images);
   {
     // Make the thread pool go out of scope when not needed to not use up memory
     dense_map::ThreadPool thread_pool;
-    for (size_t it = 0; it < cams.size(); it++) {
+    for (size_t it = 0; it < num_images; it++) {
       thread_pool.AddTask
         (&dense_map::detectFeatures,    // multi-threaded  // NOLINT
          // dense_map::detectFeatures(  // single-threaded // NOLINT
@@ -495,8 +496,8 @@ void detectMatchFeatures(// Inputs
   MATCH_MAP matches;
 
   std::vector<std::pair<int, int> > image_pairs;
-  for (size_t it1 = 0; it1 < cams.size(); it1++) {
-    for (size_t it2 = it1 + 1; it2 < std::min(cams.size(), it1 + num_overlaps + 1); it2++) {
+  for (size_t it1 = 0; it1 < num_images; it1++) {
+    for (size_t it2 = it1 + 1; it2 < std::min(num_images, it1 + num_overlaps + 1); it2++) {
       image_pairs.push_back(std::make_pair(it1, it2));
     }
   }
@@ -524,7 +525,7 @@ void detectMatchFeatures(// Inputs
 
   // Give all interest points in a given image a unique id, and put
   // them in a vector with the id corresponding to the interest point
-  std::vector<std::map<std::pair<float, float>, int>> keypoint_map(cams.size());
+  std::vector<std::map<std::pair<float, float>, int>> keypoint_map(num_images);
   for (auto it = matches.begin(); it != matches.end(); it++) {
     std::pair<int, int> const& cid_pair = it->first;     // alias
 
@@ -544,8 +545,8 @@ void detectMatchFeatures(// Inputs
       keypoint_map[right_cid][dist_right_ip] = 0;
     }
   }
-  keypoint_vec.resize(cams.size());
-  for (size_t cid = 0; cid < cams.size(); cid++) {
+  keypoint_vec.resize(num_images);
+  for (size_t cid = 0; cid < num_images; cid++) {
     keypoint_vec[cid].resize(keypoint_map[cid].size());
     int fid = 0;
     for (auto ip_it = keypoint_map[cid].begin(); ip_it != keypoint_map[cid].end();
