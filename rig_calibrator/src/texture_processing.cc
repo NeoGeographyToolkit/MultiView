@@ -110,11 +110,11 @@ bool IsaacTextureAtlas::insert(IsaacTexturePatch::ConstPtr texture_patch) {
 
   int64_t width = texture_patch->get_width() + 2 * TILE_PADDING;
   int64_t height = texture_patch->get_height() + 2 * TILE_PADDING;
-  Rect<int64_t> rect = Rect<int64_t>(0, 0, width, height);
+  Rect<long> rect = Rect<long>(0, 0, width, height); // use long, for clang
   if (!bin->insert(&rect)) return false;
 
   // Keep track how many rows of the allocated texture we actually use
-  determined_height = std::max(rect.max_y, determined_height);
+  determined_height = std::max((int64_t)rect.max_y, determined_height);
 
   // Note how we don't bother to do any copying, as at this stage we
   // only care for the structure
@@ -1347,10 +1347,11 @@ void projectTexture(mve::TriangleMesh::ConstPtr mesh, std::shared_ptr<BVHTree> b
 
       if (!success) continue;
 
-      int64_t min_iy = std::max(static_cast<int64_t>(floor((out_y0 - F.min_y) / pixel_size)), 0L);
+      int64_t min_iy = std::max(static_cast<int64_t>(floor((out_y0 - F.min_y) / pixel_size)),
+                                int64_t(0));
       int64_t max_iy =
         std::min(static_cast<int64_t>(ceil((out_y1 - F.min_y) / pixel_size)),
-                 static_cast<int64_t>(F.width) - 1L);
+                 static_cast<int64_t>(F.width) - int64_t(1));
 
       for (int64_t iy = min_iy; iy <= max_iy; iy++) {
         // The point in the plane in which we do the book-keeping
