@@ -41,12 +41,17 @@ Otherwise, after cloning it, run:
 
 # Build
 
-The dependencies for this package can be fetched with conda with the
-command:
+The dependencies for this package can be fetched with conda. For Linux,
+use:: 
 
     conda env create -f MultiView/conda/linux_deps_env.yaml
 
-Then the software can be built (on Linux) as follows:
+while for OSX::
+
+    conda env create -f MultiView/conda/osx_deps_env.yaml
+
+Then the software can be built as follows. First run ``cmake``. On
+Linux:
     
     cd MultiView
     mkdir build
@@ -59,6 +64,27 @@ Then the software can be built (on Linux) as follows:
       -DCMAKE_INSTALL_PREFIX=$(pwd)/../install                     \
       -DCMAKE_C_COMPILER=$toolsPath/bin/x86_64-conda-linux-gnu-gcc \
       -DCMAKE_CXX_COMPILER=$toolsPath/bin/x86_64-conda-linux-gnu-c++
+
+On OSX, the clang compilers are used. The rest of the flags are
+the same:
+
+    cd MultiView
+    mkdir build
+    cd build
+    conda activate rig_calibrator
+    toolsPath=$HOME/miniconda3/envs/rig_calibrator
+    $toolsPath/bin/cmake ..                                        \
+      -DCMAKE_VERBOSE_MAKEFILE=TRUE                                \
+      -DMULTIVIEW_DEPS_DIR=$toolsPath                              \
+      -DCMAKE_INSTALL_PREFIX=$(pwd)/../install                     \
+      -DCMAKE_C_COMPILER=$toolsPath/bin/clang                      \
+      -DCMAKE_CXX_COMPILER=$toolsPath/bin/clang++
+
+Carefully check if all dependencies are found. If some are picked
+not from the environment in $toolsPath, check your PATH and other
+environmental variables, and remove from those the locations
+which may tell ``cmake`` to look elsewhere. Then, run::
+
     make -j 20 && make install
 
 The resulting tools will be installed in MultiView/install.
