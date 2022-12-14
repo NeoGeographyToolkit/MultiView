@@ -478,7 +478,7 @@ void detectMatchFeatures(// Inputs
 
   std::vector<cv::Mat> cid_to_descriptor_map;
   std::vector<Eigen::Matrix2Xd> cid_to_keypoint_map;
-  int num_images = cams.size();
+  size_t num_images = cams.size();
   cid_to_descriptor_map.resize(num_images);
   cid_to_keypoint_map.resize(num_images);
   {

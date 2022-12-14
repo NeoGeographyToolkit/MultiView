@@ -38,13 +38,13 @@ set_target_properties(fit_rpc PROPERTIES
 # TODO(oalexan1): Use a loop here, as there are too many lines
 if(APPLE)
   set_target_properties(rig_calibrator PROPERTIES
-    INSTALL_RPATH "@loader_path;${MULTIVIEW_DEPS_DIR}/lib")
+    INSTALL_RPATH "@loader_path;@loader_path/../lib;${MULTIVIEW_DEPS_DIR}/lib")
   set_target_properties(rig_calibrator_bin PROPERTIES
-    INSTALL_RPATH "@loader_path;${MULTIVIEW_DEPS_DIR}/lib")
+    INSTALL_RPATH "@loader_path;@loader_path/../lib;${MULTIVIEW_DEPS_DIR}/lib")
   set_target_properties(undistort_image_texrecon PROPERTIES
-    INSTALL_RPATH "@loader_path;${MULTIVIEW_DEPS_DIR}/lib")
+    INSTALL_RPATH "@loader_path;@loader_path/../lib;${MULTIVIEW_DEPS_DIR}/lib")
   set_target_properties(fit_rpc PROPERTIES
-    INSTALL_RPATH "@loader_path;${MULTIVIEW_DEPS_DIR}/lib")
+    INSTALL_RPATH "@loader_path;@loader_path/../lib;${MULTIVIEW_DEPS_DIR}/lib")
 elseif(UNIX) # Unix which is not Apple
   set_target_properties(rig_calibrator PROPERTIES
     INSTALL_RPATH "$ORIGIN:$ORIGIN/../lib:${MULTIVIEW_DEPS_DIR}/lib")
