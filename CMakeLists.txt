@@ -29,12 +29,23 @@ find_package(TIFF REQUIRED)
 FIND_PACKAGE(TBB REQUIRED)
 
 # OpenMP
-FIND_PACKAGE(OpenMP REQUIRED)
-if(OPENMP_FOUND)
-    set(CMAKE_C_FLAGS "${CMAKE_C_FLAGS} ${OpenMP_C_FLAGS}")
-    set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} ${OpenMP_CXX_FLAGS}")
-    set(CMAKE_EXE_LINKER_FLAGS "${CMAKE_EXE_LINKER_FLAGS} ${OpenMP_EXE_LINKER_FLAGS}")
+# TODO(oalexan1): Figure out why clang does not find OpenMP
+# Also try to to understand why OpenMP cannot be found
+# without all the "set" logic below.
+if (APPLE)
+    set(OpenMP_C_LIB_NAMES "gomp")
+    set(OPENMP_INCLUDES "${MULTIVIEW_DEPS_DIR}/include")
+    set(OpenMP_C_FLAGS "-fopenmp")
+    set(OpenMP_gomp_LIBRARY "${MULTIVIEW_DEPS_DIR}/lib/libgomp${CMAKE_SHARED_LIBRARY_SUFFIX}")
+    set(OpenMP_CXX_FLAGS "-fopenmp")
+    set(OpenMP_CXX_LIB_NAMES "gomp")
+    set (CMAKE_EXE_LINKER_FLAGS "${CMAKE_EXE_LINKER_FLAGS} ${OpenMP_gomp_LIBRARY}")
+else()
+    find_package(OpenMP REQUIRED)
+    set (CMAKE_EXE_LINKER_FLAGS "${CMAKE_EXE_LINKER_FLAGS} ${OpenMP_EXE_LINKER_FLAGS}")
 endif()
+set (CMAKE_C_FLAGS "${CMAKE_C_FLAGS} ${OpenMP_C_FLAGS}")
+set (CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} ${OpenMP_CXX_FLAGS}")
 
 # GFlags 
 find_package(Gflags REQUIRED)
@@ -86,7 +97,7 @@ set(BOOST_INCLUDEDIR "${MULTIVIEW_DEPS_DIR}/include")
 set(Boost_NO_SYSTEM_PATHS ON) # Do not search anywhere else
 set(Boost_DEBUG OFF) # to help figure out issues
 set(Boost_DETAILED_FAILURE_MSG OFF) # When on, helps with debugging
-find_package(Boost 1.68 REQUIRED COMPONENTS filesystem)
+find_package(Boost 1.72 REQUIRED COMPONENTS filesystem)
 if (Boost_FOUND)
     message("Successfully found Boost version ${Boost_VERSION}.")
     message("Boost include dir = ${Boost_INCLUDE_DIRS}")
@@ -108,9 +119,8 @@ else (JASPER_FOUND)
 endif (JASPER_FOUND)
 
 # OpenCV
-find_package(OpenCV 3.2.0 REQUIRED)
+find_package(OpenCV 4.0.0 REQUIRED)
 # Find OpenCV and fix a 3.3.1 bug
-find_package(OpenCV 3 REQUIRED)
 if (${OpenCV_VERSION} MATCHES "3.3.1")
   foreach(__cvcomponent ${OpenCV_LIB_COMPONENTS})
     set (__original_cvcomponent ${__cvcomponent})
