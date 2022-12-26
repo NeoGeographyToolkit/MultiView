@@ -18,8 +18,9 @@ textured meshes. Most of the original work in this package went
 towards the creation of the calibration logic and ensuring that all
 components work together to create high-fidelity results.
 
-These tools are shipped as part of the [NASA Ames
-Stereo Pipeline](https://github.com/NeoGeographyToolkit/StereoPipeline/releases) (only with the Linux build for the moment).
+These tools are shipped as part of the [NASA Ames Stereo
+Pipeline](https://github.com/NeoGeographyToolkit/StereoPipeline/releases)
+(for Linux and OSX).
 
 # Documentation
 
@@ -41,44 +42,40 @@ Otherwise, after cloning it, run:
 
 # Build
 
-The dependencies for this package can be fetched with conda. For Linux,
-use:: 
+The dependencies for this package can be fetched with conda. For
+Linux, use::
 
-    conda env create -f MultiView/conda/linux_deps_env.yaml
+    conda env create -f MultiView/conda/linux_deps_env_asp_3.2.0.yaml
 
 while for OSX::
 
-    conda env create -f MultiView/conda/osx_deps_env.yaml
+    conda env create -f MultiView/conda/osx_deps_env_asp_3.2.0.yaml
 
-Then the software can be built as follows. First run ``cmake``. On
-Linux:
+Then the software can be built as follows. Set the compilers. This is
+different on Linux and OSX::
+
+isMac=$(uname -s | grep Darwin)
+if [ "$isMac" != "" ]; then
+    cc_comp=clang
+    cxx_comp=clang++
+else
+    cc_comp=x86_64-conda_cos6-linux-gnu-gcc
+    cxx_comp=x86_64-conda_cos6-linux-gnu-g++
+fi
+
+Run ``cmake``:: 
     
     cd MultiView
     mkdir build
     cd build
     conda activate rig_calibrator
     toolsPath=$HOME/miniconda3/envs/rig_calibrator
-    $toolsPath/bin/cmake ..                                        \
-      -DCMAKE_VERBOSE_MAKEFILE=TRUE                                \
-      -DMULTIVIEW_DEPS_DIR=$toolsPath                              \
-      -DCMAKE_INSTALL_PREFIX=$(pwd)/../install                     \
-      -DCMAKE_C_COMPILER=$toolsPath/bin/x86_64-conda-linux-gnu-gcc \
-      -DCMAKE_CXX_COMPILER=$toolsPath/bin/x86_64-conda-linux-gnu-c++
-
-On OSX, the clang compilers are used. The rest of the flags are
-the same:
-
-    cd MultiView
-    mkdir build
-    cd build
-    conda activate rig_calibrator
-    toolsPath=$HOME/miniconda3/envs/rig_calibrator
-    $toolsPath/bin/cmake ..                                        \
-      -DCMAKE_VERBOSE_MAKEFILE=TRUE                                \
-      -DMULTIVIEW_DEPS_DIR=$toolsPath                              \
-      -DCMAKE_INSTALL_PREFIX=$(pwd)/../install                     \
-      -DCMAKE_C_COMPILER=$toolsPath/bin/clang                      \
-      -DCMAKE_CXX_COMPILER=$toolsPath/bin/clang++
+    $toolsPath/bin/cmake ..                        \
+      -DCMAKE_VERBOSE_MAKEFILE=TRUE                \
+      -DMULTIVIEW_DEPS_DIR=$toolsPath              \
+      -DCMAKE_INSTALL_PREFIX=$(pwd)/../install     \
+      -DCMAKE_C_COMPILER=${toolsPath}/bin/$cc_comp \
+      -DCMAKE_CXX_COMPILER=${toolsPath}/bin/$cxx_comp
 
 Carefully check if all dependencies are found. If some are picked
 not from the environment in $toolsPath, check your PATH and other

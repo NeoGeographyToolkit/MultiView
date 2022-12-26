@@ -33,9 +33,6 @@ dependencies:
   - freetype=2.12.1=hca18f0e_1
   - gcc_impl_linux-64=12.2.0=hcc96c02_19
   - gcc_linux-64=12.2.0=h4798a0e_11
-  - geoid=1.0_isis7=1
-  - geos=3.7.3=he1b5a44_0
-  - geotiff=1.7.1=ha76d385_4
   - gettext=0.21.1=h27087fc_0
   - gflags=2.2.2=he1b5a44_1004
   - giflib=5.2.1=h36c2ea0_2
