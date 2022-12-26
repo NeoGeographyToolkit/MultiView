@@ -74,8 +74,8 @@ void detectFeatures(const cv::Mat& image, bool verbose,
   std::vector<cv::KeyPoint> storage;
 
   if (FLAGS_feature_detector == "SIFT") {
-    cv::Ptr<cv::xfeatures2d::SIFT> sift =
-      cv::xfeatures2d::SIFT::create(FLAGS_sift_nFeatures, FLAGS_sift_nOctaveLayers,
+    cv::Ptr<cv::SIFT> sift =
+      cv::SIFT::create(FLAGS_sift_nFeatures, FLAGS_sift_nOctaveLayers,
                                     FLAGS_sift_contrastThreshold,
                                     FLAGS_sift_edgeThreshold, FLAGS_sift_sigma);
     sift->detect(image, storage);
