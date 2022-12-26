@@ -20,6 +20,29 @@ include_directories("${MULTIVIEW_DEPS_DIR}/include")
 
 set(CMAKE_INSTALL_LIBDIR "lib") # install in lib and not lib64
 
+# OpenMP
+# TODO(oalexan1): Figure out why clang does not find OpenMP
+# and remove the clucky logic below.
+if (APPLE)
+    find_package(OpenMP)
+    set(OPENMP_INCLUDES "${MULTIVIEW_DEPS_DIR}/include")
+    set(OpenMP_C_LIB_NAMES "gomp")
+    set(OpenMP_CXX_LIB_NAMES "gomp")
+    set(OpenMP_C_FLAGS "-fopenmp")
+    set(OpenMP_CXX_FLAGS "-fopenmp")
+    set(OpenMP_gomp_LIBRARY "${MULTIVIEW_DEPS_DIR}/lib/libgomp${CMAKE_SHARED_LIBRARY_SUFFIX}")
+    set (CMAKE_EXE_LINKER_FLAGS "${CMAKE_EXE_LINKER_FLAGS} ${OpenMP_gomp_LIBRARY}")
+    set(OpenMP_CXX_FOUND ON)
+    set(WITH_OPENMP ON)
+    message(STATUS "Manually set: OpenMP_CXX_FLAGS=${OpenMP_CXX_FLAGS}")
+    message(STATUS "Mamually set: OpenMP_CXX_LIB_NAMES=${OpenMP_CXX_FLAGS}")
+else()
+    find_package(OpenMP REQUIRED)
+endif()
+set (CMAKE_C_FLAGS "${CMAKE_C_FLAGS} ${OpenMP_C_FLAGS}")
+set (CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} ${OpenMP_CXX_FLAGS}")
+set (CMAKE_EXE_LINKER_FLAGS "${CMAKE_EXE_LINKER_FLAGS} ${OpenMP_EXE_LINKER_FLAGS}")
+
 # Image libs
 find_package(PNG REQUIRED)
 find_package(JPEG REQUIRED)
@@ -27,25 +50,6 @@ find_package(TIFF REQUIRED)
 
 # TBB
 FIND_PACKAGE(TBB REQUIRED)
-
-# OpenMP
-# TODO(oalexan1): Figure out why clang does not find OpenMP
-# Also try to to understand why OpenMP cannot be found
-# without all the "set" logic below.
-if (APPLE)
-    set(OpenMP_C_LIB_NAMES "gomp")
-    set(OPENMP_INCLUDES "${MULTIVIEW_DEPS_DIR}/include")
-    set(OpenMP_C_FLAGS "-fopenmp")
-    set(OpenMP_gomp_LIBRARY "${MULTIVIEW_DEPS_DIR}/lib/libgomp${CMAKE_SHARED_LIBRARY_SUFFIX}")
-    set(OpenMP_CXX_FLAGS "-fopenmp")
-    set(OpenMP_CXX_LIB_NAMES "gomp")
-    set (CMAKE_EXE_LINKER_FLAGS "${CMAKE_EXE_LINKER_FLAGS} ${OpenMP_gomp_LIBRARY}")
-else()
-    find_package(OpenMP REQUIRED)
-    set (CMAKE_EXE_LINKER_FLAGS "${CMAKE_EXE_LINKER_FLAGS} ${OpenMP_EXE_LINKER_FLAGS}")
-endif()
-set (CMAKE_C_FLAGS "${CMAKE_C_FLAGS} ${OpenMP_C_FLAGS}")
-set (CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} ${OpenMP_CXX_FLAGS}")
 
 # GFlags 
 find_package(Gflags REQUIRED)
