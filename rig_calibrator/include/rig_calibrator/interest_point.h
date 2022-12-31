@@ -364,6 +364,13 @@ void savePairwiseConvergenceAngles(// Inputs
   std::vector<Eigen::Vector3d> const& xyz_vec,
   std::vector<std::map<int, std::map<int, int>>> const& pid_cid_fid_inlier,
   std::string const& conv_angles_file);
+
+// Apply a transform to inlier triangulated points  
+void transformInlierTriPoints(// Inputs
+  Eigen::Affine3d const& trans,
+  std::vector<std::map<int, int>> const& pid_to_cid_fid,
+  std::vector<std::map<int, std::map<int, int>>> const& pid_cid_fid_inlier,
+  std::vector<Eigen::Vector3d> & xyz_vec); // output
   
 }  // namespace dense_map
 

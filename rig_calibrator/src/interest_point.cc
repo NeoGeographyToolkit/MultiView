@@ -2086,5 +2086,39 @@ void savePairwiseConvergenceAngles(// Inputs
 
   return;
 }
+
+// Apply a transform to inlier triangulated points  
+void transformInlierTriPoints(// Inputs
+  Eigen::Affine3d const& trans,
+  std::vector<std::map<int, int>> const& pid_to_cid_fid,
+  std::vector<std::map<int, std::map<int, int>>> const& pid_cid_fid_inlier,
+  std::vector<Eigen::Vector3d> & xyz_vec) { // output
+  
+  if (pid_to_cid_fid.size() != pid_cid_fid_inlier.size())
+    LOG(FATAL) << "Expecting as many inlier flags as there are tracks.\n";
+  if (pid_to_cid_fid.size() != xyz_vec.size()) 
+    LOG(FATAL) << "Expecting as many tracks as there are triangulated points.\n";
+
+  for (size_t pid = 0; pid < pid_to_cid_fid.size(); pid++) {
+
+    bool isInlierXyz = false;
+    for (auto cid_fid1 = pid_to_cid_fid[pid].begin();
+         cid_fid1 != pid_to_cid_fid[pid].end(); cid_fid1++) {
+      int cid1 = cid_fid1->first;
+      int fid1 = cid_fid1->second;
+
+      // Deal with inliers only
+      if (!dense_map::getMapValue(pid_cid_fid_inlier, pid, cid1, fid1)) continue;
+
+      isInlierXyz = true;
+      break;
+    }
+
+    if (isInlierXyz) 
+      xyz_vec[pid] = trans * xyz_vec[pid];
+  }
+  
+  return;
+}
   
 }  // end namespace dense_map
