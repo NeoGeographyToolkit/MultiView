@@ -85,3 +85,7 @@ which may tell ``cmake`` to look elsewhere. Then, run::
     make -j 20 && make install
 
 The resulting tools will be installed in MultiView/install.
+
+If the Theia ``view_reconstruction`` tool is a challege to build
+because of its dependence on OpenGL, it can be excluded from building
+by editing the approproate CMakeLists.txt file.
