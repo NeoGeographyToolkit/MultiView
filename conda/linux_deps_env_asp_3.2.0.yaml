@@ -197,3 +197,5 @@ dependencies:
   - zstd=1.5.2=h6239696_4
   - mesa-libgl-cos6-x86_64
   - xorg-libxmu
+  - mesalib
+  
