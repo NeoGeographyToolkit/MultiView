@@ -34,7 +34,7 @@ This package depends on other repositories, which are included as
 submodules, and those may have their own dependencies. Hence, this
 repo should be cloned recursively, as:
 
-    git clone --recursive git@github.com:oleg-alexandrov/MultiView.git
+    git clone --recursive git@github.com:NeoGeographyToolkit/MultiView.git
 
 Otherwise, after cloning it, run:
 
@@ -43,27 +43,27 @@ Otherwise, after cloning it, run:
 # Build
 
 The dependencies for this package can be fetched with conda. For
-Linux, use::
+Linux, use:
 
     conda env create -f MultiView/conda/linux_deps_env_asp_3.2.0.yaml
 
-while for OSX::
+while for OSX:
 
     conda env create -f MultiView/conda/osx_deps_env_asp_3.2.0.yaml
 
 Then the software can be built as follows. Set the compilers. This is
-different on Linux and OSX::
+different on Linux and OSX:
 
-isMac=$(uname -s | grep Darwin)
-if [ "$isMac" != "" ]; then
-    cc_comp=clang
-    cxx_comp=clang++
-else
-    cc_comp=x86_64-conda_cos6-linux-gnu-gcc
-    cxx_comp=x86_64-conda_cos6-linux-gnu-g++
-fi
+    isMac=$(uname -s | grep Darwin)
+    if [ "$isMac" != "" ]; then
+        cc_comp=clang
+        cxx_comp=clang++
+    else
+        cc_comp=x86_64-conda_cos6-linux-gnu-gcc
+        cxx_comp=x86_64-conda_cos6-linux-gnu-g++
+    fi
 
-Run ``cmake``:: 
+Run ``cmake``:
     
     cd MultiView
     mkdir build
@@ -80,7 +80,7 @@ Run ``cmake``::
 Carefully check if all dependencies are found. If some are picked
 not from the environment in $toolsPath, check your PATH and other
 environmental variables, and remove from those the locations
-which may tell ``cmake`` to look elsewhere. Then, run::
+which may tell ``cmake`` to look elsewhere. Then, run:
 
     make -j 20 && make install
 
