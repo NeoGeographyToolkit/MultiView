@@ -1,7 +1,6 @@
 [submodule "texrecon"]
 	path = texrecon
 	url = https://github.com/oleg-alexandrov/mvs-texturing
-
 [submodule "voxblox"]
 	path = voxblox
 	url = git@github.com:oleg-alexandrov/voxblox.git
