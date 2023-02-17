@@ -36,7 +36,8 @@ if __name__ == "__main__":
         with rosbag.Bag(args.bag, "r") as bag:
             for topic, msg, t in bag.read_messages(topic_list):
                 try:
-                    fh.write("{0:0.17f} {1:s}\n".format(msg.header.stamp.to_sec(), topic))
+                    # The timestamp format is consistent with what rig_calibrator uses
+                    fh.write("{0:10.7f} {1:s}\n".format(msg.header.stamp.to_sec(), topic))
                 except:
                     pass
                 
