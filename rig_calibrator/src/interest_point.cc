@@ -1552,6 +1552,7 @@ void saveXyzImage(std::string const& filename, cv::Mat const& img) {
   if (!f.is_open()) LOG(FATAL) << "Cannot open file for writing: " << filename << "\n";
 
   // Assign these to explicit variables so we know their type and size in bytes
+  // TODO(oalexan1): Replace below with int32_t and check that it is same thing.
   int rows = img.rows, cols = img.cols, channels = img.channels();
 
   // TODO(oalexan1): Avoid C-style cast. Test if
@@ -1596,6 +1597,7 @@ void readXyzImage(std::string const& filename, cv::Mat & img) {
   if (!f.is_open()) LOG(FATAL) << "Cannot open file for reading: " << filename << "\n";
 
   int rows, cols, channels;
+  // TODO(oalexan1): Replace below with int32_t and check that it is same thing.
   f.read((char*)(&rows), sizeof(rows));         // NOLINT
   f.read((char*)(&cols), sizeof(cols));         // NOLINT
   f.read((char*)(&channels), sizeof(channels)); // NOLINT
