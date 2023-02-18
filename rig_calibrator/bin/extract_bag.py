@@ -5,12 +5,28 @@ For a given list of topics and directory names, save the image and
 point cloud messages for that topic to the specified directories. The
 created file names will be in the form: <timestamp>.<extension>, with
 the timestamp being the double-precision number of seconds since epoch
-read from message header.
+read from message header. Can specify a list of timestamps for which
+to extract the data.
 """
 
 import argparse, os, re, sys, rosbag, cv2, sensor_msgs, cv_bridge
 from sensor_msgs import point_cloud2
 import numpy as np
+
+def read_timestamps(filename):
+    """Return a map of timestamps."""
+
+    timestamp_map = {}
+    with open(filename, 'r') as f:
+        lines = f.readlines()
+
+    for line in lines:
+        m = re.match("^.*?(\d+\.\d+).*?\n", line)
+        if m:
+            timestamp = float(m.group(1))
+            timestamp_map[timestamp] = line
+            
+    return timestamp_map
   
 parser = argparse.ArgumentParser(description = __doc__,
                                  formatter_class = argparse.ArgumentDefaultsHelpFormatter)
@@ -23,7 +39,11 @@ parser.add_argument("--dirs", dest = "dirs", default = "",
 parser.add_argument("--max", dest = "max", type = int, default = -1,
                     help = "The maximum number of messages to save. By default, save all of them.")
 
+parser.add_argument("--timestamp_list", dest = "timestamp_list", default = "",  
+                    help = "Extract data only for these timestamps. By default, extract all of them. Each line in this file must have a number of the form <digits>.<digits> or it will be ignored.")
+
 args = parser.parse_args()
+
 topic_list = args.topics.split()
 dir_list = args.dirs.split()
 
@@ -39,6 +59,10 @@ if len(topic_list) == 0:
     print("Must specify at least one topic and output directory.")
     sys.exit(1)
 
+timestamp_map = {}
+if args.timestamp_list != "":
+    timestamp_map = read_timestamps(args.timestamp_list)
+    
 # TODO(oalexan1): Make this a function.
 # Map from topic name to dir name.
 topic_to_dir = {}
@@ -86,6 +110,8 @@ with rosbag.Bag(args.bag, "r") as bag:
         # Read the header timestamp
         try:
             stamp = msg.header.stamp.to_sec()
+            if len(timestamp_map) > 0 and (stamp not in timestamp_map):
+                continue # if reading from a list
         except:
             continue
 
