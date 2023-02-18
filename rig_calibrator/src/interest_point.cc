@@ -1398,12 +1398,12 @@ void writeInliersToNvm(std::string                                       const& 
     }
 
     // Keep only tracks with at least two points
-    if (nvm_cid_fid.size() > 2) {
+    if (nvm_cid_fid.size() > 1) {
       nvm_pid_to_cid_fid.push_back(nvm_cid_fid);
       nvm_pid_to_xyz.push_back(xyz_vec[pid]);
     }
-  }    
-
+  }
+  
   // Shrink to keep only the inlier keypoints we added
   for (size_t cid = 0; cid < cams.size(); cid++)
     cid_to_keypoint_map.at(cid).conservativeResize(Eigen::NoChange_t(), fid_count[cid]);
