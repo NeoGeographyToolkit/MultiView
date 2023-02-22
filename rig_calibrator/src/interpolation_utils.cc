@@ -20,6 +20,8 @@
 #include <rig_calibrator/interpolation_utils.h>
 #include <glog/logging.h>
 
+#include <iostream>
+
 namespace dense_map {
 
 // Given two poses aff0 and aff1, and 0 <= alpha <= 1, do linear interpolation.
@@ -88,4 +90,88 @@ bool findInterpPose(double desired_time, std::map<double, Eigen::Affine3d> const
   return true;
 }
 
+// Given a set of poses indexed by time, interpolate or extrapolate
+// (within range of extrap_len) at a set of target timestamps. Go
+// forward in time both in the input and the target, which makes the
+// complexity linear rather than quadratic.
+void interpOrExtrap(std::map<double, Eigen::Affine3d> const& input_poses,
+                    std::map<double, std::string> const& target,
+                    double extrap_len,
+                    // Outputs
+                    std::vector<std::string> & found_images,
+                    std::vector<Eigen::Affine3d> & found_poses) {
+
+  found_images.clear();
+  found_poses.clear();
+  
+  double beg_timestamp = input_poses.begin()->first;
+  double end_timestamp = input_poses.rbegin()->first;
+  
+  // Iterate over all timestamps to interpolate at, and simultaneously
+  // over the existing images to interpolate into, both in increasing
+  // order of time.  This makes complexity linear rather than
+  // quadratic. This is possible because both the inputs and outputs
+  // are sorted by time. Some care is needed.
+
+  auto start = input_poses.begin(); // track where we are in the input 
+  for (auto curr_it = target.begin(); curr_it != target.end(); curr_it++) {
+    
+    double curr_timestamp = curr_it->first;
+    std::string const& image_file = curr_it->second;
+    
+    if (curr_timestamp < beg_timestamp - extrap_len ||
+        curr_timestamp > end_timestamp + extrap_len)
+    LOG(FATAL) << "Cannot find camera pose for image " << image_file
+               << " as it is too far in time from existing images.\n";
+    
+    Eigen::Affine3d found_pose;
+    if (curr_timestamp <= beg_timestamp) {
+      // Use extrapolation
+      found_pose = input_poses.begin()->second; // pose for earliest time
+    } else if (curr_timestamp >= end_timestamp) {
+      found_pose = input_poses.rbegin()->second; // pose for the latest tame
+    } else {
+      // Use interpolation
+      bool success = false;
+      for (auto map_it = start; map_it != input_poses.end(); map_it++) {
+        
+        // Find the right bracketing iterator
+        auto right_map_it = map_it;
+        right_map_it++;
+        if (right_map_it == input_poses.end())
+          right_map_it = map_it; // fall back to left if at the end
+        
+        double left_timestamp = map_it->first;
+        double right_timestamp = right_map_it->first;
+
+        if (left_timestamp > curr_timestamp) {
+          // Went too far
+          break;
+        }
+
+        // Update this for next time. It always moves forward in time,
+        // and points to a location left of current timestamp.
+        start = map_it;
+        
+        bool is_good = (curr_timestamp <= right_timestamp);
+        if (!is_good) 
+          continue; // too early
+        
+        // Interpolate at desired time
+        found_pose
+          = dense_map::linearInterp(left_timestamp, curr_timestamp, right_timestamp,
+                                    map_it->second, right_map_it->second);
+        
+        found_images.push_back(image_file);
+        found_poses.push_back(found_pose);
+        success = true;
+        break;
+      }
+      
+      if (!success)
+        LOG(FATAL) << "Cannot compute camera pose for image " << image_file << ".\n";
+    }
+  }  
+}
+  
 }  // end namespace dense_map

@@ -23,7 +23,9 @@
 #include <Eigen/Core>
 #include <Eigen/Geometry>
 
+#include <vector>
 #include <map>
+
 namespace dense_map {
 
 // Given two poses aff0 and aff1, and 0 <= alpha <= 1, do linear interpolation.
@@ -40,6 +42,17 @@ Eigen::Affine3d linearInterp(double t0, double t, double t1, Eigen::Affine3d con
 bool findInterpPose(double desired_time, std::map<double, Eigen::Affine3d> const& poses,
                     Eigen::Affine3d& interp_pose);
 
+// Given a set of poses indexed by time, interpolate or extrapolate
+// (within range of extrap_len) at a set of target timestamps. Go
+// forward in time both in the input and the target, which makes the
+// complexity linear rather than quadratic.
+void interpOrExtrap(std::map<double, Eigen::Affine3d> const& input_poses,
+                    std::map<double, std::string> const& target,
+                    double extrap_len,
+                    // Outputs
+                    std::vector<std::string> & found_images,
+                    std::vector<Eigen::Affine3d> & found_poses);
+  
 }  // namespace dense_map
 
 #endif  // INTERPOLATION_UTILS_H_

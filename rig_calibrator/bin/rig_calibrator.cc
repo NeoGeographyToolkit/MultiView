@@ -116,6 +116,7 @@
 #include <rig_calibrator/interest_point.h>
 #include <rig_calibrator/texture_processing.h>
 #include <rig_calibrator/camera_image.h>
+#include <rig_calibrator/nvm.h>
 
 #include <gflags/gflags.h>
 #include <glog/logging.h>
@@ -226,7 +227,7 @@ DEFINE_double(max_reprojection_error, 25.0, "If filtering outliers, remove inter
               "happens after each optimization pass finishes, unless disabled. It is better to not "
               "filter too aggressively unless confident of the solution.");
 
-DEFINE_double(min_triangulation_angle, 0.5, "If filtering outliers, remove triangulated points "
+DEFINE_double(min_triangulation_angle, 0.01, "If filtering outliers, remove triangulated points "
               "for which all rays converging to it make an angle (in degrees) less than this. "
               "Note that some cameras in the rig may be very close to each other relative to "
               "the triangulated points, so care is needed here.");
@@ -885,8 +886,8 @@ void parameterValidation() {
     LOG(FATAL) << "Must specify the initial rig configuration via --rig_config.\n";
 
 
-    if (FLAGS_camera_poses != "" && FLAGS_nvm != "")
-      LOG(FATAL) << "Cannot specify both --nvm and --camera_poses.\n";
+  if (FLAGS_camera_poses != "" && FLAGS_nvm != "")
+    LOG(FATAL) << "Cannot specify both --nvm and --camera_poses.\n";
 
   if (FLAGS_camera_poses == "" && FLAGS_nvm == "")
     LOG(FATAL) << "Must specify the cameras via --nvm or --camera_poses.\n";
@@ -1207,29 +1208,21 @@ int main(int argc, char** argv) {
   // and it is very important to always keep these in sync.
   std::vector<Eigen::Affine3d> world_to_ref, world_to_cam;
 
+  // Read camera poses from nvm file or a list.
   // image_data is on purpose stored in vectors of vectors, with each
   // image_data[i] having data in increasing order of timestamps. This
   // way it is fast to find next timestamps after a given one.
-  std::vector<double> ref_timestamps; // Timestamps for the ref cameras
   std::vector<std::vector<dense_map::ImageMessage>> image_data;
   std::vector<std::vector<dense_map::ImageMessage>> depth_data;
+  std::vector<double> ref_timestamps; // Timestamps for the ref cameras
   std::vector<std::string> ref_image_files;
   dense_map::nvmData nvm;
-  if (FLAGS_camera_poses != "")
-    dense_map::readCameraPoses(FLAGS_camera_poses, FLAGS_extra_list,
-                               use_initial_rig_transforms,
-                               FLAGS_bracket_len, ref_to_cam_trans,
-                               ref_to_cam_timestamp_offsets,
-                               ref_cam_type, cam_names,
-                               nvm, ref_timestamps, world_to_ref, ref_image_files,
-                               image_data, depth_data); // out
-  else if (FLAGS_nvm != "") 
-    dense_map::readNvm(FLAGS_nvm, FLAGS_extra_list,
-                       use_initial_rig_transforms,
-                       FLAGS_bracket_len, ref_to_cam_trans, ref_to_cam_timestamp_offsets,
-                       ref_cam_type, cam_names, // in
-                       nvm, ref_timestamps, world_to_ref, ref_image_files,
-                       image_data, depth_data); // out
+  dense_map::readListOrNvm(FLAGS_camera_poses, FLAGS_nvm, FLAGS_extra_list,
+                           use_initial_rig_transforms,
+                           FLAGS_bracket_len, ref_to_cam_trans, ref_to_cam_timestamp_offsets,
+                           ref_cam_type, cam_names, // in
+                           nvm, ref_timestamps, world_to_ref, ref_image_files,
+                           image_data, depth_data); // out
   
   // Keep here the images, timestamps, and bracketing information
   std::vector<dense_map::cameraImage> cams;

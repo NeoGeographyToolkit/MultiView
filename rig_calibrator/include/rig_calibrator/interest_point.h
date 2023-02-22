@@ -42,6 +42,7 @@ namespace dense_map {
 // Forward declarations
 class cameraImage;
 class ImageMessage;
+class nvmData;
   
 /// A class for storing information about an interest point
 /// in the format the NASA ASP can read it (very useful
@@ -250,47 +251,6 @@ void saveInlinerMatchPairs(// Inputs
                            const& pid_cid_fid_inlier,
                            std::string const& out_dir);
 
-// Read cameras and interest points from an nvm file  
-void ReadNVM(std::string const& input_filename,
-             std::vector<Eigen::Matrix2Xd> * cid_to_keypoint_map,
-             std::vector<std::string> * cid_to_filename,
-             std::vector<std::map<int, int>> * pid_to_cid_fid,
-             std::vector<Eigen::Vector3d> * pid_to_xyz,
-             std::vector<Eigen::Affine3d> *
-             cid_to_cam_t_global);
-
-// Write the inliers in nvm format. The keypoints are shifted relative to the optical
-// center, as written by Theia.
-void writeInliersToNvm(std::string                                       const& nvm_file,
-                       bool                                                     shift_keypoints,
-                       std::vector<camera::CameraParameters>             const& cam_params,
-                       std::vector<dense_map::cameraImage>               const& cams,
-                       std::vector<Eigen::Affine3d>                      const& world_to_cam,
-                       std::vector<std::vector<std::pair<float, float>>> const& keypoint_vec,
-                       std::vector<std::map<int, int>>                   const& pid_to_cid_fid,
-                       std::vector<std::map<int, std::map<int, int>>>    const& pid_cid_fid_inlier,
-                       std::vector<Eigen::Vector3d>                      const& xyz_vec);
-  
-// Write an nvm file. Note that a single focal length is assumed and no distortion.
-// Those are ignored, and only camera poses, matches, and keypoints are used.
-// Write an nvm file. Note that a single focal length is assumed and no distortion.
-// Those are ignored, and only camera poses, matches, and keypoints are used.
-// It is assumed the interest point matches are shifted relative to the optical center.
-void writeNvm(std::vector<Eigen::Matrix2Xd> const& cid_to_keypoint_map,
-              std::vector<std::string> const& cid_to_filename,
-              std::vector<double> const& focal_lengths,
-              std::vector<std::map<int, int>> const& pid_to_cid_fid,
-              std::vector<Eigen::Vector3d> const& pid_to_xyz,
-              std::vector<Eigen::Affine3d> const& cid_to_cam_t_global,
-              std::string const& output_filename);
-
-struct nvmData {
-  std::vector<Eigen::Matrix2Xd>    cid_to_keypoint_map;
-  std::vector<std::string>         cid_to_filename;
-  std::vector<std::map<int, int>>  pid_to_cid_fid;
-  std::vector<Eigen::Vector3d>     pid_to_xyz;
-  std::vector<Eigen::Affine3d>     cid_to_cam_t_global;
-};
 
 // Write an image with 3 floats per pixel. OpenCV's imwrite() cannot do that.
 void saveXyzImage(std::string const& filename, cv::Mat const& img);
@@ -301,26 +261,10 @@ void saveImagesAndDepthClouds(std::vector<cameraImage> const& cams);
 // Read an image with 3 floats per pixel. OpenCV's imread() cannot do that.
 void readXyzImage(std::string const& filename, cv::Mat & img);
 
-void readCameraPoses(// Inputs
-                     std::string const& camera_poses_file,
-                     std::string const& extra_list,
-                     bool use_initial_rig_transforms,
-                     double bracket_len,
-                     std::vector<Eigen::Affine3d> const& ref_to_cam_trans,
-                     std::vector<double> const& ref_to_cam_timestamp_offsets,
-                     int ref_cam_type,
-                     std::vector<std::string> const& cam_names,
-                     // Outputs
-                     nvmData & nvm,
-                     std::vector<double>& ref_timestamps,
-                     std::vector<Eigen::Affine3d>& world_to_ref,
-                     std::vector<std::string> & ref_image_files,
-                     std::vector<std::vector<ImageMessage>>& image_data,
-                     std::vector<std::vector<ImageMessage>>& depth_data);
-  
-// Read camera information and images from an NVM file, exported
-// from Theia
-void readNvm(// Inputs
+// Read camera information and images from a list or from an NVM file.
+// Can interpolate/extrapolate poses for data from an extra list.  
+void readListOrNvm(// Inputs
+             std::string const& camera_poses_list,
              std::string const& nvm_file,
              std::string const& extra_list,
              bool use_initial_rig_transforms,
