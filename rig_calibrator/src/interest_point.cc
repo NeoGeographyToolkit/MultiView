@@ -28,6 +28,8 @@
 #include <rig_calibrator/thread.h>
 #include <rig_calibrator/matching.h>
 #include <rig_calibrator/transform_utils.h>
+#include <rig_calibrator/interpolation_utils.h>
+
 #include <camera_model/camera_params.h>
 
 // Get rid of warnings beyond our control
@@ -1410,10 +1412,26 @@ void writeInliersToNvm(std::string                                       const& 
 
   writeNvm(cid_to_keypoint_map, cid_to_filename, focal_lengths, nvm_pid_to_cid_fid,  
            nvm_pid_to_xyz, world_to_cam, nvm_file);
+
+  // Write the optical center per image
+  if (shift_keypoints) {
+    int file_len = nvm_file.size(); // cast to int to make subtraction safe
+    // Remove .nvm and add new suffix
+    std::string offset_path = nvm_file.substr(0, std::max(file_len - 4, 0)) + "_offsets.txt";
+    std::cout << "Writing optical center per image: " << offset_path << std::endl;
+    std::ofstream offset_fh(offset_path.c_str());
+    offset_fh.precision(17);   // Save with the highest precision
+    for (size_t cid = 0; cid < cid_to_filename.size(); cid++) {
+      auto const& optical_center = cam_params[cams[cid].camera_type].GetOpticalOffset();
+      offset_fh << cid_to_filename[cid] << " "
+                << optical_center[0] << " " << optical_center[1] << "\n";
+    }
+  }
 }
   
 // Write an nvm file. Note that a single focal length is assumed and no distortion.
 // Those are ignored, and only camera poses, matches, and keypoints are used.
+// It is assumed the interest point matches are shifted relative to the optical center.
 void writeNvm(std::vector<Eigen::Matrix2Xd> const& cid_to_keypoint_map,
               std::vector<std::string> const& cid_to_filename,
               std::vector<double> const& focal_lengths,
@@ -1427,7 +1445,6 @@ void writeNvm(std::vector<Eigen::Matrix2Xd> const& cid_to_keypoint_map,
   dense_map::createDir(out_dir);
 
   std::cout << "Writing: " << output_filename << std::endl;
-  
   std::fstream f(output_filename, std::ios::out);
   f.precision(17); // double precision
   f << "NVM_V3\n";
@@ -1617,14 +1634,16 @@ void readXyzImage(std::string const& filename, cv::Mat & img) {
 
   return;
 }
-  
-void readImageEntry(// Inputs
-                    std::string const& image_file,
-                    Eigen::Affine3d const& world_to_cam,
-                    std::vector<std::string> const& cam_names,
-                    // Outputs
-                    std::map<int, std::map<double, dense_map::ImageMessage>> & image_maps,
-                    std::map<int, std::map<double, dense_map::ImageMessage>> & depth_maps) {
+
+void findCamTypeAndTimestamp(std::string const& image_file,
+                             std::vector<std::string> const& cam_names,
+                             // Outputs
+                             int    & cam_type,
+                             double & timestamp) {
+
+  // Initialize the outputs
+  cam_type = 0;
+  timestamp = 0.0;
   
   // The cam name is the subdir having the images
   std::string cam_name =
@@ -1634,10 +1653,9 @@ void readImageEntry(// Inputs
   if (basename.empty() || basename[0] < '0' || basename[0] > '9')
     LOG(FATAL) << "Image name (without directory) must start with digits. Got: "
                << basename << "\n";
-  double timestamp = atof(basename.c_str());
+  timestamp = atof(basename.c_str());
 
   // Infer cam type from cam name
-  int cam_type = 0;
   bool success = false;
   for (size_t cam_it = 0; cam_it < cam_names.size(); cam_it++) {
     if (cam_names[cam_it] == cam_name) {
@@ -1648,6 +1666,21 @@ void readImageEntry(// Inputs
   }
   if (!success) 
     LOG(FATAL) << "Could not determine sensor name from image path: " << image_file << "\n";
+}
+  
+void readImageEntry(// Inputs
+                    std::string const& image_file,
+                    Eigen::Affine3d const& world_to_cam,
+                    std::vector<std::string> const& cam_names,
+                    // Outputs
+                    std::map<int, std::map<double, dense_map::ImageMessage>> & image_maps,
+                    std::map<int, std::map<double, dense_map::ImageMessage>> & depth_maps) {
+  
+  int cam_type = 0;
+  double timestamp = 0.0;
+  findCamTypeAndTimestamp(image_file, cam_names,  
+                          // Outputs
+                          cam_type, timestamp);
     
   // Aliases
   std::map<double, ImageMessage> & image_map = image_maps[cam_type];
@@ -1681,15 +1714,21 @@ void readImageEntry(// Inputs
 }
 
 void readCameraPoses(// Inputs
-                      std::string const& camera_poses_file, int ref_cam_type,
-                      std::vector<std::string> const& cam_names,
-                      // Outputs
-                      nvmData & nvm,
-                      std::vector<double>& ref_timestamps,
-                      std::vector<Eigen::Affine3d>& world_to_ref,
-                      std::vector<std::string> & ref_image_files,
-                      std::vector<std::vector<ImageMessage>>& image_data,
-                      std::vector<std::vector<ImageMessage>>& depth_data) {
+                     std::string const& camera_poses_file,
+                     std::string const& extra_list,
+                     bool use_initial_rig_transforms,
+                     double bracket_len,
+                     std::vector<Eigen::Affine3d> const& ref_to_cam_trans,
+                     std::vector<double> const& ref_to_cam_timestamp_offsets,
+                     int ref_cam_type,
+                     std::vector<std::string> const& cam_names,
+                     // Outputs
+                     nvmData & nvm,
+                     std::vector<double>& ref_timestamps,
+                     std::vector<Eigen::Affine3d>& world_to_ref,
+                     std::vector<std::string> & ref_image_files,
+                     std::vector<std::vector<ImageMessage>>& image_data,
+                     std::vector<std::vector<ImageMessage>>& depth_data) {
   
   // Clear the outputs
   ref_timestamps.clear();
@@ -1702,6 +1741,7 @@ void readCameraPoses(// Inputs
   // Open the file
   std::cout << "Reading: " << camera_poses_file << std::endl;
   std::ifstream f;
+  // TODO(oalexan1): Why read as binary?
   f.open(camera_poses_file.c_str(), std::ios::binary | std::ios::in);
   if (!f.is_open()) LOG(FATAL) << "Cannot open file for reading: " << camera_poses_file << "\n";
 
@@ -1750,7 +1790,13 @@ void readCameraPoses(// Inputs
 // Read camera information and images from an NVM file, exported
 // from Theia
 void readNvm(// Inputs
-             std::string const& nvm_file, int ref_cam_type,
+             std::string const& nvm_file,
+             std::string const& extra_list,
+             bool use_initial_rig_transforms,
+             double bracket_len,
+             std::vector<Eigen::Affine3d> const& ref_to_cam_trans,
+             std::vector<double> const& ref_to_cam_timestamp_offsets,
+             int ref_cam_type,
              std::vector<std::string> const& cam_names,
              // Outputs
              nvmData & nvm,
@@ -1759,14 +1805,165 @@ void readNvm(// Inputs
              std::vector<std::string>    & ref_image_files,
              std::vector<std::vector<ImageMessage>>& image_data,
              std::vector<std::vector<ImageMessage>>& depth_data) {
+
+  // Sanity check. At some point there will be multiple rigs, which can result
+  // in a lot of code overhaul.
+  if (ref_cam_type != 0)
+    LOG(FATAL) << "Expecting ref cam type to be 0.\n";
   
-  // cid_to_cam_t_global has world_to_cam
+  // nvm.cid_to_cam_t_global has world_to_cam entry for each image
   dense_map::ReadNVM(nvm_file,  
                      &nvm.cid_to_keypoint_map,  
                      &nvm.cid_to_filename,  
                      &nvm.pid_to_cid_fid,  
                      &nvm.pid_to_xyz,  
                      &nvm.cid_to_cam_t_global);
+
+  std::cout << "--stop here, extra list is " << extra_list << std::endl;
+  std::cout << "--bracket len is " << bracket_len << std::endl;
+
+
+  // TODO(oalexan1): Factor this out after testing!
+  // TODO(oalexan1): Make it an if statement
+  if (extra_list != "") {
+    // Add code here
+  }
+
+  // Put existing poses in a map
+  std::set<std::string> existing_images;
+  std::map<int, std::map<double, Eigen::Affine3d>> existing_world_to_cam;
+  for (size_t image_it = 0; image_it < nvm.cid_to_filename.size(); image_it++) {
+    auto const& image_file = nvm.cid_to_filename[image_it];
+    existing_images.insert(image_file); 
+    int cam_type = 0;
+    double timestamp = 0.0;
+    findCamTypeAndTimestamp(image_file, cam_names,  
+                            cam_type, timestamp); // outputs
+    std::cout.precision(17);
+    std::cout << "--existing image " << image_file << ' ' << cam_type << ' ' <<
+      timestamp << std::endl;
+    Eigen::Affine3d world_to_cam = nvm.cid_to_cam_t_global[image_it];
+    existing_world_to_cam[cam_type][timestamp] = world_to_cam;
+
+    if (use_initial_rig_transforms) {
+      // Use the rig constraint to find the poses for the other sensors on the rig
+      // First go to the ref sensor
+      double ref_timestamp = timestamp - ref_to_cam_timestamp_offsets[cam_type];
+      // Careful here with transform directions and order
+      Eigen::Affine3d cam_to_ref = ref_to_cam_trans[cam_type].inverse();
+      Eigen::Affine3d world_to_ref = cam_to_ref * world_to_cam;
+      // Now do all the sensors. Note how we do the reverse of the above
+      // timestamp and camera operations, but not just for the given cam_type,
+      // but for any sensor on the rig.
+      for (size_t sensor_it = ref_cam_type; sensor_it < ref_to_cam_trans.size(); sensor_it++) {
+        double curr_timestamp = ref_timestamp + ref_to_cam_timestamp_offsets[sensor_it];
+        Eigen::Affine3d curr_world_to_cam = ref_to_cam_trans[sensor_it] * world_to_ref;
+
+        // Initialize the map if needed
+        if (existing_world_to_cam.find(sensor_it) == existing_world_to_cam.end())
+          existing_world_to_cam[sensor_it] = std::map<double, Eigen::Affine3d>();
+
+        // Add an entry, unless one already exists
+        std::map<double, Eigen::Affine3d> & map = existing_world_to_cam[sensor_it]; // alias
+        if (map.find(curr_timestamp) == map.end()) {
+          existing_world_to_cam[sensor_it][curr_timestamp] = curr_world_to_cam;
+          std::cout << "--adding current " << sensor_it << ' ' << curr_timestamp << ' ' << curr_world_to_cam.matrix() << std::endl;
+        }
+      }
+    }
+  }
+  
+  // Open the file
+  std::cout << "Reading: " << extra_list << std::endl;
+  std::ifstream f(extra_list.c_str());
+  if (!f.is_open())
+    LOG(FATAL) << "Cannot open file for reading: " << extra_list << "\n";
+  std::string line;
+  while (getline(f, line)) {
+    if (line.empty() || line[0] == '#') continue;
+    
+    std::string image_file;
+    std::istringstream iss(line);
+    if (!(iss >> image_file))
+      LOG(FATAL) << "Cannot parse the image file in: " << extra_list << "\n";
+
+    std::cout << "--read image " << image_file << std::endl;
+
+    if (existing_images.find(image_file) != existing_images.end()) 
+      continue; // this image already exists
+    
+    // TODO(oalexan1): This is quadratic complexity!
+    
+    int cam_type = 0;
+    double curr_timestamp = 0.0;
+    findCamTypeAndTimestamp(image_file, cam_names,  
+                            cam_type, curr_timestamp); // outputs
+    std::cout << "--mew cam type curr_timestamp " << cam_type << ' ' << curr_timestamp << std::endl;
+
+    std::map<double, Eigen::Affine3d> & world_to_cam_map = existing_world_to_cam[cam_type]; // alias
+    if (world_to_cam_map.empty()) {
+      std::string msg = "Cannot find camera pose for image " + image_file +
+        " as the data is insufficient.\n";
+      if (!use_initial_rig_transforms) 
+        msg += std::string("If the rig configuration file has an initial rig, consider ")
+          + "using the option --use_initial_rig_transforms.\n";
+      LOG(FATAL) << msg;
+    }
+    double beg_timestamp = world_to_cam_map.begin()->first;
+    double end_timestamp = world_to_cam_map.rbegin()->first;
+    std::cout << "--first and last " << beg_timestamp << ' ' << end_timestamp << std::endl;
+    if (curr_timestamp < beg_timestamp - bracket_len ||
+        curr_timestamp > end_timestamp + bracket_len)
+      LOG(FATAL) << "Cannot find camera pose for image " << image_file
+                 << " as it is too far in time from existing images.\n";
+    
+    Eigen::Affine3d curr_world_to_cam;
+    if (curr_timestamp <= beg_timestamp) {
+      // Use extrapolation
+      std::cout << "--extrapolate left " << std::endl;
+      curr_world_to_cam = world_to_cam_map[beg_timestamp];
+    } else if (curr_timestamp >= end_timestamp) {
+      std::cout << "--extrapolate right" << std::endl;
+      curr_world_to_cam = world_to_cam_map[end_timestamp];
+    } else {
+      // Use interpolation
+      bool success = false;
+      for (auto map_it = world_to_cam_map.begin(); map_it != world_to_cam_map.end(); map_it++) {
+        
+        // Find the right bracketing iterator
+        auto right_map_it = map_it;
+        right_map_it++;
+        if (right_map_it == world_to_cam_map.end())
+          right_map_it = map_it; // fall back to left it if at the end
+        
+        double left_timestamp = map_it->first;
+        double right_timestamp = right_map_it->first;
+        
+        std::cout << "--try " << left_timestamp << ' ' << right_timestamp << std::endl;
+        
+        if (left_timestamp <= curr_timestamp && curr_timestamp <= right_timestamp) {
+          std::cout << "left and curr and right timestamp " << left_timestamp << ' ' << curr_timestamp << ' ' << right_timestamp << std::endl;
+          
+          // Interpolate at desired time
+          curr_world_to_cam
+            = dense_map::linearInterp(left_timestamp, curr_timestamp, right_timestamp,
+                                      map_it->second, right_map_it->second);
+          
+          std::cout << " interp " << map_it->second.matrix() << "\n\n" << curr_world_to_cam.matrix() << "\n\n" << right_map_it->second.matrix() << std::endl;
+          success = true;
+          break;
+        }
+      }
+      
+      if (!success)
+        LOG(FATAL) << "Cannot compute camera pose for image " << image_file << ".\n";
+    }
+    
+    nvm.cid_to_filename.push_back(image_file);
+    nvm.cid_to_cam_t_global.push_back(curr_world_to_cam);
+  }
+  
+  exit(0);
   
   // Read here temporarily the images and depth maps
   std::map<int, std::map<double, dense_map::ImageMessage>> image_maps;

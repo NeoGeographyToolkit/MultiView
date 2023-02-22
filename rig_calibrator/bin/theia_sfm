@@ -211,29 +211,36 @@ def genTheiaCalibFile(rig_config, args):
 
     return (calib_file, sym_image_dir, images, sym_images, extension)
 
-def put_orig_images_in_nvm(nvm_file, final_nvm_file, images, sym_images):
+def put_orig_images(nvm_file, final_nvm_file,
+                    offset_file, final_offset_file,
+                    images, sym_images):
     """
-    Theia saves images without full path. Go back to original image names.
+    Theia saves images without full path. Go back to original image names in the nvm
+    and offset files.
     """
     # Make a dict for quick lookup
     image_dict = {}
     for key in images:
         for i in range(len(images[key])):
             image_dict[os.path.basename(sym_images[key][i])] = images[key][i]
-        
-    lines = []
-    with open(nvm_file, 'r') as fh:
-        lines = fh.readlines()
 
-    for it in range(len(lines)):
-        vals = lines[it].split()
-        if len(vals) > 0 and vals[0] in image_dict:
-            vals[0] = image_dict[vals[0]]
-            lines[it] = " ".join(vals) + "\n"
+    in_files = [nvm_file, offset_file]
+    out_files = [final_nvm_file, final_offset_file]
 
-    print("Writing nvm file with original image names: " + final_nvm_file)
-    with open(final_nvm_file, 'w') as fh:
-        fh.writelines(lines)
+    for file_it in range(2):
+        lines = []
+        with open(in_files[file_it], 'r') as fh:
+            lines = fh.readlines()
+
+        for line_it in range(len(lines)):
+            vals = lines[line_it].split()
+            if len(vals) > 0 and vals[0] in image_dict:
+                vals[0] = image_dict[vals[0]]
+                lines[line_it] = " ".join(vals) + "\n"
+
+        print("Writing file with original image names: " + out_files[file_it])
+        with open(out_files[file_it], 'w') as fh:
+            fh.writelines(lines)
     
 if __name__ == "__main__":
 
@@ -286,5 +293,9 @@ if __name__ == "__main__":
     rig_utils.run_cmd(cmd)
 
     final_nvm_file = args.out_dir + "/cameras.nvm"
-    put_orig_images_in_nvm(nvm_file, final_nvm_file, images, sym_images)
+
+    offset_file = reconstruction_file + "_offsets.txt";
+    final_offset_file = args.out_dir + "/cameras_offsets.txt";
+    
+    put_orig_images(nvm_file, final_nvm_file, offset_file, final_offset_file, images, sym_images)
     

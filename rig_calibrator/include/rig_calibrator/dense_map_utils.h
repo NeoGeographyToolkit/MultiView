@@ -85,16 +85,6 @@ void parse_rig_transforms_to_float(std::vector<std::string> const& cam_names,
                                    std::string const& rig_transforms_to_float_str,
                                    std::set<std::string>& rig_transforms_to_float);
 
-// Extract a rigid transform to an array of length NUM_RIGID_PARAMS
-void rigid_transform_to_array(Eigen::Affine3d const& aff, double* arr);
-
-// Convert an array of length NUM_RIGID_PARAMS to a rigid
-// transform. Normalize the quaternion to make it into a rotation.
-void array_to_rigid_transform(Eigen::Affine3d& aff, const double* arr);
-
-void affine_transform_to_array(Eigen::Affine3d const& aff, double* arr);
-void array_to_affine_transform(Eigen::Affine3d& aff, const double* arr);
-
 // Convert a string of values separated by spaces to a vector of doubles.
 std::vector<double> string_to_vector(std::string const& str);
 
@@ -111,16 +101,6 @@ void writeCloud(std::vector<float> const& points, size_t point_size, std::string
 
 // Return the type of an opencv matrix
 std::string matType(cv::Mat const& mat);
-
-// Given two poses aff0 and aff1, and 0 <= alpha <= 1, do linear interpolation.
-Eigen::Affine3d linearInterp(double alpha, Eigen::Affine3d const& aff0,
-                               Eigen::Affine3d const& aff1);
-
-// Given a set of poses indexed by timestamp in an std::map, find the
-// interpolated pose at desired timestamp. This is efficient
-// only for very small maps. Else use the StampedPoseStorage class.
-bool findInterpPose(double desired_time, std::map<double, Eigen::Affine3d> const& poses,
-                    Eigen::Affine3d& interp_pose);
 
 // Implement some heuristic to find the maximum rotation angle that can result
 // from applying the given transform. It is assumed that the transform is not

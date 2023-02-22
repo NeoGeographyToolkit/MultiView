@@ -30,6 +30,41 @@ std::string affineToStr(Eigen::Affine3d const& M);
 
 // Form an affine transform from 12 values
 Eigen::Affine3d vecToAffine(Eigen::VectorXd const& vals);
+
+// Calculate interpolated world to reference sensor transform. Take into account
+// that the timestamp is for a sensor which may not be the reference one, so
+// an offset needs to be applied.
+Eigen::Affine3d calc_interp_world_to_ref(const double* beg_world_to_ref_t,
+                                         const double* end_world_to_ref_t,
+                                         double beg_ref_stamp,
+                                         double end_ref_stamp,
+                                         double ref_to_cam_offset,
+                                         double cam_stamp);
+
+// Calculate interpolated world to camera transform. Use the
+// convention that if beg_ref_stamp == end_ref_stamp, then this is the
+// reference camera, and then only beg_world_to_ref_t is used, while
+// end_world_to_ref_t is undefined. For the reference camera it is
+// also expected that ref_to_cam_aff is the identity. This saves some
+// code duplication later as the ref cam need not be treated
+// separately.
+Eigen::Affine3d calc_world_to_cam_trans(const double* beg_world_to_ref_t,
+                                        const double* end_world_to_ref_t,
+                                        const double* ref_to_cam_trans,
+                                        double beg_ref_stamp,
+                                        double end_ref_stamp,
+                                        double ref_to_cam_offset,
+                                        double cam_stamp);
+
+void affine_transform_to_array(Eigen::Affine3d const& aff, double* arr);
+void array_to_affine_transform(Eigen::Affine3d& aff, const double* arr);
+  
+// Extract a rigid transform to an array of length NUM_RIGID_PARAMS
+void rigid_transform_to_array(Eigen::Affine3d const& aff, double* arr);
+
+// Convert an array of length NUM_RIGID_PARAMS to a rigid
+// transform. Normalize the quaternion to make it into a rotation.
+void array_to_rigid_transform(Eigen::Affine3d& aff, const double* arr);
   
 }  // end namespace dense_map
 

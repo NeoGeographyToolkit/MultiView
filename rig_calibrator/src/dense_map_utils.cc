@@ -23,6 +23,7 @@
 #include <rig_calibrator/dense_map_utils.h>
 #include <rig_calibrator/camera_image.h>
 #include <rig_calibrator/transform_utils.h>
+#include <rig_calibrator/interpolation_utils.h>
 #include <rig_calibrator/happly.h> // for saving ply files as meshes
 #include <camera_model/camera_params.h>
 
@@ -155,58 +156,6 @@ void parse_rig_transforms_to_float(std::vector<std::string> const& cam_names,
   return;
 }
   
-// Extract a rigid transform to an array of length NUM_RIGID_PARAMS
-void rigid_transform_to_array(Eigen::Affine3d const& aff, double* arr) {
-  for (size_t it = 0; it < 3; it++) arr[it] = aff.translation()[it];
-
-  Eigen::Quaterniond R(aff.linear());
-  arr[3] = R.x();
-  arr[4] = R.y();
-  arr[5] = R.z();
-  arr[6] = R.w();
-}
-
-// Convert an array of length NUM_RIGID_PARAMS to a rigid
-// transform. Normalize the quaternion to make it into a rotation.
-void array_to_rigid_transform(Eigen::Affine3d& aff, const double* arr) {
-  for (size_t it = 0; it < 3; it++) aff.translation()[it] = arr[it];
-
-  Eigen::Quaterniond R(arr[6], arr[3], arr[4], arr[5]);
-  R.normalize();
-
-  aff = Eigen::Affine3d(Eigen::Translation3d(arr[0], arr[1], arr[2])) * Eigen::Affine3d(R);
-}
-
-// Extract a affine transform to an array of length NUM_AFFINE_PARAMS
-void affine_transform_to_array(Eigen::Affine3d const& aff, double* arr) {
-  Eigen::MatrixXd M = aff.matrix();
-  int count = 0;
-  // The 4th row always has 0, 0, 0, 1
-  for (int row = 0; row < 3; row++) {
-    for (int col = 0; col < 4; col++) {
-      arr[count] = M(row, col);
-      count++;
-    }
-  }
-}
-
-// Convert an array of length NUM_AFFINE_PARAMS to a affine
-// transform. Normalize the quaternion to make it into a rotation.
-void array_to_affine_transform(Eigen::Affine3d& aff, const double* arr) {
-  Eigen::MatrixXd M = Eigen::Matrix<double, 4, 4>::Identity();
-
-  int count = 0;
-  // The 4th row always has 0, 0, 0, 1
-  for (int row = 0; row < 3; row++) {
-    for (int col = 0; col < 4; col++) {
-      M(row, col) = arr[count];
-      count++;
-    }
-    }
-
-  aff.matrix() = M;
-}
-
 // Read a 4x4 pose matrix of doubles from disk
 void readPoseMatrix(cv::Mat& pose, std::string const& filename) {
   pose = cv::Mat::zeros(4, 4, CV_64F);
@@ -309,54 +258,6 @@ std::string matType(cv::Mat const& mat) {
   r += (chans + '0');
 
   return r;
-}
-
-// Given two poses aff0 and aff1, and 0 <= alpha <= 1, do linear interpolation.
-Eigen::Affine3d linearInterp(double alpha, Eigen::Affine3d const& aff0,
-                               Eigen::Affine3d const& aff1) {
-  Eigen::Quaternion<double> rot0(aff0.linear());
-  Eigen::Quaternion<double> rot1(aff1.linear());
-
-  Eigen::Vector3d trans0 = aff0.translation();
-  Eigen::Vector3d trans1 = aff1.translation();
-
-  Eigen::Affine3d result;
-
-  result.translation() = (1.0 - alpha) * trans0 + alpha * trans1;
-  result.linear() = rot0.slerp(alpha, rot1).toRotationMatrix();
-
-  return result;
-}
-
-// Given a set of poses indexed by timestamp in an std::map, find the
-// interpolated pose at desired timestamp. This is efficient
-// only for very small maps. Else use the StampedPoseStorage class.
-bool findInterpPose(double desired_time, std::map<double, Eigen::Affine3d> const& poses,
-                      Eigen::Affine3d& interp_pose) {
-  double left_time = std::numeric_limits<double>::max();
-  double right_time = -left_time;
-  for (auto it = poses.begin(); it != poses.end(); it++) {
-    double curr_time = it->first;
-    if (curr_time <= desired_time) {
-      left_time = curr_time;  // this can only increase
-    }
-    if (curr_time >= desired_time) {
-      // Here an "if" was used rather than "else", to be able to
-      // handle the case when left_time == curr_time == right_time.
-      right_time = curr_time;
-      break;  // just passed the desired time, can stop now
-    }
-  }
-
-  if (left_time > right_time) {
-    // Could not bracket the desired time
-    return false;
-  }
-
-  double alpha = (desired_time - left_time) / (right_time - left_time);
-  if (left_time == right_time) alpha = 0.0;  // handle division by 0
-  interp_pose = linearInterp(alpha, poses.find(left_time)->second, poses.find(right_time)->second);
-  return true;
 }
 
 // Implement some heuristic to find the maximum rotation angle that can result
@@ -1468,7 +1369,15 @@ void lookupImagesAndBrackets(// Inputs
   
   int num_ref_cams = ref_timestamps.size();
   int num_cam_types = cam_names.size();
-  
+
+  // Sanity checks
+  if (cam_names.size() != cam_params.size())
+    LOG(FATAL) << "Expecting as many sensors as camera param sets.\n";
+  if (cam_names.size() != image_data.size()) 
+    LOG(FATAL) << "Expecting as many sensors as image datasets for them.\n";
+  if (cam_names.size() != depth_data.size()) 
+    LOG(FATAL) << "Expecting as many sensors as depth datasets for them.\n";
+    
   // Initialize the outputs
   cams.clear();
   min_timestamp_offset.resize(num_cam_types, -1.0e+100);

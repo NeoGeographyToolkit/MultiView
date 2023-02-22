@@ -112,6 +112,7 @@
 #include <rig_calibrator/dense_map_utils.h>
 #include <rig_calibrator/system_utils.h>
 #include <rig_calibrator/transform_utils.h>
+#include <rig_calibrator/interpolation_utils.h>
 #include <rig_calibrator/interest_point.h>
 #include <rig_calibrator/texture_processing.h>
 #include <rig_calibrator/camera_image.h>
@@ -301,11 +302,8 @@ DEFINE_bool(use_initial_rig_transforms, false,
             "Use the transforms among the sensors of the rig specified via --rig_config. "
             "Otherwise derive it from the poses of individual cameras.");
 
-DEFINE_bool(save_nvm, false,
-            "Save the optimized camera poses and inlier interest point matches to "
-            "<out dir>/cameras.nvm. Interest point matches are offset relative to the optical "
-            "center, to be consistent with Theia. This file can be passed in to a new invocation "
-            "of this tool via --nvm.");
+DEFINE_string(extra_list, "",
+              "Add to the SfM solution the camera poses for the additional images/depth clouds in this list. Use bilinear interpolation of poses in time and nearest neighbor extrapolation (within --bracket_len) and/or the rig constraint to find the new poses (will be followed by bundle adjustment refinement). This can give incorrect results if the new images are not very similar or not close in time to the existing ones. This list can contain entries for the data already present.");
 
 DEFINE_bool(save_nvm_no_shift, false,
             "Save the optimized camera poses and inlier interest point matches to "
@@ -330,78 +328,6 @@ DEFINE_bool(verbose, false,
             "Print a lot of verbose information about how matching goes.");
 
 namespace dense_map {
-
-// TODO(oalexan1): Move to transform_utils.cc.
-  
-Eigen::Affine3d calc_interp_world_to_ref(const double* beg_world_to_ref_t,
-                                         const double* end_world_to_ref_t,
-                                         double beg_ref_stamp,
-                                         double end_ref_stamp,
-                                         double ref_to_cam_offset,
-                                         double cam_stamp) {
-    Eigen::Affine3d beg_world_to_ref_aff;
-    array_to_rigid_transform(beg_world_to_ref_aff, beg_world_to_ref_t);
-
-    Eigen::Affine3d end_world_to_ref_aff;
-    array_to_rigid_transform(end_world_to_ref_aff, end_world_to_ref_t);
-
-    // Handle the degenerate case
-    if (end_ref_stamp == beg_ref_stamp) 
-      return beg_world_to_ref_aff;
-    
-    // Covert from cam time to ref time and normalize. It is very
-    // important that below we subtract the big numbers from each
-    // other first, which are the timestamps, then subtract whatever
-    // else is necessary. Otherwise we get problems with numerical
-    // precision with CERES.
-    double alpha = ((cam_stamp - beg_ref_stamp) - ref_to_cam_offset)
-        / (end_ref_stamp - beg_ref_stamp);
-    
-    if (alpha < 0.0 || alpha > 1.0) LOG(FATAL) << "Out of bounds in interpolation.\n";
-
-    // Interpolate at desired time
-    Eigen::Affine3d interp_world_to_ref_aff = dense_map::linearInterp(alpha, beg_world_to_ref_aff,
-                                                                      end_world_to_ref_aff);
-
-    return interp_world_to_ref_aff;
-}
-  
-// Calculate interpolated world to camera transform. Use the
-// convention that if beg_ref_stamp == end_ref_stamp, then this is the
-// reference camera, and then only beg_world_to_ref_t is used, while
-// end_world_to_ref_t is undefined. For the reference camera it is
-// also expected that ref_to_cam_aff is the identity. This saves some
-// code duplication later as the ref cam need not be treated
-// separately.
-Eigen::Affine3d calc_world_to_cam_trans(const double* beg_world_to_ref_t,
-                                        const double* end_world_to_ref_t,
-                                        const double* ref_to_cam_trans,
-                                        double beg_ref_stamp,
-                                        double end_ref_stamp,
-                                        double ref_to_cam_offset,
-                                        double cam_stamp) {
-
-  Eigen::Affine3d interp_world_to_cam_aff;
-  if (beg_ref_stamp == end_ref_stamp) {
-    Eigen::Affine3d beg_world_to_ref_aff;
-    array_to_rigid_transform(beg_world_to_ref_aff, beg_world_to_ref_t);
-    interp_world_to_cam_aff = beg_world_to_ref_aff;
-  } else {
-
-    Eigen::Affine3d ref_to_cam_aff;
-    array_to_rigid_transform(ref_to_cam_aff, ref_to_cam_trans);
-
-    Eigen::Affine3d interp_world_to_ref_aff =
-      calc_interp_world_to_ref(beg_world_to_ref_t, end_world_to_ref_t,  
-                               beg_ref_stamp,  
-                               end_ref_stamp,  ref_to_cam_offset,  
-                               cam_stamp);
-    
-    interp_world_to_cam_aff = ref_to_cam_aff * interp_world_to_ref_aff;
-  }
-
-  return interp_world_to_cam_aff;
-}
 
 // TODO(oalexan1): Move to a separate file named costFunctions.h
 
@@ -1262,7 +1188,11 @@ int main(int argc, char** argv) {
                            ref_to_cam_timestamp_offsets);
 
   int num_cam_types = cam_params.size();
-
+  if (FLAGS_extra_list != "" && FLAGS_num_overlaps < num_cam_types)
+    LOG(FATAL) << "If inserting extra images, must have --num_overlaps be at least the number "
+               << "of sensors in the rig, and ideally more, to be able to tie well the "
+               << "new images with the existing ones.\n";
+  
   // Optionally load the mesh
   mve::TriangleMesh::Ptr mesh;
   std::shared_ptr<mve::MeshInfo> mesh_info;
@@ -1285,13 +1215,19 @@ int main(int argc, char** argv) {
   std::vector<std::vector<dense_map::ImageMessage>> depth_data;
   std::vector<std::string> ref_image_files;
   dense_map::nvmData nvm;
-
   if (FLAGS_camera_poses != "")
-    dense_map::readCameraPoses(FLAGS_camera_poses, ref_cam_type, cam_names, // in
+    dense_map::readCameraPoses(FLAGS_camera_poses, FLAGS_extra_list,
+                               use_initial_rig_transforms,
+                               FLAGS_bracket_len, ref_to_cam_trans,
+                               ref_to_cam_timestamp_offsets,
+                               ref_cam_type, cam_names,
                                nvm, ref_timestamps, world_to_ref, ref_image_files,
                                image_data, depth_data); // out
   else if (FLAGS_nvm != "") 
-    dense_map::readNvm(FLAGS_nvm, ref_cam_type, cam_names, // in
+    dense_map::readNvm(FLAGS_nvm, FLAGS_extra_list,
+                       use_initial_rig_transforms,
+                       FLAGS_bracket_len, ref_to_cam_trans, ref_to_cam_timestamp_offsets,
+                       ref_cam_type, cam_names, // in
                        nvm, ref_timestamps, world_to_ref, ref_image_files,
                        image_data, depth_data); // out
   
@@ -1359,7 +1295,7 @@ int main(int argc, char** argv) {
   }
 
   // Transform to world coordinates if control points were provided
-  if (FLAGS_registration  && FLAGS_hugin_file != "" && FLAGS_xyz_file != "") {
+  if (FLAGS_registration && FLAGS_hugin_file != "" && FLAGS_xyz_file != "") {
     // Keep user's depth_to_image transforms, and only transform only the image
     // cameras from Theia's abstract coordinate system to world coordinates.
     bool scale_depth = false;
@@ -2017,13 +1953,11 @@ int main(int argc, char** argv) {
                             cam_params, ref_to_cam_trans, depth_to_image,
                             ref_to_cam_timestamp_offsets);
 
-  if (FLAGS_save_nvm) {
-    std::string nvm_file = FLAGS_out_dir + "/cameras.nvm";
-    bool shift_keypoints = true;
-    dense_map::writeInliersToNvm(nvm_file, shift_keypoints, cam_params, cams,
-                                 world_to_cam, keypoint_vec,
+  std::string nvm_file = FLAGS_out_dir + "/cameras.nvm";
+  bool shift_keypoints = true;
+  dense_map::writeInliersToNvm(nvm_file, shift_keypoints, cam_params, cams,
+                               world_to_cam, keypoint_vec,
                                  pid_to_cid_fid, pid_cid_fid_inlier, xyz_vec);
-  }
   
   if (FLAGS_save_nvm_no_shift) {
     std::string nvm_file = FLAGS_out_dir + "/cameras_no_shift.nvm";

@@ -273,6 +273,9 @@ void writeInliersToNvm(std::string                                       const& 
   
 // Write an nvm file. Note that a single focal length is assumed and no distortion.
 // Those are ignored, and only camera poses, matches, and keypoints are used.
+// Write an nvm file. Note that a single focal length is assumed and no distortion.
+// Those are ignored, and only camera poses, matches, and keypoints are used.
+// It is assumed the interest point matches are shifted relative to the optical center.
 void writeNvm(std::vector<Eigen::Matrix2Xd> const& cid_to_keypoint_map,
               std::vector<std::string> const& cid_to_filename,
               std::vector<double> const& focal_lengths,
@@ -299,7 +302,13 @@ void saveImagesAndDepthClouds(std::vector<cameraImage> const& cams);
 void readXyzImage(std::string const& filename, cv::Mat & img);
 
 void readCameraPoses(// Inputs
-                     std::string const& camera_poses_file, int ref_cam_type,
+                     std::string const& camera_poses_file,
+                     std::string const& extra_list,
+                     bool use_initial_rig_transforms,
+                     double bracket_len,
+                     std::vector<Eigen::Affine3d> const& ref_to_cam_trans,
+                     std::vector<double> const& ref_to_cam_timestamp_offsets,
+                     int ref_cam_type,
                      std::vector<std::string> const& cam_names,
                      // Outputs
                      nvmData & nvm,
@@ -312,7 +321,13 @@ void readCameraPoses(// Inputs
 // Read camera information and images from an NVM file, exported
 // from Theia
 void readNvm(// Inputs
-             std::string const& nvm_file, int ref_cam_type,
+             std::string const& nvm_file,
+             std::string const& extra_list,
+             bool use_initial_rig_transforms,
+             double bracket_len,
+             std::vector<Eigen::Affine3d> const& ref_to_cam_trans,
+             std::vector<double> const& ref_to_cam_timestamp_offsets,
+             int ref_cam_type,
              std::vector<std::string> const& cam_names,
              // Outputs
              nvmData & nvm,
