@@ -25,8 +25,8 @@
 // License, v. 2.0. If a copy of the MPL was not distributed with this
 // file, You can obtain one at http://mozilla.org/MPL/2.0/.
 
-#ifndef OPENMVG_MULTIVIEW_TRIANGULATION_NVIEW_H
-#define OPENMVG_MULTIVIEW_TRIANGULATION_NVIEW_H
+#ifndef OPENMVG_MULTIVIEW_TRIANGULATION_NVIEW_HPP
+#define OPENMVG_MULTIVIEW_TRIANGULATION_NVIEW_HPP
 
 #include "openMVG/numeric/numeric.h"
 
@@ -50,40 +50,43 @@ namespace openMVG {
 
   //Iterated linear method
   class Triangulation
-	{
-	public:
+  {
+    public:
 
-		size_t size() const {	return views.size();}
+    size_t size() const;
 
-		void clear()  { views.clear();}
+    void clear();
 
-		void add(const Mat34& projMatrix, const Vec2 & p) {
-			views.push_back( std::pair<Mat34, Vec2>(projMatrix,p) );
-		}
+    void add
+    (
+      const Mat34& projMatrix,
+      const Vec2 & p
+    );
 
     // Return squared L2 sum of error
-		double error(const Vec3 &X) const;
+    double error(const Vec3 &X) const;
 
-		Vec3 compute(int iter = 3) const;
+    // Compute the corresponding 3D point
+    Vec3 compute(int iter = 3) const;
 
-		/////////////////////////////////////////////////////////////////////////////////////////////////////////////////
-		// Accessors
+    /////////////////////////////////////////////////////////////////////////////////////////////////////////////////
+    // Accessors
 
-		// These values are defined after a successful call to compute
-		double minDepth() const { return zmin; }
-		double maxDepth() const { return zmax; }
-		double error()    const { return err; }
+    // These values are defined after a successful call to compute
+    double minDepth() const { return zmin; }
+    double maxDepth() const { return zmax; }
+    double error()    const { return err; }
 
-		/////////////////////////////////////////////////////////////////////////////////////////////////////////////////
-		// Data members
+    /////////////////////////////////////////////////////////////////////////////////////////////////////////////////
+    // Data members
 
-	protected:
-		mutable double zmin; // min depth, mutable since modified in compute(...) const;
-    mutable double zmax; // max depth, mutable since modified in compute(...) const;
-    mutable double err;  // retprojection error, mutable since modified in compute(...) const;
-		std::vector< std::pair<Mat34, Vec2> > views; // Proj matrix and associated image point
-	};
+    protected:
+      mutable double zmin; // min depth, mutable since modified in compute(...) const;
+      mutable double zmax; // max depth, mutable since modified in compute(...) const;
+      mutable double err;  // re-projection error, mutable since modified in compute(...) const;
+      std::vector< std::pair<Mat34, Vec2> > views; // Proj matrix and associated image point
+  };
 
 }  // namespace openMVG
 
-#endif  // OPENMVG_MULTIVIEW_TRIANGULATION_NVIEW_H
+#endif  // OPENMVG_MULTIVIEW_TRIANGULATION_NVIEW_HPP
