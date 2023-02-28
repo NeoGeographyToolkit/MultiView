@@ -62,6 +62,9 @@ if len(topic_list) == 0:
 timestamp_map = {}
 if args.timestamp_list != "":
     timestamp_map = read_timestamps(args.timestamp_list)
+    if len(timestamp_map) == 0:
+        print("No timestamps read from " + args.timestamp_list)
+        sys.exit(1)
     
 # TODO(oalexan1): Make this a function.
 # Map from topic name to dir name.
@@ -103,15 +106,17 @@ with rosbag.Bag(args.bag, "r") as bag:
 
     # Check image message type
     msg_type = info.topics[topic].msg_type
-    print("msgs type ", msg_type)
-    
     for topic, msg, t in bag.read_messages(topic_list):
 
         # Read the header timestamp
         try:
+            # Note that we search the bag exhaustively. We do not assume
+            # timestamps are in increasing order of time. Sometimes
+            # that assumption can be violated.
             stamp = msg.header.stamp.to_sec()
-            if len(timestamp_map) > 0 and (stamp not in timestamp_map):
-                continue # if reading from a list
+            if len(timestamp_map) > 0 and stamp not in timestamp_map:
+                # When extracting only a subset of the timestamps
+                continue 
         except:
             continue
 

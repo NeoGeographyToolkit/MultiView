@@ -193,6 +193,10 @@ Eigen::Vector3d Triangulate(std::vector<double> const& focal_length_vec,
                             std::vector<Eigen::Affine3d> const& world_to_cam_vec,
                             std::vector<Eigen::Vector2d> const& pix_vec);
 
+void TransformCamerasAndPoints(Eigen::Affine3d const& A,
+                               std::vector<Eigen::Affine3d> *cid_to_cam_t,
+                               std::vector<Eigen::Vector3d> *xyz);
+  
 // Apply a given transform to the given set of cameras.
 // We assume that the transform is of the form
 // T(x) = scale * rotation * x + translation
@@ -205,13 +209,13 @@ void TransformPoints(Eigen::Affine3d const& T, std::vector<Eigen::Vector3d> *xyz
 // changes is scale, as the rig transforms are between coordinate
 // systems of various cameras.
 void TransformRig(Eigen::Affine3d const& T, std::vector<Eigen::Affine3d> & ref_to_cam_trans);
-  
+
+// TODO(oalexan1): Move this to transform_utils.
 // Find the 3D transform from an abstract coordinate system to the
 // world, given control points (pixel matches) and corresponding 3D
-// measurements. It is assumed all images are from the reference
-// camera.
+// measurements. It is assumed all images are acquired with the same camera.
 Eigen::Affine3d registrationTransform(std::string const& hugin_file, std::string const& xyz_file,
-                                      camera::CameraParameters const& ref_cam_params,
+                                      camera::CameraParameters const& cam_params,
                                       std::vector<std::string> const& cid_to_filename,
                                       std::vector<Eigen::Affine3d>  & world_to_cam_trans); 
   
@@ -289,6 +293,7 @@ void readListOrNvm(// Inputs
 void appendMatchesFromNvm(// Inputs
                           std::vector<camera::CameraParameters> const& cam_params,
                           std::vector<dense_map::cameraImage>   const& cams,
+                          bool read_nvm_no_shift,
                           nvmData const& nvm,
                           // Outputs (these get appended to)
                           std::vector<std::map<int, int>> & pid_to_cid_fid,

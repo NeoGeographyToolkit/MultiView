@@ -154,7 +154,9 @@ DEFINE_string(intrinsics_to_float, "", "Specify which intrinsics to float for ea
               "Example: 'cam1:focal_length,optical_center,distortion cam2:focal_length'.");
 
 DEFINE_string(rig_transforms_to_float, "",
-              "Specify the names of sensors whose transforms to float, relative to the ref sensor. Use quotes around this string if it has spaces. Also can use comma as separator. Example: 'cam1 cam2'.");
+              "Specify the names of sensors whose transforms to float, relative to the ref "
+              "sensor. Use quotes around this string if it has spaces. Also can use comma "
+              "as separator. Example: 'cam1 cam2'.");
 
 // TODO(oalexan1): With the rig constraint on, only ref cam poses can float on their own,
 // as the others are tied to it.
@@ -304,7 +306,17 @@ DEFINE_bool(use_initial_rig_transforms, false,
             "Otherwise derive it from the poses of individual cameras.");
 
 DEFINE_string(extra_list, "",
-              "Add to the SfM solution the camera poses for the additional images/depth clouds in this list. Use bilinear interpolation of poses in time and nearest neighbor extrapolation (within --bracket_len) and/or the rig constraint to find the new poses (will be followed by bundle adjustment refinement). This can give incorrect results if the new images are not very similar or not close in time to the existing ones. This list can contain entries for the data already present.");
+              "Add to the SfM solution the camera poses for the additional images/depth "
+              "clouds in this list. Use bilinear interpolation of poses in time and nearest "
+              "neighbor extrapolation (within --bracket_len) and/or the rig constraint to "
+              "find the new poses (will be followed by bundle adjustment refinement). "
+              "This can give incorrect results if the new images are not very similar "
+              "or not close in time to the existing ones. This list can contain entries "
+              "for the data already present.");
+
+DEFINE_bool(read_nvm_no_shift, false,
+            "Read an nvm file assuming that interest point matches were not shifted "
+            "to the origin.");
 
 DEFINE_bool(save_nvm_no_shift, false,
             "Save the optimized camera poses and inlier interest point matches to "
@@ -330,7 +342,7 @@ DEFINE_bool(verbose, false,
 
 namespace dense_map {
 
-// TODO(oalexan1): Move to a separate file named costFunctions.h
+// TODO(oalexan1): Move to a separate file named costFunctions.cc
 
 ceres::LossFunction* GetLossFunction(std::string cost_fun, double th) {
   // Convert to lower-case
@@ -351,7 +363,7 @@ ceres::LossFunction* GetLossFunction(std::string cost_fun, double th) {
   return loss_function;
 }
 
-// TODO(oalexan1): Move to a separate file named costFunctions.h
+// TODO(oalexan1): Move to a separate file named costFunctions.cc
   
 // An error function minimizing the error of projecting
 // an xyz point into a camera that is bracketed by
@@ -691,6 +703,7 @@ struct XYZError {
   double m_weight;
 };  // End class XYZError
 
+// TODO(oalexan1): Move to residual_utils.cc
 void calc_residuals_stats(std::vector<double> const& residuals,
                           std::vector<std::string> const& residual_names,
                           std::string const& tag) {
@@ -729,6 +742,7 @@ void calc_residuals_stats(std::vector<double> const& residuals,
   }
 }
 
+// TODO(oalexan1): Move to transform_utils.
 // Compute the transforms from the world to every camera, based on the rig transforms
 void calc_world_to_cam_using_rig(// Inputs
                                   std::vector<dense_map::cameraImage> const& cams,
@@ -760,6 +774,7 @@ void calc_world_to_cam_using_rig(// Inputs
   return;
 }
 
+// TODO(oalexan1): Move to transform_utils.
 // A version of the above with the data stored differently
 void calc_world_to_cam_using_rig(// Inputs
                                  std::vector<dense_map::cameraImage> const& cams,
@@ -791,6 +806,7 @@ void calc_world_to_cam_using_rig(// Inputs
                               world_to_cam);
 }
   
+// TODO(oalexan1): Move to transform_utils.
 // Calculate world_to_cam transforms from their representation in a
 // vector, rather than using reference cameras, extrinsics and
 // timestamp interpolation. Only for use with --no_rig, when
@@ -807,6 +823,7 @@ void calc_world_to_cam_no_rig(// Inputs
                                         &world_to_cam_vec[dense_map::NUM_RIGID_PARAMS * cid]);
 }
 
+// TODO(oalexan1): Move to transform_utils.
 // Use one of the two implementations above. Care is needed as when there are no extrinsics,
 // each camera is on its own, so the input is in world_to_cam_vec and not in world_to_ref_vec
 void calc_world_to_cam_rig_or_not(// Inputs
@@ -941,6 +958,7 @@ void set_up_block_sizes(int num_depth_params,
   xyz_block_sizes.push_back(dense_map::NUM_XYZ_PARAMS);
 }
 
+// TODO(oalexan1): Move to residual_utils.cc
 // Evaluate the residuals before and after optimization
 void evalResiduals(  // Inputs
   std::string const& tag, std::vector<std::string> const& residual_names,
@@ -967,14 +985,13 @@ void evalResiduals(  // Inputs
   return;
 }
 
-  
 // TODO(oalexan1): Move to transforms
-  
 // Given the transforms from each camera to the world and their timestamps,
 // find an initial guess for the relationship among the sensors on the rig.
 // Note that strictly speaking the transforms in world_to_ref_vec are among
 // those in world_to_cam, but we don't have a way of looking them up in that
 // vector.
+// TODO(oalexan1): Test this with multiple rigs. It should work.
 void calc_rig_using_word_to_cam(int ref_cam_type, int num_cam_types,
                          std::vector<dense_map::cameraImage> const& cams,
                          std::vector<Eigen::Affine3d>        const& world_to_ref,
@@ -1031,6 +1048,7 @@ void calc_rig_using_word_to_cam(int ref_cam_type, int num_cam_types,
   for (auto it = transforms.begin(); it != transforms.end(); it++) {
     int cam_type = it->first;
     auto & transforms = it->second;
+    // TODO(oalexan1): Split this into a medianMatrix() function.
     Eigen::MatrixXd median_trans = Eigen::MatrixXd::Zero(4, 4);
     for (int col = 0; col < 4; col++) {
       for (int row = 0; row < 4; row++) {
@@ -1052,7 +1070,7 @@ void calc_rig_using_word_to_cam(int ref_cam_type, int num_cam_types,
   return;
 }
 
-// TODO(oalexan1): Move this to utils
+// TODO(oalexan1): Move to residual_utils.cc
 // Write the inlier residuals. Create one output file for each camera type.
 // The format of each file is:
 // dist_pixel_x, dist_pixel_y, norm(residual_x, residual_y)
@@ -1119,7 +1137,9 @@ void writeResiduals(std::string                           const& out_dir,
 }
   
 } // end namespace dense_map
-
+// TODO(oalexan1): Test this with multiple rigs. It should work.
+// TODO(oalexan1): Need to fix ref_cam_type.
+// TODO(oalexan1): ref_image_files must be first_rig_ref_image_files.
 // Apply registration to each camera, rig (if present), and depth-to-image, if desired
 void applyRegistration(bool no_rig, bool scale_depth, int ref_cam_type,
                        std::string                           const & hugin_file,
@@ -1141,11 +1161,16 @@ void applyRegistration(bool no_rig, bool scale_depth, int ref_cam_type,
 
   // Find the registration transform, and apply to to world_to_ref.
   // It is a bit confusing that world_to_ref changes here.
+  // TODO(oalexan1): Pass to this the whole set of cameras and camera
+  // params, as it need not be the first rig images that are used.
   registration_trans
     = dense_map::registrationTransform(hugin_file, xyz_file,  
                                        cam_params[ref_cam_type],  
                                        ref_image_files,  
                                        world_to_ref);
+
+  // TODO(oalexan1): Do not apply transform to world_to_ref inside that function,
+  // do it here instead.
   
   // The above transformed world_to_ref. Also transform world_to_cam.
   dense_map::TransformCameras(registration_trans, world_to_cam);
@@ -1246,6 +1271,7 @@ int main(int argc, char** argv) {
   // are up-to-date. Use the version of calc_world_to_cam_using_rig
   // without world_to_cam_vec, on input which was not computed yet.
 
+  // TODO(oalexan1): If statement below looks fishy.
   if (use_initial_rig_transforms && !FLAGS_no_rig) {
     // Using the rig transforms in ref_to_cam_vec and transforms from
     // world to each ref cam in world_to_ref, calculate world_to_cam,
@@ -1257,6 +1283,8 @@ int main(int argc, char** argv) {
                                            world_to_cam);
   } else {
     // Parse the transform from the world to each cam, which were known on input
+    // TODO(oalexan1): Hide this in lookupImages(). Also hide there
+    // image_data and depth_data.
     world_to_cam.resize(cams.size());
     std::vector<int> start_pos(num_cam_types, 0);  // to help advance in time
     for (size_t cam_it = 0; cam_it < cams.size(); cam_it++) {
@@ -1330,6 +1358,7 @@ int main(int argc, char** argv) {
                                        intrinsics_to_float);
 
   // TODO(oalexan1): When --no_rig is on, these must be empty!
+  // TODO(oalexan1): Merge this into --camera_poses_to_float.
   std::set<std::string> rig_transforms_to_float;
   dense_map::parse_rig_transforms_to_float(cam_names, ref_cam_type,
                                            FLAGS_rig_transforms_to_float, rig_transforms_to_float);
@@ -1346,8 +1375,11 @@ int main(int argc, char** argv) {
   
   // Set up the variable blocks to optimize for BracketedDepthError
   int num_depth_params = dense_map::NUM_RIGID_PARAMS;
-  if (FLAGS_affine_depth_to_image) num_depth_params = dense_map::NUM_AFFINE_PARAMS;
+  if (FLAGS_affine_depth_to_image)
+    num_depth_params = dense_map::NUM_AFFINE_PARAMS;
 
+  // TODO(oalexan1): affine_depth_to_image must allow
+  // fixing the scale. 
   // Separate the initial scale. This is convenient if
   // cam_depth_to_image is scale * rotation + translation and if
   // it is desired to keep the scale fixed. In either case, the scale
@@ -1412,7 +1444,8 @@ int main(int argc, char** argv) {
   // Append the interest point matches from the nvm file
   if (!FLAGS_no_nvm_matches && FLAGS_nvm != "")
     dense_map::appendMatchesFromNvm(// Inputs
-                                    cam_params, cams, nvm,  
+                                    cam_params, cams,
+                                    FLAGS_read_nvm_no_shift, nvm,  
                                     // Outputs (these get appended to)
                                     pid_to_cid_fid, keypoint_vec);
 
@@ -1549,41 +1582,53 @@ int main(int argc, char** argv) {
             end_cam_ptr = &world_to_ref_vec[dense_map::NUM_RIGID_PARAMS * end_ref_index];
 
           // The beg and end timestamps will be the same only for the
-          // ref cam
+          // ref cam or for last non-ref cam whose timestamp is same
+          // as ref cam timestamp which is also last.
+          // TODO(oalexan1): Looks like a bug. When beg_ref_timestamp equals
+          // end_ref_timestamp, the rig constraint will be ignored? This
+          // is a valid use case.
+          // TODO(oalexan1): Must set ref_to_cam_ptr to identity and fix it!
           beg_ref_timestamp = ref_timestamps[beg_ref_index];
           end_ref_timestamp = ref_timestamps[end_ref_index];
           cam_timestamp = cams[cid].timestamp;  // uses current camera's clock
 
         } else {
-          // No rig. Then, beg_cam_ptr is just current camera,
-          // not the ref bracket, end_cam_ptr is the identity and
-          // fixed. The beg and end timestamps are declared to be
-          // same, which will be used in calc_world_to_cam_trans() to
-          // ignore the rig transform and end_cam_ptr.
+          // No rig. Then, beg_cam_ptr is just current camera, not the
+          // ref bracket, end_cam_ptr is the identity. The beg and end
+          // timestamps are declared to be same, which will be used in
+          // calc_world_to_cam_trans() to ignore the rig transform and
+          // end_cam_ptr.
           cam_timestamp     = cams[cid].timestamp;
           beg_ref_timestamp = cam_timestamp;
           end_ref_timestamp = cam_timestamp;
 
           // Note how we use world_to_cam_vec and not world_to_ref_vec
-          beg_cam_ptr  = &world_to_cam_vec[dense_map::NUM_RIGID_PARAMS * cid];
+          beg_cam_ptr = &world_to_cam_vec[dense_map::NUM_RIGID_PARAMS * cid];
           end_cam_ptr = &identity_vec[0];
+          // TODO(oalexan1): Must set ref_to_cam_ptr to identity!
+          // TODO(oalexan1): Must ensure the identity is fixed! But only if used!
+          // Also, introduce a is_ref_cam flag to pass to calc_world_to_cam_trans, for 
+          // robustness.
         }
 
         // Transform from reference camera to given camera. Won't be used when
         // FLAGS_no_rig is true or when the cam is of ref type.
+        // TODO(oalexan1): This is buggy, per above. Needs to be set to identity
+        // and fixed when not used.
         ref_to_cam_ptr = &ref_to_cam_vec[dense_map::NUM_RIGID_PARAMS * cam_type];
 
         Eigen::Vector2d dist_ip(keypoint_vec[cid][fid].first, keypoint_vec[cid][fid].second);
 
+        // Remember the index of the pixel residuals about to create
+        pid_cid_fid_to_residual_index[pid][cid][fid] = residual_names.size();
+
+        // TODO(oalexan1): Add this block to CostFunctions.cc.
         ceres::CostFunction* bracketed_cost_function =
           dense_map::BracketedCamError::Create(dist_ip, beg_ref_timestamp, end_ref_timestamp,
                                                cam_timestamp, bracketed_cam_block_sizes,
                                                cam_params[cam_type]);
         ceres::LossFunction* bracketed_loss_function
           = dense_map::GetLossFunction("cauchy", FLAGS_robust_threshold);
-
-        // Remember the index of the residuals about to create
-        pid_cid_fid_to_residual_index[pid][cid][fid] = residual_names.size();
 
         // Handle the case of no distortion
         double * distortion_ptr = NULL;
@@ -1661,6 +1706,7 @@ int main(int argc, char** argv) {
              dense_map::depthValue(cams[cid].depth_cloud, dist_ip, depth_xyz));
 
         if (have_depth_tri_constraint) {
+          // TODO(oalexan1): Add this block to CostFunctions.cc.
           // Ensure that the depth points agree with triangulated points
           ceres::CostFunction* bracketed_depth_cost_function
             = dense_map::BracketedDepthError::Create(FLAGS_depth_tri_weight, depth_xyz,
@@ -1709,6 +1755,7 @@ int main(int argc, char** argv) {
         }
 
         if (have_depth_mesh_constraint) {
+          // TODO(oalexan1): Add this block to CostFunctions.cc.
           // Try to make each mesh intersection agree with corresponding depth measurement,
           // if it exists
           ceres::CostFunction* bracketed_depth_mesh_cost_function
@@ -1857,7 +1904,7 @@ int main(int argc, char** argv) {
         cam_params[cam_type].updateRpcUndistortion(FLAGS_num_opt_threads);
     }
 
-    // Copy back the optimized extrinsics, whether it was optimized or fixed
+    // Copy back the optimized extrinsics, whether they were optimized or fixed
     for (int cam_type = 0; cam_type < num_cam_types; cam_type++)
       dense_map::array_to_rigid_transform
         (ref_to_cam_trans[cam_type],
@@ -1933,8 +1980,6 @@ int main(int argc, char** argv) {
   }
   
   // TODO(oalexan1): Why the call below works without dense_map:: prepended to it?
-  // TODO(oalexan1): This call to calc_world_to_cam_rig_or_not is likely not
-  // necessary since world_to_cam has been updated by now.
   if (FLAGS_out_texture_dir != "")
     dense_map::meshProjectCameras(cam_names, cam_params, cams, world_to_cam, mesh, bvh_tree,
                                   FLAGS_out_texture_dir);
@@ -1950,7 +1995,7 @@ int main(int argc, char** argv) {
   bool shift_keypoints = true;
   dense_map::writeInliersToNvm(nvm_file, shift_keypoints, cam_params, cams,
                                world_to_cam, keypoint_vec,
-                                 pid_to_cid_fid, pid_cid_fid_inlier, xyz_vec);
+                               pid_to_cid_fid, pid_cid_fid_inlier, xyz_vec);
   
   if (FLAGS_save_nvm_no_shift) {
     std::string nvm_file = FLAGS_out_dir + "/cameras_no_shift.nvm";

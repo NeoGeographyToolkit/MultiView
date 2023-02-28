@@ -1343,7 +1343,7 @@ void adjustImageSize(camera::CameraParameters const& cam_params, cv::Mat & image
 // Look up each ref cam image by timestamp, with the rig
 // assumption. In between any two ref cam timestamps, which are no
 // further from each other than the bracket length, look up an image
-// of each of the other camera types. If more than one choice, try to
+// of each of the other camera types in the rig. If more than one choice, try to
 // stay as close as possible to the midpoint of the two bracketing ref
 // cam timestamps. This way there's more wiggle room later if one
 // attempts to modify the timestamp offset. If there is no rig, keep

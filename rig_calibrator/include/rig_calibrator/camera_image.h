@@ -44,8 +44,10 @@ struct cameraImage {
   double cloud_timestamp;
 
   // Indices to look up the reference cameras bracketing this camera
-  // in time. The two indices will have same value if and only if
-  // this is a reference camera.
+  // in time in array ref_timestamps. These can have the same value
+  // for the reference camera and for the last camera if its time
+  // stamp is also the last ref cam timestamp, as then there's no more
+  // indices.  this is a reference camera.
   int beg_ref_index;
   int end_ref_index;
 

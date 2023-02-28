@@ -115,6 +115,8 @@ Eigen::Affine3d calc_interp_world_to_ref(const double* beg_world_to_ref_t,
 // also expected that ref_to_cam_aff is the identity. This saves some
 // code duplication later as the ref cam need not be treated
 // separately.
+// TODO(oalexan1): There is a bug! Just because beg_ref_stamp and end_ref_stamp
+// are equal, it should not mean that ref_to_cam_aff is the identity!
 Eigen::Affine3d calc_world_to_cam_trans(const double* beg_world_to_ref_t,
                                         const double* end_world_to_ref_t,
                                         const double* ref_to_cam_trans,

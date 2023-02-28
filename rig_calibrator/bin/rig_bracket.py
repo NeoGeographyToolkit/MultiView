@@ -91,7 +91,6 @@ for ref_count in range(len(ref_timestamps)):
                (t == t2 and ref_count == len(ref_timestamps) - 1):
             found_it.append(it)
             other_count = it + 1
-            print("bracketed ", t1, t, t2)
             break
 
 # Save the lines corresponding to bracketed timestamps

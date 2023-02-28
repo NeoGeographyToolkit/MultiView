@@ -93,17 +93,25 @@ def processArgs(args, base_dir):
 
 def genTheiaCalibFile(rig_config, args):
 
-    # Parse the images for all cameras
+    # Initialize the datastructure
     images = {}
     extensions = set()
+
+    # Expand all wildcards
+    image_array = []
     for image_wildcard in args.images.split():
-        # TODO(oalexan1): This is very fragile!
-        # Better glob them all, then divide them later by sensor name
-        sensor_name = os.path.basename(os.path.dirname(image_wildcard))
-        images[sensor_name] = sorted(glob.glob(image_wildcard))
+        image_array += glob.glob(image_wildcard)
+
+    # Parse the images for all cameras
+    image_array = sorted(image_array)
+    for image in image_array:
+        sensor_name = os.path.basename(os.path.dirname(image))
+        if sensor_name not in images:
+            images[sensor_name] = []
+        images[sensor_name].append(image)
         ext = rig_utils.imageExtension(images[sensor_name])
         extensions.add(ext)
-        
+    
     if len(extensions) > 1:
         raise Exception("Input images have a mix of filename extensions. Use just one.")
     if len(extensions) == 0:

@@ -1024,6 +1024,16 @@ void TransformPoints(Eigen::Affine3d const& T, std::vector<Eigen::Vector3d> *xyz
     (*xyz)[pid] = T * (*xyz)[pid];
 }
 
+// Apply a given transform to the specified xyz points, and adjust accordingly the cameras
+// for consistency. We assume that the transform is of the form
+// A(x) = scale * rotation * x + translation
+void TransformCamerasAndPoints(Eigen::Affine3d const& A,
+                               std::vector<Eigen::Affine3d> *cid_to_cam_t,
+                               std::vector<Eigen::Vector3d> *xyz) {
+  TransformCameras(A, *cid_to_cam_t);
+  TransformPoints(A, xyz);
+}
+  
 // Apply a registration transform to a rig. The only thing that
 // changes is scale, as the rig transforms are between coordinate
 // systems of various cameras.
@@ -1044,13 +1054,13 @@ std::string print_vec(Eigen::Vector3d a) {
   snprintf(st, sizeof(st), "%7.4f %7.4f %7.4f", a[0], a[1], a[2]);
   return std::string(st);
 }
-  
+
+// TODO(oalexan1): Move this to transform_utils.
 // Find the 3D transform from an abstract coordinate system to the
 // world, given control points (pixel matches) and corresponding 3D
-// measurements. It is assumed all images are from the reference
-// camera.
+// measurements. It is assumed all images are acquired with the same camera.
 Eigen::Affine3d registrationTransform(std::string const& hugin_file, std::string const& xyz_file,
-                                      camera::CameraParameters const& ref_cam_params,
+                                      camera::CameraParameters const& cam_params,
                                       std::vector<std::string> const& cid_to_filename,
                                       std::vector<Eigen::Affine3d>  & world_to_cam_trans) { 
   
@@ -1166,7 +1176,7 @@ Eigen::Affine3d registrationTransform(std::string const& hugin_file, std::string
   Eigen::Vector2d output;
   for (size_t cid = 0; cid < user_cid_to_keypoint_map.size(); cid++) {
     for (int i = 0; i < user_cid_to_keypoint_map[cid].cols(); i++) {
-      ref_cam_params.Convert<camera::DISTORTED, camera::UNDISTORTED_C>
+      cam_params.Convert<camera::DISTORTED, camera::UNDISTORTED_C>
         (user_cid_to_keypoint_map[cid].col(i), &output);
       user_cid_to_keypoint_map[cid].col(i) = output;
     }
@@ -1177,7 +1187,7 @@ Eigen::Affine3d registrationTransform(std::string const& hugin_file, std::string
   std::vector<Eigen::Vector3d> unreg_pid_to_xyz;
   bool rm_invalid_xyz = false;  // there should be nothing to remove hopefully
   Triangulate(rm_invalid_xyz,
-              ref_cam_params.GetFocalLength(),
+              cam_params.GetFocalLength(),
               world_to_cam_trans,
               user_cid_to_keypoint_map,
               &user_pid_to_cid_fid,
@@ -1443,8 +1453,8 @@ void readImageEntry(// Inputs
   std::map<double, ImageMessage> & depth_map = depth_maps[cam_type];
 
   if (image_map.find(timestamp) != image_map.end())
-    LOG(FATAL) << "Duplicate timestamp " << std::setprecision(17) << timestamp
-               << " for sensor id " << cam_type << "\n";
+    LOG(WARNING) << "Duplicate timestamp " << std::setprecision(17) << timestamp
+                 << " for sensor id " << cam_type << "\n";
   
   // Read the image as grayscale, in order for feature matching to work
   // For texturing, texrecon should use the original color images.
@@ -1456,8 +1466,8 @@ void readImageEntry(// Inputs
 
   // Sanity check
   if (depth_map.find(timestamp) != depth_map.end())
-    LOG(FATAL) << "Duplicate timestamp " << std::setprecision(17) << timestamp
-               << " for sensor id " << cam_type << "\n";
+    LOG(WARNING) << "Duplicate timestamp " << std::setprecision(17) << timestamp
+                 << " for sensor id " << cam_type << "\n";
 
   // Read the depth data, if present
   std::string depth_file = fs::path(image_file).replace_extension(".pc").string();
@@ -1619,7 +1629,8 @@ void readCameraPoses(// Inputs
     nvm.cid_to_filename.push_back(image_file);
   }
 }
-  
+
+// TODO(oalexan1): Move this to fileio.cc.  
 // Read camera information and images from a list or from an NVM file.
 // Can interpolate/extrapolate poses for data from an extra list.  
 void readListOrNvm(// Inputs
@@ -1654,7 +1665,7 @@ void readListOrNvm(// Inputs
                                // Outputs
                                nvm);
   else
-    dense_map::ReadNVM(nvm_file,  
+    dense_map::ReadNVM(nvm_file, 
                        &nvm.cid_to_keypoint_map,  
                        &nvm.cid_to_filename,  
                        &nvm.pid_to_cid_fid,  
@@ -1677,9 +1688,11 @@ void readListOrNvm(// Inputs
                    image_maps, depth_maps); // out 
   }
 
-  // This entails some book-keeping
-  // TODO(oalexan1): Just keep image_maps and depth_maps and change the book-keeping
-  // to use std::map rather than std::vector iterators
+  // This entails some book-keeping TODO(oalexan1): Remove image_data
+  // and depth_data. Just keep image_maps and depth_maps and change
+  // the book-keeping to use std::map rather than std::vector
+  // iterators. Even better, store right away in the future
+  // cameraImage struct, avoiding the intermediate ImageMessage.
   dense_map::ImageDataToVectors(// Inputs
                                 ref_cam_type, image_maps, depth_maps,
                                 // Outputs
@@ -1695,6 +1708,7 @@ void readListOrNvm(// Inputs
 void appendMatchesFromNvm(// Inputs
                           std::vector<camera::CameraParameters> const& cam_params,
                           std::vector<dense_map::cameraImage>   const& cams,
+                          bool read_nvm_no_shift,
                           nvmData const& nvm,
                           // Outputs (these get appended to)
                           std::vector<std::map<int, int>> & pid_to_cid_fid,
@@ -1736,8 +1750,10 @@ void appendMatchesFromNvm(// Inputs
         continue; // this image went missing during bracketing
 
       int cid = it->second; // cid value in 'cams'
-      // Add the offset Theia removes
-      keypoint += cam_params[cams[cid].camera_type].GetOpticalOffset();
+      
+      // Add the optical center shift, if needed
+      if (!read_nvm_no_shift)
+        keypoint += cam_params[cams[cid].camera_type].GetOpticalOffset();
 
       int fid = keypoint_vec[cid].size(); // this is before we add the keypoint
       out_cid_fid[cid] = fid;
