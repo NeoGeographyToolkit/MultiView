@@ -993,14 +993,11 @@ void evalResiduals(  // Inputs
 // those in world_to_cam, but we don't have a way of looking them up in that
 // vector.
 // TODO(oalexan1): Test this with multiple rigs. It should work.
-void calc_rig_using_word_to_cam(int ref_cam_type, int num_cam_types,
-                         std::vector<dense_map::cameraImage> const& cams,
-                         std::vector<Eigen::Affine3d>        const& world_to_ref,
-                         std::vector<Eigen::Affine3d>        const& world_to_cam,
-                         std::vector<double>                 const& ref_timestamps,
-                         std::vector<double>                 const& ref_to_cam_timestamp_offsets,
-                         // Output
-                         std::vector<Eigen::Affine3d>             & ref_to_cam_trans) {
+void calc_rig_trans(std::vector<dense_map::cameraImage> const& cams,
+                    std::vector<Eigen::Affine3d>        const& world_to_ref,
+                    std::vector<Eigen::Affine3d>        const& world_to_cam,
+                    std::vector<double>                 const& ref_timestamps,
+                    dense_map::RigSet                        & R) { // update this
 
   // Sanity check
   if (cams.size() != world_to_cam.size()) 
@@ -1014,8 +1011,9 @@ void calc_rig_using_word_to_cam(int ref_cam_type, int num_cam_types,
     dense_map::rigid_transform_to_array(world_to_ref[cid],
                                         &world_to_ref_vec[dense_map::NUM_RIGID_PARAMS * cid]);
   
-  // Wipe the output
-  ref_to_cam_trans.resize(num_cam_types);
+  // Resize the output
+  int num_cam_types = R.cam_names.size();
+  R.ref_to_cam_trans.resize(num_cam_types);
 
   // Calc all transforms
   std::map<int, std::vector<Eigen::MatrixXd>> transforms;
@@ -1024,7 +1022,7 @@ void calc_rig_using_word_to_cam(int ref_cam_type, int num_cam_types,
     int end_index = cams[cam_it].end_ref_index;
     int cam_type = cams[cam_it].camera_type;
     
-    if (cam_type == ref_cam_type) {
+    if (R.isRefSensor(R.cam_names[cam_type])) {
       // The identity transform, from the ref sensor to itself
       transforms[cam_type].push_back(Eigen::MatrixXd::Identity(4, 4));
     } else {
@@ -1036,7 +1034,7 @@ void calc_rig_using_word_to_cam(int ref_cam_type, int num_cam_types,
         (&world_to_ref_vec[dense_map::NUM_RIGID_PARAMS * beg_index],
          &world_to_ref_vec[dense_map::NUM_RIGID_PARAMS * end_index],
          ref_timestamps[beg_index], ref_timestamps[end_index],
-         ref_to_cam_timestamp_offsets[cam_type],
+         R.ref_to_cam_timestamp_offsets[cam_type],
          cams[cam_it].timestamp);
       
       Eigen::Affine3d ref_to_cam_aff
@@ -1063,9 +1061,9 @@ void calc_rig_using_word_to_cam(int ref_cam_type, int num_cam_types,
         median_trans(col, row) = vals[vals.size()/2];
       }
     }
-    ref_to_cam_trans[cam_type].matrix() = median_trans;
-    ref_to_cam_trans[cam_type].linear() /= 
-      pow(ref_to_cam_trans[cam_type].linear().determinant(), 1.0 / 3.0);
+    R.ref_to_cam_trans[cam_type].matrix() = median_trans;
+    R.ref_to_cam_trans[cam_type].linear() /= 
+      pow(R.ref_to_cam_trans[cam_type].linear().determinant(), 1.0 / 3.0);
   }
   
   return;
@@ -1199,9 +1197,8 @@ int main(int argc, char** argv) {
 
   dense_map::parameterValidation();
 
-  bool use_initial_rig_transforms = FLAGS_use_initial_rig_transforms; // this may change
   dense_map::RigSet R;
-  dense_map::readRigConfig(FLAGS_rig_config, use_initial_rig_transforms, R);
+  dense_map::readRigConfig(FLAGS_rig_config, FLAGS_use_initial_rig_transforms, R);
 
   int num_cam_types = R.cam_params.size();
   if (FLAGS_extra_list != "" && FLAGS_num_overlaps < num_cam_types)
@@ -1234,9 +1231,10 @@ int main(int argc, char** argv) {
   dense_map::nvmData nvm;
   int ref_cam_type = 0; // TODO(oalexan1): Remove this
   dense_map::readListOrNvm(FLAGS_camera_poses, FLAGS_nvm, FLAGS_extra_list,
-                           use_initial_rig_transforms,
+                           FLAGS_use_initial_rig_transforms,
                            FLAGS_bracket_len, R.ref_to_cam_trans, R.ref_to_cam_timestamp_offsets,
-                           ref_cam_type, R.cam_names, // in
+                           R,
+                           // outputs
                            nvm, ref_timestamps, world_to_ref, ref_image_files,
                            image_data, depth_data); // out
   
@@ -1254,50 +1252,26 @@ int main(int argc, char** argv) {
                           ref_timestamps, image_data, depth_data,
                           R.ref_to_cam_timestamp_offsets,
                           // Outputs
-                          cams, min_timestamp_offset, max_timestamp_offset);
+                          cams, world_to_cam, min_timestamp_offset, max_timestamp_offset);
   
-  // If we have initial rig transforms, compute the transform from the
-  // world to every camera based on the rig transforms and ref_to_cam
-  // transforms. It assumes that world_to_ref and ref_to_cam
-  // are up-to-date. Use the version of calc_world_to_cam_using_rig
-  // without world_to_cam_vec, on input which was not computed yet.
-
-  // TODO(oalexan1): If statement below looks fishy.
-  if (use_initial_rig_transforms && !FLAGS_no_rig) {
-    // Using the rig transforms in ref_to_cam_vec and transforms from
-    // world to each ref cam in world_to_ref, calculate world_to_cam,
-    // the transforms from the world to each camera
-    dense_map::calc_world_to_cam_using_rig(// Inputs
-                                           cams, world_to_ref, ref_timestamps, R.ref_to_cam_trans,
-                                           R.ref_to_cam_timestamp_offsets,
-                                           // Output
-                                           world_to_cam);
-  } else {
-    // Parse the transform from the world to each cam, which were known on input
-    // TODO(oalexan1): Hide this in lookupImages(). Also hide there
-    // image_data and depth_data.
-    world_to_cam.resize(cams.size());
-    std::vector<int> start_pos(num_cam_types, 0);  // to help advance in time
-    for (size_t cam_it = 0; cam_it < cams.size(); cam_it++) {
-      int cam_type = cams[cam_it].camera_type;
-      for (size_t pos = start_pos[cam_type]; pos < image_data[cam_type].size(); pos++) {
-        // Count on the fact that image_data[cam_type] is sorted chronologically
-        if (cams[cam_it].timestamp == image_data[cam_type][pos].timestamp) {
-          world_to_cam[cam_it] = image_data[cam_type][pos].world_to_cam;
-          start_pos[cam_type] = pos;  // save for next time
-        }
-      }
+  if (!FLAGS_no_rig) { // if we have a rig
+    if (FLAGS_use_initial_rig_transforms) {
+      // If we can use the initial rig transform, compute and
+      // overwrite overwrite world_to_cam, the transforms from the
+      // world to each camera.
+      dense_map::calc_world_to_cam_using_rig(// Inputs
+                                             cams, world_to_ref, ref_timestamps, R.ref_to_cam_trans,
+                                             R.ref_to_cam_timestamp_offsets,
+                                             // Output
+                                             world_to_cam);
+    } else {
+      // Using the transforms from the world to each camera, compute
+      // the rig transforms.
+      dense_map::calc_rig_trans(cams, world_to_ref, world_to_cam, ref_timestamps,
+                                R); // update this
     }
-
-    // Using the transforms from the world to each camera, compute
-    // the rig transforms
-    dense_map::calc_rig_using_word_to_cam(ref_cam_type, num_cam_types,  
-                                          cams, world_to_ref, world_to_cam,  
-                                          ref_timestamps,  R.ref_to_cam_timestamp_offsets,  
-                                          // Output
-                                          R.ref_to_cam_trans);
   }
-
+  
   // Determine if a given camera type has any depth information
   std::vector<bool> has_depth(num_cam_types, false);
   for (size_t cid = 0; cid < cams.size(); cid++) {
@@ -1463,7 +1437,7 @@ int main(int argc, char** argv) {
   // TODO(oalexan1): Must initialize all points as inliers outside this function,
   // as now this function resets those.
   dense_map::flagOutlierByExclusionDist(// Inputs
-                                        ref_cam_type, R.cam_params, cams, pid_to_cid_fid,
+                                        R.cam_params, cams, pid_to_cid_fid,
                                         keypoint_vec,
                                         // Outputs
                                         pid_cid_fid_inlier);
@@ -1490,7 +1464,8 @@ int main(int argc, char** argv) {
       world_to_cam);
 
     dense_map::multiViewTriangulation(// Inputs
-                                      R.cam_params, cams, world_to_cam, pid_to_cid_fid, keypoint_vec,
+                                      R.cam_params, cams, world_to_cam, pid_to_cid_fid,
+                                      keypoint_vec,
                                       // Outputs
                                       pid_cid_fid_inlier, xyz_vec);
 
@@ -1670,11 +1645,12 @@ int main(int argc, char** argv) {
         // The end cam floats only if told to, and if it brackets
         // a given non-ref cam.
         if (camera_poses_to_float.find(R.cam_names[ref_cam_type]) == camera_poses_to_float.end() ||
-            cam_type == ref_cam_type || FLAGS_no_rig) {
+            R.isRefSensor(R.cam_names[cam_type]) || FLAGS_no_rig) {
           problem.SetParameterBlockConstant(end_cam_ptr);
         }
         
-        if (!FLAGS_float_timestamp_offsets || cam_type == ref_cam_type || FLAGS_no_rig) {
+        if (!FLAGS_float_timestamp_offsets || R.isRefSensor(R.cam_names[cam_type]) ||
+            FLAGS_no_rig) {
           // Either we don't float timestamp offsets at all, or the cam is the ref type,
           // or with no extrinsics, when it can't float anyway.
           problem.SetParameterBlockConstant(&R.ref_to_cam_timestamp_offsets[cam_type]);
@@ -1687,7 +1663,7 @@ int main(int argc, char** argv) {
         // ref_to_cam is kept fixed at the identity if the cam is the ref type or
         // no rig
         if (rig_transforms_to_float.find(R.cam_names[cam_type]) == rig_transforms_to_float.end() ||
-            cam_type == ref_cam_type || FLAGS_no_rig) {
+            R.isRefSensor(R.cam_names[cam_type]) || FLAGS_no_rig) {
           problem.SetParameterBlockConstant(ref_to_cam_ptr);
         }
 

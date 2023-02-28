@@ -43,6 +43,7 @@ namespace dense_map {
 class cameraImage;
 class ImageMessage;
 class nvmData;
+class RigSet;
   
 /// A class for storing information about an interest point
 /// in the format the NASA ASP can read it (very useful
@@ -275,8 +276,7 @@ void readListOrNvm(// Inputs
              double bracket_len,
              std::vector<Eigen::Affine3d> const& ref_to_cam_trans,
              std::vector<double> const& ref_to_cam_timestamp_offsets,
-             int ref_cam_type,
-             std::vector<std::string> const& cam_names,
+             dense_map::RigSet const& R,
              // Outputs
              nvmData & nvm,
              std::vector<double>& ref_timestamps,
@@ -300,7 +300,6 @@ void appendMatchesFromNvm(// Inputs
                           std::vector<std::vector<std::pair<float, float>>> & keypoint_vec);
 
 void flagOutlierByExclusionDist(// Inputs
-                                int ref_cam_type,
                                 std::vector<camera::CameraParameters> const& cam_params,
                                 std::vector<dense_map::cameraImage> const& cams,
                                 std::vector<std::map<int, int>> const& pid_to_cid_fid,

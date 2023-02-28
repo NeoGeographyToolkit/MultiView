@@ -1379,6 +1379,8 @@ void lookupImagesNoBrackets(// Inputs
 
 // Look up images, with or without the rig constraint. See individual functions
 // below for more details.
+// TODO(oalexan1): Hide in this function image_data and depth_data.
+
 void lookupImages(// Inputs
                   int ref_cam_type, bool no_rig, double bracket_len,
                   double timestamp_offsets_max_change,
@@ -1390,6 +1392,7 @@ void lookupImages(// Inputs
                   std::vector<double> const& ref_to_cam_timestamp_offsets,
                   // Outputs
                   std::vector<dense_map::cameraImage>& cams,
+                  std::vector<Eigen::Affine3d> & world_to_cam,
                   std::vector<double>& min_timestamp_offset,
                   std::vector<double>& max_timestamp_offset) {
 
@@ -1439,6 +1442,24 @@ void lookupImages(// Inputs
   // and end_ref_it in this vector because those indices point to
   // world_to_ref and ref_timestamp, which do not change.
   std::sort(cams.begin(), cams.end(), dense_map::timestampLess);
+
+  // Parse the transform from the world to each cam, which were known on input.
+  // Later, if use_initial_rig_transform is specified, these will
+  // be computed based on the rig.
+  world_to_cam.resize(cams.size());
+  std::vector<int> start_pos(num_cam_types, 0);  // to help advance in time
+  for (size_t cam_it = 0; cam_it < cams.size(); cam_it++) {
+    int cam_type = cams[cam_it].camera_type;
+    for (size_t pos = start_pos[cam_type]; pos < image_data[cam_type].size(); pos++) {
+      // Count on the fact that image_data[cam_type] is sorted chronologically
+      if (cams[cam_it].timestamp == image_data[cam_type][pos].timestamp) {
+        world_to_cam[cam_it] = image_data[cam_type][pos].world_to_cam;
+        start_pos[cam_type] = pos;  // save for next time
+      }
+    }
+  }
+  
+  return; 
 }
 
 }  // end namespace dense_map

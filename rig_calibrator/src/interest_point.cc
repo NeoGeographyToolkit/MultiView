@@ -29,6 +29,7 @@
 #include <rig_calibrator/matching.h>
 #include <rig_calibrator/transform_utils.h>
 #include <rig_calibrator/interpolation_utils.h>
+#include <rig_calibrator/rig_config.h>
 #include <rig_calibrator/nvm.h>
 
 #include <camera_model/camera_params.h>
@@ -1269,7 +1270,7 @@ Eigen::Affine3d registrationTransform(std::string const& hugin_file, std::string
 // chronologically in them, to speed up traversal.
 void ImageDataToVectors
 (// Inputs
- int ref_cam_type,
+ dense_map::RigSet const& R,
  std::map<int, std::map<double, dense_map::ImageMessage>> const& image_maps,
  std::map<int, std::map<double, dense_map::ImageMessage>> const& depth_maps,
  // Outputs
@@ -1306,7 +1307,7 @@ void ImageDataToVectors
         
         // Collect the ref cam timestamps, world_to_ref, and image names,
         // in chronological order
-        if (cam_type == ref_cam_type) {
+        if (R.isRefSensor(R.cam_names[cam_type])) {
           world_to_ref.push_back(it->second.world_to_cam);
           ref_timestamps.push_back(it->second.timestamp);
           ref_image_files.push_back(it->second.name);
@@ -1453,7 +1454,7 @@ void readImageEntry(// Inputs
   std::map<double, ImageMessage> & depth_map = depth_maps[cam_type];
 
   if (image_map.find(timestamp) != image_map.end())
-    LOG(WARNING) << "Duplicate timestamp " << std::setprecision(17) << timestamp
+    std::cout << "WARNING: Duplicate timestamp " << std::setprecision(17) << timestamp
                  << " for sensor id " << cam_type << "\n";
   
   // Read the image as grayscale, in order for feature matching to work
@@ -1485,7 +1486,7 @@ void calcExtraPoses(std::string const& extra_list, bool use_initial_rig_transfor
                     double bracket_len,
                     std::vector<Eigen::Affine3d> const& ref_to_cam_trans,
                     std::vector<double> const& ref_to_cam_timestamp_offsets,
-                    int ref_cam_type, std::vector<std::string> const& cam_names,
+                    std::vector<std::string> const& cam_names,
                     // Append here
                     std::vector<std::string>     & cid_to_filename,
                     std::vector<Eigen::Affine3d> & cid_to_cam_t_global) {
@@ -1516,7 +1517,7 @@ void calcExtraPoses(std::string const& extra_list, bool use_initial_rig_transfor
       // Now do all the sensors. Note how we do the reverse of the above
       // timestamp and camera operations, but not just for the given cam_type,
       // but for any sensor on the rig.
-      for (size_t sensor_it = ref_cam_type; sensor_it < ref_to_cam_trans.size(); sensor_it++) {
+      for (size_t sensor_it = 0; sensor_it < ref_to_cam_trans.size(); sensor_it++) {
         double curr_timestamp = ref_timestamp + ref_to_cam_timestamp_offsets[sensor_it];
         Eigen::Affine3d curr_world_to_cam = ref_to_cam_trans[sensor_it] * world_to_ref;
 
@@ -1641,8 +1642,7 @@ void readListOrNvm(// Inputs
              double bracket_len,
              std::vector<Eigen::Affine3d> const& ref_to_cam_trans,
              std::vector<double> const& ref_to_cam_timestamp_offsets,
-             int ref_cam_type,
-             std::vector<std::string> const& cam_names,
+             dense_map::RigSet const& R,
              // Outputs
              nvmData & nvm,
              std::vector<double>& ref_timestamps,
@@ -1650,11 +1650,6 @@ void readListOrNvm(// Inputs
              std::vector<std::string>    & ref_image_files,
              std::vector<std::vector<ImageMessage>>& image_data,
              std::vector<std::vector<ImageMessage>>& depth_data) {
-
-  // Sanity check. At some point there will be multiple rigs, which can result
-  // in a lot of code overhaul.
-  if (ref_cam_type != 0)
-    LOG(FATAL) << "Expecting ref cam type to be 0.\n";
 
   if (int(camera_poses_list.empty()) + int(nvm_file.empty()) != 1)
     LOG(FATAL) << "Must specify precisely one of --camera-poses or --nvm.\n";
@@ -1674,7 +1669,7 @@ void readListOrNvm(// Inputs
 
   if (extra_list != "")
     calcExtraPoses(extra_list, use_initial_rig_transforms, bracket_len,
-                   ref_to_cam_trans, ref_to_cam_timestamp_offsets, ref_cam_type, cam_names,  
+                   ref_to_cam_trans, ref_to_cam_timestamp_offsets, R.cam_names,  
                    nvm.cid_to_filename, nvm.cid_to_cam_t_global); // append here
   
   // Read here temporarily the images and depth maps
@@ -1684,7 +1679,7 @@ void readListOrNvm(// Inputs
     // Aliases
     auto const& image_file = nvm.cid_to_filename[it];
     auto const& world_to_cam = nvm.cid_to_cam_t_global[it];
-    readImageEntry(image_file, world_to_cam, cam_names,  
+    readImageEntry(image_file, world_to_cam, R.cam_names,  
                    image_maps, depth_maps); // out 
   }
 
@@ -1694,7 +1689,7 @@ void readListOrNvm(// Inputs
   // iterators. Even better, store right away in the future
   // cameraImage struct, avoiding the intermediate ImageMessage.
   dense_map::ImageDataToVectors(// Inputs
-                                ref_cam_type, image_maps, depth_maps,
+                                R, image_maps, depth_maps,
                                 // Outputs
                                 ref_timestamps, world_to_ref, ref_image_files,
                                 image_data, depth_data);
@@ -1768,7 +1763,6 @@ void appendMatchesFromNvm(// Inputs
 }
 
 void flagOutlierByExclusionDist(// Inputs
-                                int ref_cam_type,
                                 std::vector<camera::CameraParameters> const& cam_params,
                                 std::vector<dense_map::cameraImage> const& cams,
                                 std::vector<std::map<int, int>> const& pid_to_cid_fid,
