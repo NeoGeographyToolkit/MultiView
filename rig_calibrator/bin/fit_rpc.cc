@@ -38,6 +38,7 @@
 #include <opencv2/core/utility.hpp>
 
 #include <rig_calibrator/dense_map_utils.h>
+#include <rig_calibrator/rig_config.h>
 #include <camera_model/rpc_distortion.h>
 #include <camera_model/camera_params.h>
 
@@ -96,22 +97,15 @@ int main(int argc, char** argv) {
   if (FLAGS_num_samples <= 0)
       LOG(FATAL) << "The number of samples must be positive.";
 
-  int ref_cam_type = 0; // dictated by the API
-  std::vector<std::string> cam_names;
-  std::vector<Eigen::Affine3d> depth_to_image;
-  std::vector<camera::CameraParameters> cam_params;
-  std::vector<Eigen::Affine3d>          ref_to_cam_trans;
-  std::vector<double>                   ref_to_cam_timestamp_offsets;
+  dense_map::RigSet R;
   bool use_initial_rig_transforms = true; // dictated by the api
-  dense_map::readRigConfig(FLAGS_camera_config, use_initial_rig_transforms, ref_cam_type, cam_names,
-                           cam_params, ref_to_cam_trans, depth_to_image,
-                           ref_to_cam_timestamp_offsets);
+  dense_map::readRigConfig(FLAGS_camera_config, use_initial_rig_transforms, R);
   
-  std::cout << "Focal length is " << cam_params[0].GetFocalVector().transpose() << std::endl;
+  std::cout << "Focal length is " << R.cam_params[0].GetFocalVector().transpose() << std::endl;
 
   Eigen::VectorXd rpc_dist_coeffs;
   dense_map::fitRpcDist(FLAGS_rpc_degree, FLAGS_num_samples,
-                        cam_params[0],
+                        R.cam_params[0],
                         FLAGS_num_opt_threads, FLAGS_num_iterations,
                         FLAGS_parameter_tolerance,
                         FLAGS_verbose,
@@ -121,7 +115,7 @@ int main(int argc, char** argv) {
   Eigen::VectorXd rpc_undist_coeffs;
   dense_map::fitRpcUndist(rpc_dist_coeffs,
                           FLAGS_num_samples,
-                          cam_params[0],
+                          R.cam_params[0],
                           FLAGS_num_opt_threads, FLAGS_num_iterations,
                           FLAGS_parameter_tolerance,
                           FLAGS_verbose,
@@ -132,15 +126,13 @@ int main(int argc, char** argv) {
   rpc.set_distortion_parameters(rpc_dist_coeffs);
   rpc.set_undistortion_parameters(rpc_undist_coeffs);
 
-  dense_map::evalRpcDistUndist(FLAGS_num_samples, cam_params[0], rpc);
+  dense_map::evalRpcDistUndist(FLAGS_num_samples, R.cam_params[0], rpc);
 
   // Create the model with RPC distortion. Note how we pass both the distortion
   // and undistortion RPC coefficients.
-  cam_params[0].SetDistortion(rpc.dist_undist_params());
+  R.cam_params[0].SetDistortion(rpc.dist_undist_params());
 
-  dense_map::writeRigConfig(FLAGS_out_dir, use_initial_rig_transforms, ref_cam_type, cam_names,
-                            cam_params, ref_to_cam_trans, depth_to_image,
-                            ref_to_cam_timestamp_offsets);
+  dense_map::writeRigConfig(FLAGS_out_dir, use_initial_rig_transforms, R);
   
   return 0;
 }

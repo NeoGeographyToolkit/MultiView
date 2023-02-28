@@ -29,38 +29,50 @@
 
 namespace dense_map {
 
-  struct RigSet {
+struct RigSet {
 
-    // For rig i, sensor_names[i] will list the sensor names in that rig.
-    // sensor_names[i][0] is the reference sensor. All sensor
-    // names are unique.
-    std::vector<std::vector<std::string>> sensor_names;
+  // For rig i, cam_set[i] will list the sensor/camera names in that rig.
+  // cam_set[i][0] is the reference sensor. All sensor
+  // names are unique. For convenience, this is also duplicated
+  // as 'cam_names', where all sensors are concatenated. That is
+  // enough in almost all circumstances.
+  std::vector<std::vector<std::string>> cam_set;
 
-    // A transform from a reference sensor to a sensor in the rig
-    // (including to itself, that's the identity transform). This
-    // concatenates all such transforms for all rigs, in the order
-    // given by concatenating sensor_names[0], sensor_names[1], etc.
-    std::vector<Eigen::Affine3d> ref_to_cam_trans;
+  // Must be in one-to-one correspondence with all vectors below.
+  std::vector<std::string> cam_names;
 
-    // Depth-to-image transform for each sensor. It is the identity
-    // if there are no depth transforms. One per sensor. All
-    // concatenated.
-    std::vector<Eigen::Affine3d> depth_to_image;
+  // A transform from a reference sensor to a sensor in the rig
+  // (including to itself, that's the identity transform). This
+  // concatenates all such transforms for all rigs, in the order
+  // given by concatenating cam_set[0], cam_set[1], etc.
+  std::vector<Eigen::Affine3d> ref_to_cam_trans;
 
-    // The value to add to each ref sensor time to get a given sensor
-    // time. One per sensor. All concatenated.
-    std::vector<double> ref_to_cam_timestamp_offsets;
+  // Depth-to-image transform for each sensor. It is the identity
+  // if there are no depth transforms. One per sensor. All
+  // concatenated.
+  std::vector<Eigen::Affine3d> depth_to_image;
+
+  // The value to add to each ref sensor time to get a given sensor
+  // time. One per sensor. All concatenated.
+  std::vector<double> ref_to_cam_timestamp_offsets;
     
-    // Each sensor's intrinsics. All concatenated. 
-    std::vector<camera::CameraParameters> cam_params;
+  // Each sensor's intrinsics. All concatenated. 
+  std::vector<camera::CameraParameters> cam_params;
 
-    // If this sensor is a reference sensor for one of the rig.
-    bool isRefSensor(std::string const& sensor_name);
+  // If this sensor is a reference sensor for one of the rig.
+  bool isRefSensor(std::string const& sensor_name) const;
 
-    // Sanity checks
-    void validate();
-  };
+  // Sanity checks
+  void validate() const;
+};
+
+// Save the optimized rig configuration
+void writeRigConfig(std::string const& out_dir, bool model_rig, RigSet const& R);
   
+// Read a rig configuration. Check if the transforms among the sensors
+// on the rig is not 0, in that case will use it.
+void readRigConfig(std::string const& rig_config, bool have_rig_transforms,
+                   RigSet & R);
 }  // end namespace dense_map
 
 #endif  // RIG_CALIBRATOR_RIG_CONFIG_H

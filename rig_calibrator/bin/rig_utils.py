@@ -110,6 +110,11 @@ def readConfigVals(handle, tag, num_vals):
             continue
         
         vals = line.split()
+
+        # Quietly gloss over ref_sensor_name, as we don't need it.
+        if len(vals) > 0 and vals[0] == 'ref_sensor_name:':
+            continue
+        
         if len(vals) == 0 or vals[0] != tag:
             raise Exception("Failed to read entry for: " + tag)
 
@@ -124,13 +129,12 @@ def readConfigVals(handle, tag, num_vals):
     return (vals, handle)
 
 def parseRigConfig(rig_config_file):
-
+    '''Parse a rig set. This function does not implement the rig
+    structure. The individual sensors are read without any knowledge
+    of a rig or set of rigs. That because that functionality is not
+    needed. It is implemented in C++, however.'''
     cameras = []
-    
     with open(rig_config_file, "r") as handle:
-
-        (vals, handle) = readConfigVals(handle, 'ref_sensor_name:', 1)
-        ref_sensor_name = vals[0]
 
         while True:
             camera = {}

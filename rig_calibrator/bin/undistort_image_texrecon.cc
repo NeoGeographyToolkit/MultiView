@@ -18,6 +18,7 @@
 
 #include <camera_model/camera_params.h>
 #include <rig_calibrator/dense_map_utils.h>
+#include <rig_calibrator/rig_config.h>
 #include <rig_calibrator/system_utils.h>
 
 #include <gflags/gflags.h>
@@ -94,22 +95,15 @@ int main(int argc, char ** argv) {
   
   // Load the correct camera model
   camera::CameraParameters *cam_ptr = NULL; // use a pointer as there is no constructor
-  int ref_cam_type = 0;
-  std::vector<std::string> cam_names;
-  std::vector<Eigen::Affine3d> depth_to_image;
-  std::vector<camera::CameraParameters> cam_params;
-  std::vector<Eigen::Affine3d>          ref_to_cam_trans;
-  std::vector<double>                   ref_to_cam_timestamp_offsets;
+  dense_map::RigSet R;
   bool use_initial_rig_transforms = false;
   if (FLAGS_rig_config != "")  // Read a plain text config file for n sensors
-    dense_map::readRigConfig(FLAGS_rig_config, use_initial_rig_transforms, ref_cam_type, cam_names,
-                             cam_params, ref_to_cam_trans, depth_to_image,
-                             ref_to_cam_timestamp_offsets);
+    dense_map::readRigConfig(FLAGS_rig_config, use_initial_rig_transforms, R);
   bool success = false;
-  for (size_t it = 0; it < cam_params.size(); it++) {
-    if (cam_names[it] == FLAGS_rig_sensor) {
-      std::cout << "Using camera: " << cam_names[it] << std::endl;
-      cam_ptr = &cam_params[it]; // note that cam_params still owns the resource
+  for (size_t it = 0; it < R.cam_params.size(); it++) {
+    if (R.cam_names[it] == FLAGS_rig_sensor) {
+      std::cout << "Using camera: " << R.cam_names[it] << std::endl;
+      cam_ptr = &R.cam_params[it]; // note that R.cam_params still owns the resource
       success = true;
       break;
     }
@@ -325,24 +319,24 @@ int main(int argc, char ** argv) {
     cv::Mat bgr_image;
     if (FLAGS_save_bgr && undist_image.channels() == 1) {
       // Convert from grayscale to color if needed
-      #if (CV_VERSION_MAJOR >= 4)
-        cvtColor(undist_image, bgr_image, cv::COLOR_GRAY2BGR);
-      #else
-        cvtColor(undist_image, bgr_image, CV_GRAY2BGR);
-      #endif
+#if (CV_VERSION_MAJOR >= 4)
+      cvtColor(undist_image, bgr_image, cv::COLOR_GRAY2BGR);
+#else
+      cvtColor(undist_image, bgr_image, CV_GRAY2BGR);
+#endif
       undist_image = bgr_image;
     }
-
+    
     cv::Mat gray_image;
     if (!FLAGS_save_bgr && undist_image.channels() > 1) {
-      #if (CV_VERSION_MAJOR >= 4)
-        cvtColor(undist_image, gray_image, cv::COLOR_BGR2GRAY);
-      #else
-        cvtColor(undist_image, gray_image, CV_BGR2GRAY);
-      #endif
+#if (CV_VERSION_MAJOR >= 4)
+      cvtColor(undist_image, gray_image, cv::COLOR_BGR2GRAY);
+#else
+      cvtColor(undist_image, gray_image, CV_BGR2GRAY);
+#endif
       undist_image = gray_image;
     }
-
+    
     cv::imwrite(undist_file, undist_image);
   } // end iterating over images
   

@@ -55,10 +55,6 @@ const int NUM_RIGID_PARAMS   = 7;  // quaternion (4) + translation (3)  // NOLIN
 const int NUM_AFFINE_PARAMS  = 12; // 3x3 matrix (9) + translation (3)  // NOLINT
 
 const std::string NO_DEPTH_FILE      = "no_depth_file";
-const std::string FISHEYE_DISTORTION = "fisheye";
-const std::string RADTAN_DISTORTION  = "radtan";
-const std::string RPC_DISTORTION     = "rpc";
-const std::string NO_DISTORION       = "no_distortion";
 
 // A function to parse a string like
 // 'cam1:focal_length,optical_center,distortion cam2:focal_length' and
@@ -251,23 +247,6 @@ void strToVec(std::string const& str, std::vector<double> & vec);
 // Save the properties of images. Use space as separator.
 void saveCameraPoses(std::string const& out_dir, std::vector<dense_map::cameraImage> const& cams,
                     std::vector<Eigen::Affine3d> const& world_to_cam);
-
-// Save the optimized rig configuration
-void writeRigConfig(std::string const& out_dir, bool model_rig, int ref_cam_type,
-                    std::vector<std::string> const& cam_names,
-                    std::vector<camera::CameraParameters> const& cam_params,
-                    std::vector<Eigen::Affine3d> const& ref_to_cam_trans,
-                    std::vector<Eigen::Affine3d> const& depth_to_image,
-                    std::vector<double> const& ref_to_cam_timestamp_offsets);
-  
-// Read a rig configuration. Check if the transforms among the sensors
-// on the rig is not 0, in that case will use it.
-void readRigConfig(std::string const& rig_config, bool have_rig_transforms, int & ref_cam_type,
-                   std::vector<std::string> & cam_names,
-                   std::vector<camera::CameraParameters> & cam_params,
-                   std::vector<Eigen::Affine3d> & ref_to_cam_trans,
-                   std::vector<Eigen::Affine3d> & depth_to_image,
-                   std::vector<double> & ref_to_cam_timestamp_offsets);
 
 // Save the depth clouds and optimized transforms needed to create a mesh with voxblox
 // (if depth clouds exist).
