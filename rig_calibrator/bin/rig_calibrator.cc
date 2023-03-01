@@ -1224,31 +1224,31 @@ int main(int argc, char** argv) {
   // image_data is on purpose stored in vectors of vectors, with each
   // image_data[i] having data in increasing order of timestamps. This
   // way it is fast to find next timestamps after a given one.
-  std::vector<std::vector<dense_map::ImageMessage>> image_data;
-  std::vector<std::vector<dense_map::ImageMessage>> depth_data;
-  std::vector<double> ref_timestamps; // Timestamps for the ref cameras
-  std::vector<std::string> ref_image_files;
+  std::map<int, std::map<double, dense_map::ImageMessage>> image_maps;
+  std::map<int, std::map<double, dense_map::ImageMessage>> depth_maps;
   dense_map::nvmData nvm;
   dense_map::readListOrNvm(FLAGS_camera_poses, FLAGS_nvm, FLAGS_extra_list,
                            FLAGS_use_initial_rig_transforms,
                            FLAGS_bracket_len, R,
                            // outputs
-                           nvm, ref_timestamps, world_to_ref, ref_image_files,
-                           image_data, depth_data); // out
+                           nvm, image_maps, depth_maps); // out
   
   // Keep here the images, timestamps, and bracketing information
   std::vector<dense_map::cameraImage> cams;
   //  The range of R.ref_to_cam_timestamp_offsets[cam_type] before
   //  getting out of the bracket.
   std::vector<double> min_timestamp_offset, max_timestamp_offset;
+  std::vector<double> ref_timestamps; // Timestamps for the ref cameras
+  std::vector<std::string> ref_image_files;
   // Select the images to use. If the rig is used, keep non-ref images
   // only within the bracket.
   int ref_cam_type = 0; // TODO(oalexan1): Remove this
   dense_map::lookupImages(// Inputs
                           FLAGS_no_rig, FLAGS_bracket_len,
                           FLAGS_timestamp_offsets_max_change,
-                          R, ref_timestamps, image_data, depth_data,
+                          R, image_maps, depth_maps,
                           // Outputs
+                          ref_timestamps, world_to_ref, ref_image_files,
                           cams, world_to_cam, min_timestamp_offset, max_timestamp_offset);
   
   if (!FLAGS_no_rig) { // if we have a rig

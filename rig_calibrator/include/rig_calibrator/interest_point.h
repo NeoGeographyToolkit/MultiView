@@ -269,19 +269,16 @@ void readXyzImage(std::string const& filename, cv::Mat & img);
 // Read camera information and images from a list or from an NVM file.
 // Can interpolate/extrapolate poses for data from an extra list.  
 void readListOrNvm(// Inputs
-             std::string const& camera_poses_list,
-             std::string const& nvm_file,
-             std::string const& extra_list,
-             bool use_initial_rig_transforms,
-             double bracket_len,
-             dense_map::RigSet const& R,
-             // Outputs
-             nvmData & nvm,
-             std::vector<double>& ref_timestamps,
-             std::vector<Eigen::Affine3d>& world_to_ref,
-             std::vector<std::string>    & ref_image_files,
-             std::vector<std::vector<ImageMessage>>& image_data,
-             std::vector<std::vector<ImageMessage>>& depth_data);
+                   std::string const& camera_poses_list,
+                   std::string const& nvm_file,
+                   std::string const& extra_list,
+                   bool use_initial_rig_transforms,
+                   double bracket_len,
+                   dense_map::RigSet const& R,
+                   // Outputs
+                   nvmData & nvm,
+                   std::map<int, std::map<double, dense_map::ImageMessage>> & image_maps,
+                   std::map<int, std::map<double, dense_map::ImageMessage>> & depth_maps);
   
 // Append to existing keypoints and pid_to_cid_fid the entries from the nvm file.  
 // Need to account for the fact that the nvm file will likely have the images

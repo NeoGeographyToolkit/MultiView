@@ -1266,65 +1266,6 @@ Eigen::Affine3d registrationTransform(std::string const& hugin_file, std::string
   return registration_trans;
 }
   
-// A function to copy image data from maps to vectors with the data stored
-// chronologically in them, to speed up traversal.
-void ImageDataToVectors
-(// Inputs
- dense_map::RigSet const& R,
- std::map<int, std::map<double, dense_map::ImageMessage>> const& image_maps,
- std::map<int, std::map<double, dense_map::ImageMessage>> const& depth_maps,
- // Outputs
- std::vector<double>& ref_timestamps,
- std::vector<Eigen::Affine3d> & world_to_ref,
- std::vector<std::string> & ref_image_files,
- std::vector<std::vector<dense_map::ImageMessage>> & image_data,
- std::vector<std::vector<dense_map::ImageMessage>> & depth_data) {
-
-  // Wipe the outputs
-  ref_timestamps.clear();
-  world_to_ref.clear();
-  ref_image_files.clear();
-  image_data.clear();
-  depth_data.clear();
-  
-  // Find the range of sensor ids.
-  int max_cam_type = 0;
-  for (auto it = image_maps.begin(); it != image_maps.end(); it++)
-    max_cam_type = std::max(max_cam_type, it->first);
-  for (auto it = depth_maps.begin(); it != depth_maps.end(); it++)
-    max_cam_type = std::max(max_cam_type, it->first);
-
-  image_data.resize(max_cam_type + 1);
-  depth_data.resize(max_cam_type + 1);
-  for (size_t cam_type = 0; cam_type < image_data.size(); cam_type++) {
-
-    auto image_map_it = image_maps.find(cam_type);
-    if (image_map_it != image_maps.end()) {
-      auto image_map = image_map_it->second; 
-
-      for (auto it = image_map.begin(); it != image_map.end(); it++) {
-        image_data[cam_type].push_back(it->second);
-        
-        // Collect the ref cam timestamps, world_to_ref, and image names,
-        // in chronological order
-        if (R.isRefSensor(R.cam_names[cam_type])) {
-          world_to_ref.push_back(it->second.world_to_cam);
-          ref_timestamps.push_back(it->second.timestamp);
-          ref_image_files.push_back(it->second.name);
-        }
-      }
-    }
-    
-    auto depth_map_it = depth_maps.find(cam_type);
-    if (depth_map_it != depth_maps.end()) {
-      auto depth_map = depth_map_it->second; 
-      for (auto it = depth_map.begin(); it != depth_map.end(); it++)
-        depth_data[cam_type].push_back(it->second);
-    }
-  }
-}
-
-
 // Write an image with 3 floats per pixel. OpenCV's imwrite() cannot do that.
 void saveXyzImage(std::string const& filename, cv::Mat const& img) {
   if (img.depth() != CV_32F)
@@ -1512,21 +1453,24 @@ void calcExtraPoses(std::string const& extra_list, bool use_initial_rig_transfor
       Eigen::Affine3d cam_to_ref = R.ref_to_cam_trans[cam_type].inverse();
       Eigen::Affine3d world_to_ref = cam_to_ref * world_to_cam;
 
-      // Now do all the sensors. Note how we do the reverse of the above
+      // Now do all the sensors on that rig. Note how we do the reverse of the above
       // timestamp and camera operations, but not just for the given cam_type,
       // but for any sensor on the rig.
       for (size_t sensor_it = 0; sensor_it < R.ref_to_cam_trans.size(); sensor_it++) {
-        double curr_timestamp = ref_timestamp + R.ref_to_cam_timestamp_offsets[sensor_it];
-        Eigen::Affine3d curr_world_to_cam = R.ref_to_cam_trans[sensor_it] * world_to_ref;
 
+        if (R.rigId(sensor_it) != R.rigId(cam_type)) 
+          continue; // stay within the current rig
+        
         // Initialize the map if needed
         if (existing_world_to_cam.find(sensor_it) == existing_world_to_cam.end())
           existing_world_to_cam[sensor_it] = std::map<double, Eigen::Affine3d>();
 
         // Add an entry, unless one already exists
         std::map<double, Eigen::Affine3d> & map = existing_world_to_cam[sensor_it]; // alias
+        double curr_timestamp = ref_timestamp + R.ref_to_cam_timestamp_offsets[sensor_it];
         if (map.find(curr_timestamp) == map.end()) {
-          existing_world_to_cam[sensor_it][curr_timestamp] = curr_world_to_cam;
+          existing_world_to_cam[sensor_it][curr_timestamp]
+            = R.ref_to_cam_trans[sensor_it] * world_to_ref;
         }
       }
     }
@@ -1641,15 +1585,12 @@ void readListOrNvm(// Inputs
                    dense_map::RigSet const& R,
                    // Outputs
                    nvmData & nvm,
-                   std::vector<double>& ref_timestamps,
-                   std::vector<Eigen::Affine3d>& world_to_ref,
-                   std::vector<std::string>    & ref_image_files,
-                   std::vector<std::vector<ImageMessage>>& image_data,
-                   std::vector<std::vector<ImageMessage>>& depth_data) {
-  
+                   std::map<int, std::map<double, dense_map::ImageMessage>> & image_maps,
+                   std::map<int, std::map<double, dense_map::ImageMessage>> & depth_maps) {
+
   if (int(camera_poses_list.empty()) + int(nvm_file.empty()) != 1)
     LOG(FATAL) << "Must specify precisely one of --camera-poses or --nvm.\n";
-  
+
   if (camera_poses_list != "") 
     dense_map::readCameraPoses(// Inputs
                                camera_poses_list,  
@@ -1663,13 +1604,14 @@ void readListOrNvm(// Inputs
                        &nvm.pid_to_xyz,  
                        &nvm.cid_to_cam_t_global);
 
+  // Extra poses need be be added right after reading the original ones,
+  // to ensure the same book-keeping is done for all of them. The extra
+  // entries do not mess up the bookkeeping of pid_to_cid_fid, etc,
+  // if their cid is larger than the ones read from NVM.
   if (extra_list != "")
     calcExtraPoses(extra_list, use_initial_rig_transforms, bracket_len,
                    R, nvm.cid_to_filename, nvm.cid_to_cam_t_global); // append here
   
-  // Read here temporarily the images and depth maps
-  std::map<int, std::map<double, dense_map::ImageMessage>> image_maps;
-  std::map<int, std::map<double, dense_map::ImageMessage>> depth_maps;
   for (size_t it = 0; it < nvm.cid_to_filename.size(); it++) {
     // Aliases
     auto const& image_file = nvm.cid_to_filename[it];
@@ -1678,16 +1620,6 @@ void readListOrNvm(// Inputs
                    image_maps, depth_maps); // out 
   }
 
-  // This entails some book-keeping TODO(oalexan1): Remove image_data
-  // and depth_data. Just keep image_maps and depth_maps and change
-  // the book-keeping to use std::map rather than std::vector
-  // iterators. Even better, store right away in the future
-  // cameraImage struct, avoiding the intermediate ImageMessage.
-  dense_map::ImageDataToVectors(// Inputs
-                                R, image_maps, depth_maps,
-                                // Outputs
-                                ref_timestamps, world_to_ref, ref_image_files,
-                                image_data, depth_data);
 }
 
 // Append to existing keypoints and pid_to_cid_fid the entries from the nvm file.  

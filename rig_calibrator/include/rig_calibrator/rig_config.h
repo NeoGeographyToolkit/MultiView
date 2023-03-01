@@ -34,8 +34,8 @@ struct RigSet {
   // For rig i, cam_set[i] will list the sensor/camera names in that rig.
   // cam_set[i][0] is the reference sensor. All sensor
   // names are unique. For convenience, this is also duplicated
-  // as 'cam_names', where all sensors are concatenated. That is
-  // enough in almost all circumstances.
+  // as 'cam_names', where all sensors are concatenated. That vector
+  // is often more convenient.
   std::vector<std::vector<std::string>> cam_set;
 
   // Must be in one-to-one correspondence with all vectors below.
@@ -62,6 +62,10 @@ struct RigSet {
   // If this sensor is a reference sensor for one of the rig.
   bool isRefSensor(std::string const& sensor_name) const;
 
+  // Return the id of the rig given the index of the camera
+  // in cam_names.
+  int rigId(int cam_id) const;
+  
   // Sanity checks
   void validate() const;
 };

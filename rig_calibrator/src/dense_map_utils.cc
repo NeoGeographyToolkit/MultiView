@@ -351,7 +351,8 @@ void StampedPoseStorage::clear() { m_poses.clear(); }
 bool StampedPoseStorage::empty() const { return m_poses.empty(); }
 
 // Compute the azimuth and elevation for a (normal) vector
-void normalToAzimuthAndElevation(Eigen::Vector3d const& normal, double& azimuth, double& elevation) {
+void normalToAzimuthAndElevation(Eigen::Vector3d const& normal,
+                                 double& azimuth, double& elevation) {
   if (normal.x() == 0 && normal.y() == 0) {
     azimuth = 0.0;
     if (normal.z() >= 0.0)
@@ -568,7 +569,8 @@ void pickTimestampsInBounds(std::vector<double> const& timestamps,
 }
 
 // A debug utility for saving a camera in a format ASP understands.
-// Need to expose the sci cam intrinsics.
+// TODO(oalexan1): Expose the sci cam intrinsics.
+// TODO(oalexan1): Support in ASP the rig_calibrator distortion models.
 void saveTsaiCamera(Eigen::MatrixXd const& desired_cam_to_world_trans,
                         std::string const& output_dir,
                       double curr_time, std::string const& suffix) {
@@ -590,8 +592,10 @@ void saveTsaiCamera(Eigen::MatrixXd const& desired_cam_to_world_trans,
   ofs << "v_direction = 0 1 0\n";
   ofs << "w_direction = 0 0 1\n";
   ofs << "C = " << T(0, 3) + shift << ' ' << T(1, 3) << ' ' << T(2, 3) << "\n";
-  ofs << "R = " << T(0, 0) << ' ' << T(0, 1) << ' ' << T(0, 2) << ' ' << T(1, 0) << ' ' << T(1, 1) << ' ' << T(1, 2)
-      << ' ' << T(2, 0) << ' ' << T(2, 1) << ' ' << T(2, 2) << "\n";
+  ofs << "R = "
+      << T(0, 0) << ' ' << T(0, 1) << ' ' << T(0, 2) << ' '
+      << T(1, 0) << ' ' << T(1, 1) << ' ' << T(1, 2) << ' '
+      << T(2, 0) << ' ' << T(2, 1) << ' ' << T(2, 2) << "\n";
   ofs << "pitch = 1\n";
   ofs << "NULL\n";
   ofs.close();
@@ -1060,6 +1064,63 @@ void adjustImageSize(camera::CameraParameters const& cam_params, cv::Mat & image
     LOG(FATAL) << "Sci cam images have the wrong size.";
 }
 
+// A function to copy image data from maps to vectors with the data stored
+// chronologically in them, to speed up traversal.
+void ImageDataToVectors(// Inputs
+                        dense_map::RigSet const& R,
+                        std::map<int, std::map<double, dense_map::ImageMessage>> const& image_maps,
+                        std::map<int, std::map<double, dense_map::ImageMessage>> const& depth_maps,
+                        // Outputs
+                        std::vector<double>& ref_timestamps,
+                        std::vector<Eigen::Affine3d> & world_to_ref,
+                        std::vector<std::string> & ref_image_files,
+                        std::vector<std::vector<dense_map::ImageMessage>> & image_data,
+                        std::vector<std::vector<dense_map::ImageMessage>> & depth_data) {
+
+  // Wipe the outputs
+  ref_timestamps.clear();
+  world_to_ref.clear();
+  ref_image_files.clear();
+  image_data.clear();
+  depth_data.clear();
+  
+  // Find the range of sensor ids.
+  int max_cam_type = 0;
+  for (auto it = image_maps.begin(); it != image_maps.end(); it++)
+    max_cam_type = std::max(max_cam_type, it->first);
+  for (auto it = depth_maps.begin(); it != depth_maps.end(); it++)
+    max_cam_type = std::max(max_cam_type, it->first);
+
+  image_data.resize(max_cam_type + 1);
+  depth_data.resize(max_cam_type + 1);
+  for (size_t cam_type = 0; cam_type < image_data.size(); cam_type++) {
+
+    auto image_map_it = image_maps.find(cam_type);
+    if (image_map_it != image_maps.end()) {
+      auto image_map = image_map_it->second; 
+
+      for (auto it = image_map.begin(); it != image_map.end(); it++) {
+        image_data[cam_type].push_back(it->second);
+        
+        // Collect the ref cam timestamps, world_to_ref, and image names,
+        // in chronological order
+        if (R.isRefSensor(R.cam_names[cam_type])) {
+          world_to_ref.push_back(it->second.world_to_cam);
+          ref_timestamps.push_back(it->second.timestamp);
+          ref_image_files.push_back(it->second.name);
+        }
+      }
+    }
+    
+    auto depth_map_it = depth_maps.find(cam_type);
+    if (depth_map_it != depth_maps.end()) {
+      auto depth_map = depth_map_it->second; 
+      for (auto it = depth_map.begin(); it != depth_map.end(); it++)
+        depth_data[cam_type].push_back(it->second);
+    }
+  }
+}
+  
 // Look up each ref cam image by timestamp, with the rig
 // assumption. In between any two ref cam timestamps, which are no
 // further from each other than the bracket length, look up an image
@@ -1081,7 +1142,7 @@ void lookupImagesAndBrackets(// Inputs
                              std::vector<double>& max_timestamp_offset) {
 
   std::cout << "Looking up the images and bracketing the timestamps." << std::endl;
-  
+
   int num_ref_cams = ref_timestamps.size();
   int num_cam_types = R.cam_names.size();
 
@@ -1376,15 +1437,30 @@ void lookupImages(// Inputs
                   bool no_rig, double bracket_len,
                   double timestamp_offsets_max_change,
                   dense_map::RigSet const& R,
-                  std::vector<double> const& ref_timestamps,
-                  std::vector<std::vector<ImageMessage>> const& image_data,
-                  std::vector<std::vector<ImageMessage>> const& depth_data,
+                  std::map<int, std::map<double, dense_map::ImageMessage>> const& image_maps,
+                  std::map<int, std::map<double, dense_map::ImageMessage>> const& depth_maps,
                   // Outputs
-                  std::vector<dense_map::cameraImage>& cams,
-                  std::vector<Eigen::Affine3d> & world_to_cam,
-                  std::vector<double>& min_timestamp_offset,
-                  std::vector<double>& max_timestamp_offset) {
+                  std::vector<double>                 & ref_timestamps,
+                  std::vector<Eigen::Affine3d>        & world_to_ref,
+                  std::vector<std::string>            & ref_image_files,
+                  std::vector<dense_map::cameraImage> & cams,
+                  std::vector<Eigen::Affine3d>        & world_to_cam,
+                  std::vector<double>                 & min_timestamp_offset,
+                  std::vector<double>                 & max_timestamp_offset) {
 
+  // This entails some book-keeping. TODO(oalexan1): Remove image_data
+  // and depth_data. Just keep image_maps and depth_maps and change
+  // the book-keeping to use std::map rather than std::vector
+  // iterators. Even better, store right away in the future
+  // cameraImage struct, avoiding the intermediate ImageMessage.
+  std::vector<std::vector<ImageMessage>> image_data, depth_data;
+  dense_map::ImageDataToVectors(// Inputs
+                                R, image_maps, depth_maps,
+                                // Outputs
+                                ref_timestamps, world_to_ref, ref_image_files,
+                                image_data, depth_data);
+  
+  
   if (!no_rig) 
     lookupImagesAndBrackets(// Inputs
                             bracket_len,  

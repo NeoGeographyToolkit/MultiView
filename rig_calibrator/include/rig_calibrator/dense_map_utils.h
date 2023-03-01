@@ -218,27 +218,22 @@ void genImageAndDepthFileNames(  // Inputs
   // Outputs
   std::vector<std::string>& image_files, std::vector<std::string>& depth_files);
 
-// Find an image at the given timestamp or right after it. We assume
-// that during repeated calls to this function we always travel
-// forward in time, and we keep track of where we are in the vector using
-// the variable beg_pos that we update as we go.
-bool lookupImage(double desired_time, std::vector<ImageMessage> const& msgs,
-                 cv::Mat& image, std::string & image_name, int& beg_pos, double& found_time);
-
 // Look up images, with or without the rig constraint. See individual functions
 // below for more details.
 void lookupImages(// Inputs
                   bool no_rig, double bracket_len,
                   double timestamp_offsets_max_change,
                   dense_map::RigSet const& R,
-                  std::vector<double> const& ref_timestamps,
-                  std::vector<std::vector<ImageMessage>> const& image_data,
-                  std::vector<std::vector<ImageMessage>> const& depth_data,
+                  std::map<int, std::map<double, dense_map::ImageMessage>> const& image_maps,
+                  std::map<int, std::map<double, dense_map::ImageMessage>> const& depth_maps,
                   // Outputs
-                  std::vector<dense_map::cameraImage>& cams,
-                  std::vector<Eigen::Affine3d> & world_to_cam,
-                  std::vector<double>& min_timestamp_offset,
-                  std::vector<double>& max_timestamp_offset);
+                  std::vector<double>                 & ref_timestamps,
+                  std::vector<Eigen::Affine3d>        & world_to_ref,
+                  std::vector<std::string>            & ref_image_files,
+                  std::vector<dense_map::cameraImage> & cams,
+                  std::vector<Eigen::Affine3d>        & world_to_cam,
+                  std::vector<double>                 & min_timestamp_offset,
+                  std::vector<double>                 & max_timestamp_offset);
   
 // Convert a string of space-separated numbers to a vector
 void strToVec(std::string const& str, std::vector<double> & vec);

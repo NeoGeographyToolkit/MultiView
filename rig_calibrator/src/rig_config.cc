@@ -27,51 +27,72 @@
 
 namespace dense_map {
 
-  void RigSet::validate() const {
-
-    if (cam_set.empty()) 
-      LOG(FATAL) << "Found an empty set of rigs.\n";
-
-    size_t num_cams = 0;
-    std::set<std::string> all_cams; // checks for duplicates
-    for (size_t rig_it = 0; rig_it < cam_set.size(); rig_it++) {
-      if (cam_set[rig_it].empty()) 
-        LOG(FATAL) << "Found a rig with no cams.\n";
-
-      num_cams += cam_set[rig_it].size();
-      for (size_t cam_it = 0; cam_it < cam_set[rig_it].size(); cam_it++)
-        all_cams.insert(cam_set[rig_it][cam_it]);
-    }
-
-    if (num_cams != all_cams.size() || num_cams != cam_names.size())
-      LOG(FATAL) << "Found a duplicate sensor name in the rig set.\n";
-
-    if (num_cams != ref_to_cam_trans.size()) 
-      LOG(FATAL) << "Number of sensors is not equal to number of ref-to-cam transforms.\n";
+void RigSet::validate() const {
+  
+  if (cam_set.empty()) 
+    LOG(FATAL) << "Found an empty set of rigs.\n";
+  
+  size_t num_cams = 0;
+  std::set<std::string> all_cams; // checks for duplicates
+  for (size_t rig_it = 0; rig_it < cam_set.size(); rig_it++) {
+    if (cam_set[rig_it].empty()) 
+      LOG(FATAL) << "Found a rig with no cams.\n";
     
-    if (num_cams != depth_to_image.size()) 
-      LOG(FATAL) << "Number of sensors is not equal to number of depth-to-image transforms.\n";
-
-    if (num_cams != ref_to_cam_timestamp_offsets.size()) 
-      LOG(FATAL) << "Number of sensors is not equal to number of ref-to-cam timestamp offsets.\n";
-    
-    if (num_cams != cam_params.size()) 
-      LOG(FATAL) << "Number of sensors is not equal to number of camera models.\n";
-
-    for (size_t cam_it = 0; cam_it < cam_names.size(); cam_it++) {
-      if (isRefSensor(cam_names[cam_it]) && ref_to_cam_timestamp_offsets[cam_it] != 0) 
-        LOG(FATAL) << "The timestamp offsets for the reference sensors must be always 0.\n";
-    }
+    num_cams += cam_set[rig_it].size();
+    for (size_t cam_it = 0; cam_it < cam_set[rig_it].size(); cam_it++)
+      all_cams.insert(cam_set[rig_it][cam_it]);
   }
   
-  // A ref sensor is the first sensor on each rig
-  bool RigSet::isRefSensor(std::string const& cam_name) const {
-    for (size_t rig_it = 0; rig_it < cam_set.size(); rig_it++) 
-      if (cam_set[rig_it][0] == cam_name) 
-        return true;
-    return false;
+  if (num_cams != all_cams.size() || num_cams != cam_names.size())
+    LOG(FATAL) << "Found a duplicate sensor name in the rig set.\n";
+  
+  if (num_cams != ref_to_cam_trans.size()) 
+    LOG(FATAL) << "Number of sensors is not equal to number of ref-to-cam transforms.\n";
+  
+  if (num_cams != depth_to_image.size()) 
+    LOG(FATAL) << "Number of sensors is not equal to number of depth-to-image transforms.\n";
+  
+  if (num_cams != ref_to_cam_timestamp_offsets.size()) 
+    LOG(FATAL) << "Number of sensors is not equal to number of ref-to-cam timestamp offsets.\n";
+  
+  if (num_cams != cam_params.size()) 
+    LOG(FATAL) << "Number of sensors is not equal to number of camera models.\n";
+  
+  for (size_t cam_it = 0; cam_it < cam_names.size(); cam_it++) {
+    if (isRefSensor(cam_names[cam_it]) && ref_to_cam_timestamp_offsets[cam_it] != 0) 
+      LOG(FATAL) << "The timestamp offsets for the reference sensors must be always 0.\n";
+  }
+}
+  
+// A ref sensor is the first sensor on each rig
+bool RigSet::isRefSensor(std::string const& cam_name) const {
+  for (size_t rig_it = 0; rig_it < cam_set.size(); rig_it++) 
+    if (cam_set[rig_it][0] == cam_name) 
+      return true;
+  return false;
+}
+
+// Return the id of the rig given the index of the sensor
+// in cam_names.
+int RigSet::rigId(int cam_id) const {
+  if (cam_id < 0 || cam_id >= cam_names.size()) 
+    LOG(FATAL) << "Out of bounds sensor id.\n";
+  
+  std::string cam_name = cam_names[cam_id];
+  
+  for (size_t rig_it = 0; rig_it < cam_set.size(); rig_it++) {
+    for (size_t cam_it = 0; cam_it < cam_set[rig_it].size(); cam_it++) {
+      if (cam_set[rig_it][cam_it] == cam_name) {
+        return rig_it;
+      }
+    }
   }
 
+  // Should not arrive here
+  LOG(FATAL) << "Could not look up in the rig the sensor: " << cam_name << "\n";
+  return -1;
+}
+  
 const std::string FISHEYE_DISTORTION = "fisheye";
 const std::string RADTAN_DISTORTION  = "radtan";
 const std::string RPC_DISTORTION     = "rpc";
