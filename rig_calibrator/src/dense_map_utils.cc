@@ -601,49 +601,6 @@ void saveTsaiCamera(Eigen::MatrixXd const& desired_cam_to_world_trans,
   ofs.close();
 }
 
-// Find an image at the given timestamp or right after it. We assume
-// that during repeated calls to this function we always travel
-// forward in time, and we keep track of where we are in the bag using
-// the variable start_pos that we update as we go.
-bool lookupImage(// Inputs
-                 double desired_time, std::vector<ImageMessage> const& msgs,
-                 // Outputs
-                 cv::Mat& image, std::string & image_name,
-                 int& start_pos, double& found_time) {
-  // Initialize the outputs. Note that start_pos is passed in from outside.
-  image = cv::Mat();
-  image_name = "";
-  found_time = -1.0;
-
-  int num_msgs = msgs.size();
-  double prev_image_time = -1.0;
-
-  for (int local_pos = start_pos; local_pos < num_msgs; local_pos++) {
-    start_pos = local_pos;  // save this for exporting
-
-    found_time = msgs[local_pos].timestamp;
-
-    // Sanity check: We must always travel forward in time
-    if (found_time < prev_image_time) {
-      LOG(FATAL) << "Found images not in chronological order.\n"
-                 << std::fixed << std::setprecision(17)
-                 << "Times in wrong order: " << prev_image_time << ' ' << found_time << ".\n";
-      continue;
-    }
-
-    prev_image_time = found_time;
-
-    if (found_time >= desired_time) {
-      // Found the desired data. Do a deep copy, to not depend on the
-      // original structure.
-      msgs[local_pos].image.copyTo(image);
-      image_name = msgs[local_pos].name;
-      return true;
-    }
-  }
-  return false;
-}
-
 // Convert a string of space-separated numbers to a vector
 void strToVec(std::string const& str, std::vector<double> & vec) {
 
@@ -1064,12 +1021,104 @@ void adjustImageSize(camera::CameraParameters const& cam_params, cv::Mat & image
     LOG(FATAL) << "Sci cam images have the wrong size.";
 }
 
+typedef std::map<double, dense_map::ImageMessage> MsgMap;
+typedef std::map<double, dense_map::ImageMessage>::const_iterator MsgMapIter;
+  
+// Find an image at the given timestamp or right after it. We assume
+// that during repeated calls to this function we always travel
+// forward in time, and we keep track of where we are in the bag using
+// the variable start_pos that we update as we go.
+// TODO(oalexan1): Wipe this!
+bool lookupImage(// Inputs
+                 double desired_time, std::vector<ImageMessage> const& msgs,
+                 // Outputs
+                 cv::Mat& image, std::string & image_name,
+                 int& start_pos, double& found_time) {
+  // Initialize the outputs. Note that start_pos is passed in from outside.
+  image = cv::Mat();
+  image_name = "";
+  found_time = -1.0;
+
+  int num_msgs = msgs.size();
+  double prev_image_time = -1.0;
+
+  for (int local_pos = start_pos; local_pos < num_msgs; local_pos++) {
+    start_pos = local_pos;  // save this for exporting
+
+    found_time = msgs[local_pos].timestamp;
+
+    // Sanity check: We must always travel forward in time
+    if (found_time < prev_image_time) {
+      LOG(FATAL) << "Found images not in chronological order.\n"
+                 << std::fixed << std::setprecision(17)
+                 << "Times in wrong order: " << prev_image_time << ' ' << found_time << ".\n";
+      continue;
+    }
+
+    prev_image_time = found_time;
+
+    if (found_time >= desired_time) {
+      // Found the desired data. Do a deep copy, to not depend on the
+      // original structure.
+      msgs[local_pos].image.copyTo(image);
+      image_name = msgs[local_pos].name;
+      return true;
+    }
+  }
+  return false;
+}
+
+  
+// Find an image at the given timestamp or right after it. We assume
+// that during repeated calls to this function we always travel
+// forward in time, and we keep track of where we are in the bag using
+// the variable start_pos that we update as we go.
+bool lookupImage(// Inputs
+                 double desired_time, MsgMap const& msgs,
+                 // Outputs
+                 cv::Mat& image, std::string & image_name,
+                 MsgMapIter& start_pos, double& found_time) {
+  // Initialize the outputs. Note that start_pos is passed in from outside.
+  image = cv::Mat();
+  image_name = "";
+  found_time = -1.0;
+
+   int num_msgs = msgs.size();
+   double prev_image_time = -1.0;
+
+   for (auto local_pos = start_pos; local_pos != msgs.end(); local_pos++) {
+     start_pos = local_pos;  // save this for exporting
+
+     dense_map::ImageMessage const& imgMsg = local_pos->second; // alias
+     found_time = imgMsg.timestamp;
+
+     // Sanity check: We must always travel forward in time
+     if (found_time < prev_image_time) {
+       LOG(FATAL) << "Found images not in chronological order.\n"
+                  << std::fixed << std::setprecision(17)
+                  << "Times in wrong order: " << prev_image_time << ' ' << found_time << ".\n";
+       continue;
+     }
+
+     prev_image_time = found_time;
+
+     if (found_time >= desired_time) {
+       // Found the desired data. Do a deep copy, to not depend on the
+       // original structure.
+       imgMsg.image.copyTo(image);
+       image_name = imgMsg.name;
+       return true;
+     }
+   }
+  return false;
+}
+
 // A function to copy image data from maps to vectors with the data stored
 // chronologically in them, to speed up traversal.
 void ImageDataToVectors(// Inputs
                         dense_map::RigSet const& R,
-                        std::map<int, std::map<double, dense_map::ImageMessage>> const& image_maps,
-                        std::map<int, std::map<double, dense_map::ImageMessage>> const& depth_maps,
+                        std::vector<std::map<double, dense_map::ImageMessage>> const& image_maps,
+                        std::vector<std::map<double, dense_map::ImageMessage>> const& depth_maps,
                         // Outputs
                         std::vector<double>& ref_timestamps,
                         std::vector<Eigen::Affine3d> & world_to_ref,
@@ -1083,41 +1132,30 @@ void ImageDataToVectors(// Inputs
   ref_image_files.clear();
   image_data.clear();
   depth_data.clear();
-  
-  // Find the range of sensor ids.
-  int max_cam_type = 0;
-  for (auto it = image_maps.begin(); it != image_maps.end(); it++)
-    max_cam_type = std::max(max_cam_type, it->first);
-  for (auto it = depth_maps.begin(); it != depth_maps.end(); it++)
-    max_cam_type = std::max(max_cam_type, it->first);
 
-  image_data.resize(max_cam_type + 1);
-  depth_data.resize(max_cam_type + 1);
+  int num_cams = R.cam_names.size();
+
+  image_data.resize(num_cams);
+  depth_data.resize(num_cams);
   for (size_t cam_type = 0; cam_type < image_data.size(); cam_type++) {
 
-    auto image_map_it = image_maps.find(cam_type);
-    if (image_map_it != image_maps.end()) {
-      auto image_map = image_map_it->second; 
+    auto const& image_map = image_maps[cam_type];
 
-      for (auto it = image_map.begin(); it != image_map.end(); it++) {
-        image_data[cam_type].push_back(it->second);
-        
-        // Collect the ref cam timestamps, world_to_ref, and image names,
-        // in chronological order
-        if (R.isRefSensor(R.cam_names[cam_type])) {
-          world_to_ref.push_back(it->second.world_to_cam);
-          ref_timestamps.push_back(it->second.timestamp);
-          ref_image_files.push_back(it->second.name);
-        }
+    for (auto it = image_map.begin(); it != image_map.end(); it++) {
+      image_data[cam_type].push_back(it->second);
+      
+      // Collect the ref cam timestamps, world_to_ref, and image names,
+      // in chronological order
+      if (R.isRefSensor(R.cam_names[cam_type])) {
+        world_to_ref.push_back(it->second.world_to_cam);
+        ref_timestamps.push_back(it->second.timestamp);
+        ref_image_files.push_back(it->second.name);
       }
     }
-    
-    auto depth_map_it = depth_maps.find(cam_type);
-    if (depth_map_it != depth_maps.end()) {
-      auto depth_map = depth_map_it->second; 
-      for (auto it = depth_map.begin(); it != depth_map.end(); it++)
-        depth_data[cam_type].push_back(it->second);
-    }
+      
+    auto const& depth_map = depth_maps[cam_type];
+    for (auto it = depth_map.begin(); it != depth_map.end(); it++)
+      depth_data[cam_type].push_back(it->second);
   }
 }
   
@@ -1432,13 +1470,12 @@ void lookupImagesNoBrackets(// Inputs
 // Look up images, with or without the rig constraint. See individual functions
 // below for more details.
 // TODO(oalexan1): Hide in this function image_data and depth_data.
-
 void lookupImages(// Inputs
                   bool no_rig, double bracket_len,
                   double timestamp_offsets_max_change,
                   dense_map::RigSet const& R,
-                  std::map<int, std::map<double, dense_map::ImageMessage>> const& image_maps,
-                  std::map<int, std::map<double, dense_map::ImageMessage>> const& depth_maps,
+                  std::vector<MsgMap> const& image_maps,
+                  std::vector<MsgMap> const& depth_maps,
                   // Outputs
                   std::vector<double>                 & ref_timestamps,
                   std::vector<Eigen::Affine3d>        & world_to_ref,
@@ -1459,8 +1496,7 @@ void lookupImages(// Inputs
                                 // Outputs
                                 ref_timestamps, world_to_ref, ref_image_files,
                                 image_data, depth_data);
-  
-  
+    
   if (!no_rig) 
     lookupImagesAndBrackets(// Inputs
                             bracket_len,  
@@ -1508,22 +1544,32 @@ void lookupImages(// Inputs
   // Matches should be among images on same rig?
   std::sort(cams.begin(), cams.end(), dense_map::timestampLess);
 
-  // Parse the transform from the world to each cam, which were known on input.
-  // Later, if use_initial_rig_transform is specified, these will
-  // be computed based on the rig.
+  // Parse the transform from the world to each cam, which were known
+  // on input.  Later, if use_initial_rig_transform is specified,
+  // these will be computed based on the rig.  Since
+  // image_maps[cam_type] is sorted chronologically, travel in time
+  // along at as we move along the cams array. Use the two arrays
+  // below to remember where we left off.
+  // TODO(oalexan1): This is fragile. It relies on cams being sorted by time.
+  // Make the cams array have a world_to_cam entry and remove the loop below.
   world_to_cam.resize(cams.size());
-  std::vector<int> start_pos(num_cam_types, 0);  // to help advance in time
+  std::vector<MsgMapIter> beg_pos(num_cam_types); 
+  std::vector<MsgMapIter> end_pos(num_cam_types); 
+  for (int cam_type = 0; cam_type < num_cam_types; cam_type++) {
+    beg_pos[cam_type] = image_maps[cam_type].begin();
+    end_pos[cam_type] = image_maps[cam_type].end();
+  }
   for (size_t cam_it = 0; cam_it < cams.size(); cam_it++) {
     int cam_type = cams[cam_it].camera_type;
-    for (size_t pos = start_pos[cam_type]; pos < image_data[cam_type].size(); pos++) {
-      // Count on the fact that image_data[cam_type] is sorted chronologically
-      if (cams[cam_it].timestamp == image_data[cam_type][pos].timestamp) {
-        world_to_cam[cam_it] = image_data[cam_type][pos].world_to_cam;
-        start_pos[cam_type] = pos;  // save for next time
+    for (auto pos = beg_pos[cam_type]; pos != end_pos[cam_type]; pos++) {
+      if (cams[cam_it].timestamp == pos->first) {
+        world_to_cam[cam_it] = (pos->second).world_to_cam;
+        std::cout << "--2parse! " <<  world_to_cam[cam_it].matrix() << std::endl;
+        beg_pos[cam_type] = pos;  // save for next time
+        break;
       }
     }
-  }
-  
+  }  
   return; 
 }
 

@@ -1381,8 +1381,8 @@ void readImageEntry(// Inputs
                     Eigen::Affine3d const& world_to_cam,
                     std::vector<std::string> const& cam_names,
                     // Outputs
-                    std::map<int, std::map<double, dense_map::ImageMessage>> & image_maps,
-                    std::map<int, std::map<double, dense_map::ImageMessage>> & depth_maps) {
+                    std::vector<std::map<double, dense_map::ImageMessage>> & image_maps,
+                    std::vector<std::map<double, dense_map::ImageMessage>> & depth_maps) {
   
   int cam_type = 0;
   double timestamp = 0.0;
@@ -1585,9 +1585,15 @@ void readListOrNvm(// Inputs
                    dense_map::RigSet const& R,
                    // Outputs
                    nvmData & nvm,
-                   std::map<int, std::map<double, dense_map::ImageMessage>> & image_maps,
-                   std::map<int, std::map<double, dense_map::ImageMessage>> & depth_maps) {
+                   std::vector<std::map<double, dense_map::ImageMessage>> & image_maps,
+                   std::vector<std::map<double, dense_map::ImageMessage>> & depth_maps) {
 
+  // Wipe the outputs
+  image_maps.clear();
+  depth_maps.clear();
+  image_maps.resize(R.cam_names.size());
+  depth_maps.resize(R.cam_names.size());
+  
   if (int(camera_poses_list.empty()) + int(nvm_file.empty()) != 1)
     LOG(FATAL) << "Must specify precisely one of --camera-poses or --nvm.\n";
 

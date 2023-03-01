@@ -224,8 +224,8 @@ void lookupImages(// Inputs
                   bool no_rig, double bracket_len,
                   double timestamp_offsets_max_change,
                   dense_map::RigSet const& R,
-                  std::map<int, std::map<double, dense_map::ImageMessage>> const& image_maps,
-                  std::map<int, std::map<double, dense_map::ImageMessage>> const& depth_maps,
+                  std::vector<std::map<double, dense_map::ImageMessage>> const& image_maps,
+                  std::vector<std::map<double, dense_map::ImageMessage>> const& depth_maps,
                   // Outputs
                   std::vector<double>                 & ref_timestamps,
                   std::vector<Eigen::Affine3d>        & world_to_ref,

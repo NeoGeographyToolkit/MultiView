@@ -1224,8 +1224,8 @@ int main(int argc, char** argv) {
   // image_data is on purpose stored in vectors of vectors, with each
   // image_data[i] having data in increasing order of timestamps. This
   // way it is fast to find next timestamps after a given one.
-  std::map<int, std::map<double, dense_map::ImageMessage>> image_maps;
-  std::map<int, std::map<double, dense_map::ImageMessage>> depth_maps;
+  std::vector<std::map<double, dense_map::ImageMessage>> image_maps;
+  std::vector<std::map<double, dense_map::ImageMessage>> depth_maps;
   dense_map::nvmData nvm;
   dense_map::readListOrNvm(FLAGS_camera_poses, FLAGS_nvm, FLAGS_extra_list,
                            FLAGS_use_initial_rig_transforms,

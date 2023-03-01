@@ -277,8 +277,8 @@ void readListOrNvm(// Inputs
                    dense_map::RigSet const& R,
                    // Outputs
                    nvmData & nvm,
-                   std::map<int, std::map<double, dense_map::ImageMessage>> & image_maps,
-                   std::map<int, std::map<double, dense_map::ImageMessage>> & depth_maps);
+                   std::vector<std::map<double, dense_map::ImageMessage>> & image_maps,
+                   std::vector<std::map<double, dense_map::ImageMessage>> & depth_maps);
   
 // Append to existing keypoints and pid_to_cid_fid the entries from the nvm file.  
 // Need to account for the fact that the nvm file will likely have the images
