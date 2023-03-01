@@ -57,6 +57,11 @@ namespace dense_map {
     
     if (num_cams != cam_params.size()) 
       LOG(FATAL) << "Number of sensors is not equal to number of camera models.\n";
+
+    for (size_t cam_it = 0; cam_it < cam_names.size(); cam_it++) {
+      if (isRefSensor(cam_names[cam_it]) && ref_to_cam_timestamp_offsets[cam_it] != 0) 
+        LOG(FATAL) << "The timestamp offsets for the reference sensors must be always 0.\n";
+    }
   }
   
   // A ref sensor is the first sensor on each rig
@@ -349,15 +354,19 @@ void readRigConfig(std::string const& rig_config, bool have_rig_transforms, RigS
 
     // Sanity check
     if (have_rig_transforms) {
-      if (R.ref_to_cam_trans[0].matrix() != Eigen::Affine3d::Identity().matrix())
-        LOG(FATAL) << "The transform from the reference sensor to itself must be the identity.\n";
+      for (size_t cam_it = 0; cam_it < R.cam_names.size(); cam_it++) {
+        if (R.isRefSensor(R.cam_names[cam_it]) &&
+            R.ref_to_cam_trans[cam_it].matrix() != Eigen::Affine3d::Identity().matrix())
+          LOG(FATAL) << "The transform from the reference sensor to itself must be the identity.\n";
+      }
     }
+    
+    R.validate();
+    
   } catch(std::exception const& e) {
     LOG(FATAL) << e.what() << "\n";
   }
 
-  R.validate();
-  
   return;
 }
   

@@ -1229,11 +1229,9 @@ int main(int argc, char** argv) {
   std::vector<double> ref_timestamps; // Timestamps for the ref cameras
   std::vector<std::string> ref_image_files;
   dense_map::nvmData nvm;
-  int ref_cam_type = 0; // TODO(oalexan1): Remove this
   dense_map::readListOrNvm(FLAGS_camera_poses, FLAGS_nvm, FLAGS_extra_list,
                            FLAGS_use_initial_rig_transforms,
-                           FLAGS_bracket_len, R.ref_to_cam_trans, R.ref_to_cam_timestamp_offsets,
-                           R,
+                           FLAGS_bracket_len, R,
                            // outputs
                            nvm, ref_timestamps, world_to_ref, ref_image_files,
                            image_data, depth_data); // out
@@ -1245,12 +1243,11 @@ int main(int argc, char** argv) {
   std::vector<double> min_timestamp_offset, max_timestamp_offset;
   // Select the images to use. If the rig is used, keep non-ref images
   // only within the bracket.
+  int ref_cam_type = 0; // TODO(oalexan1): Remove this
   dense_map::lookupImages(// Inputs
-                          ref_cam_type, FLAGS_no_rig, FLAGS_bracket_len,
+                          FLAGS_no_rig, FLAGS_bracket_len,
                           FLAGS_timestamp_offsets_max_change,
-                          R.cam_names, R.cam_params,
-                          ref_timestamps, image_data, depth_data,
-                          R.ref_to_cam_timestamp_offsets,
+                          R, ref_timestamps, image_data, depth_data,
                           // Outputs
                           cams, world_to_cam, min_timestamp_offset, max_timestamp_offset);
   

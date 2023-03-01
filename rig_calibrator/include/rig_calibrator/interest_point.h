@@ -274,8 +274,6 @@ void readListOrNvm(// Inputs
              std::string const& extra_list,
              bool use_initial_rig_transforms,
              double bracket_len,
-             std::vector<Eigen::Affine3d> const& ref_to_cam_trans,
-             std::vector<double> const& ref_to_cam_timestamp_offsets,
              dense_map::RigSet const& R,
              // Outputs
              nvmData & nvm,

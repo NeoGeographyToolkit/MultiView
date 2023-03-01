@@ -1484,9 +1484,7 @@ void readImageEntry(// Inputs
 // and/or the rig transform.
 void calcExtraPoses(std::string const& extra_list, bool use_initial_rig_transforms,
                     double bracket_len,
-                    std::vector<Eigen::Affine3d> const& ref_to_cam_trans,
-                    std::vector<double> const& ref_to_cam_timestamp_offsets,
-                    std::vector<std::string> const& cam_names,
+                    dense_map::RigSet const& R,
                     // Append here
                     std::vector<std::string>     & cid_to_filename,
                     std::vector<Eigen::Affine3d> & cid_to_cam_t_global) {
@@ -1500,7 +1498,7 @@ void calcExtraPoses(std::string const& extra_list, bool use_initial_rig_transfor
     existing_images.insert(image_file); 
     int cam_type = 0;
     double timestamp = 0.0;
-    findCamTypeAndTimestamp(image_file, cam_names,  
+    findCamTypeAndTimestamp(image_file, R.cam_names,  
                             cam_type, timestamp); // outputs
     Eigen::Affine3d world_to_cam = cid_to_cam_t_global[image_it];
     existing_world_to_cam[cam_type][timestamp] = world_to_cam;
@@ -1508,18 +1506,18 @@ void calcExtraPoses(std::string const& extra_list, bool use_initial_rig_transfor
     if (use_initial_rig_transforms) {
       // Use the rig constraint to find the poses for the other sensors on the rig
       // First go to the ref sensor
-      double ref_timestamp = timestamp - ref_to_cam_timestamp_offsets[cam_type];
+      double ref_timestamp = timestamp - R.ref_to_cam_timestamp_offsets[cam_type];
 
       // Careful here with transform directions and order
-      Eigen::Affine3d cam_to_ref = ref_to_cam_trans[cam_type].inverse();
+      Eigen::Affine3d cam_to_ref = R.ref_to_cam_trans[cam_type].inverse();
       Eigen::Affine3d world_to_ref = cam_to_ref * world_to_cam;
 
       // Now do all the sensors. Note how we do the reverse of the above
       // timestamp and camera operations, but not just for the given cam_type,
       // but for any sensor on the rig.
-      for (size_t sensor_it = 0; sensor_it < ref_to_cam_trans.size(); sensor_it++) {
-        double curr_timestamp = ref_timestamp + ref_to_cam_timestamp_offsets[sensor_it];
-        Eigen::Affine3d curr_world_to_cam = ref_to_cam_trans[sensor_it] * world_to_ref;
+      for (size_t sensor_it = 0; sensor_it < R.ref_to_cam_trans.size(); sensor_it++) {
+        double curr_timestamp = ref_timestamp + R.ref_to_cam_timestamp_offsets[sensor_it];
+        Eigen::Affine3d curr_world_to_cam = R.ref_to_cam_trans[sensor_it] * world_to_ref;
 
         // Initialize the map if needed
         if (existing_world_to_cam.find(sensor_it) == existing_world_to_cam.end())
@@ -1554,7 +1552,7 @@ void calcExtraPoses(std::string const& extra_list, bool use_initial_rig_transfor
     
     int cam_type = 0;
     double curr_timestamp = 0.0;
-    findCamTypeAndTimestamp(image_file, cam_names,  
+    findCamTypeAndTimestamp(image_file, R.cam_names,  
                             cam_type, curr_timestamp); // outputs
     extra_map[cam_type][curr_timestamp] = image_file;
   }
@@ -1635,22 +1633,20 @@ void readCameraPoses(// Inputs
 // Read camera information and images from a list or from an NVM file.
 // Can interpolate/extrapolate poses for data from an extra list.  
 void readListOrNvm(// Inputs
-             std::string const& camera_poses_list,
-             std::string const& nvm_file,
-             std::string const& extra_list,
-             bool use_initial_rig_transforms,
-             double bracket_len,
-             std::vector<Eigen::Affine3d> const& ref_to_cam_trans,
-             std::vector<double> const& ref_to_cam_timestamp_offsets,
-             dense_map::RigSet const& R,
-             // Outputs
-             nvmData & nvm,
-             std::vector<double>& ref_timestamps,
-             std::vector<Eigen::Affine3d>& world_to_ref,
-             std::vector<std::string>    & ref_image_files,
-             std::vector<std::vector<ImageMessage>>& image_data,
-             std::vector<std::vector<ImageMessage>>& depth_data) {
-
+                   std::string const& camera_poses_list,
+                   std::string const& nvm_file,
+                   std::string const& extra_list,
+                   bool use_initial_rig_transforms,
+                   double bracket_len,
+                   dense_map::RigSet const& R,
+                   // Outputs
+                   nvmData & nvm,
+                   std::vector<double>& ref_timestamps,
+                   std::vector<Eigen::Affine3d>& world_to_ref,
+                   std::vector<std::string>    & ref_image_files,
+                   std::vector<std::vector<ImageMessage>>& image_data,
+                   std::vector<std::vector<ImageMessage>>& depth_data) {
+  
   if (int(camera_poses_list.empty()) + int(nvm_file.empty()) != 1)
     LOG(FATAL) << "Must specify precisely one of --camera-poses or --nvm.\n";
   
@@ -1669,8 +1665,7 @@ void readListOrNvm(// Inputs
 
   if (extra_list != "")
     calcExtraPoses(extra_list, use_initial_rig_transforms, bracket_len,
-                   ref_to_cam_trans, ref_to_cam_timestamp_offsets, R.cam_names,  
-                   nvm.cid_to_filename, nvm.cid_to_cam_t_global); // append here
+                   R, nvm.cid_to_filename, nvm.cid_to_cam_t_global); // append here
   
   // Read here temporarily the images and depth maps
   std::map<int, std::map<double, dense_map::ImageMessage>> image_maps;

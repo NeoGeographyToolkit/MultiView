@@ -46,6 +46,7 @@ namespace dense_map {
 // Forward declarations  
 class cameraImage;
 class ImageMessage;
+class RigSet;
 
 const int NUM_SCALAR_PARAMS  = 1;  // Used to float single-value params // NOLINT
 const int NUM_OPT_CTR_PARAMS = 2;  // optical center in x and y         // NOLINT
@@ -227,14 +228,12 @@ bool lookupImage(double desired_time, std::vector<ImageMessage> const& msgs,
 // Look up images, with or without the rig constraint. See individual functions
 // below for more details.
 void lookupImages(// Inputs
-                  int ref_cam_type, bool no_rig, double bracket_len,
+                  bool no_rig, double bracket_len,
                   double timestamp_offsets_max_change,
-                  std::vector<std::string> const& cam_names,
-                  std::vector<camera::CameraParameters> const& cam_params,
+                  dense_map::RigSet const& R,
                   std::vector<double> const& ref_timestamps,
                   std::vector<std::vector<ImageMessage>> const& image_data,
                   std::vector<std::vector<ImageMessage>> const& depth_data,
-                  std::vector<double> const& ref_to_cam_timestamp_offsets,
                   // Outputs
                   std::vector<dense_map::cameraImage>& cams,
                   std::vector<Eigen::Affine3d> & world_to_cam,
