@@ -1224,8 +1224,8 @@ int main(int argc, char** argv) {
   // image_data is on purpose stored in vectors of vectors, with each
   // image_data[i] having data in increasing order of timestamps. This
   // way it is fast to find next timestamps after a given one.
-  std::vector<std::map<double, dense_map::ImageMessage>> image_maps;
-  std::vector<std::map<double, dense_map::ImageMessage>> depth_maps;
+  std::vector<dense_map::MsgMap> image_maps;
+  std::vector<dense_map::MsgMap> depth_maps;
   dense_map::nvmData nvm;
   dense_map::readListOrNvm(FLAGS_camera_poses, FLAGS_nvm, FLAGS_extra_list,
                            FLAGS_use_initial_rig_transforms,
@@ -1250,6 +1250,9 @@ int main(int argc, char** argv) {
                           // Outputs
                           ref_timestamps, world_to_ref, ref_image_files,
                           cams, world_to_cam, min_timestamp_offset, max_timestamp_offset);
+  // De-allocate data we no longer need
+  image_maps = std::vector<dense_map::MsgMap>();
+  depth_maps = std::vector<dense_map::MsgMap>();
   
   if (!FLAGS_no_rig) { // if we have a rig
     if (FLAGS_use_initial_rig_transforms) {

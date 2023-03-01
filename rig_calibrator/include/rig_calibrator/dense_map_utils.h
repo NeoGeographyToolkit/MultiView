@@ -220,12 +220,14 @@ void genImageAndDepthFileNames(  // Inputs
 
 // Look up images, with or without the rig constraint. See individual functions
 // below for more details.
+typedef std::map<double, dense_map::ImageMessage> MsgMap;
+typedef MsgMap::const_iterator MsgMapIter;
 void lookupImages(// Inputs
                   bool no_rig, double bracket_len,
                   double timestamp_offsets_max_change,
                   dense_map::RigSet const& R,
-                  std::vector<std::map<double, dense_map::ImageMessage>> const& image_maps,
-                  std::vector<std::map<double, dense_map::ImageMessage>> const& depth_maps,
+                  std::vector<MsgMap> const& image_maps,
+                  std::vector<MsgMap> const& depth_maps,
                   // Outputs
                   std::vector<double>                 & ref_timestamps,
                   std::vector<Eigen::Affine3d>        & world_to_ref,

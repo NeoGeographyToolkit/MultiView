@@ -1021,9 +1021,6 @@ void adjustImageSize(camera::CameraParameters const& cam_params, cv::Mat & image
     LOG(FATAL) << "Sci cam images have the wrong size.";
 }
 
-typedef std::map<double, dense_map::ImageMessage> MsgMap;
-typedef std::map<double, dense_map::ImageMessage>::const_iterator MsgMapIter;
-  
 // Find an image at the given timestamp or right after it. We assume
 // that during repeated calls to this function we always travel
 // forward in time, and we keep track of where we are in the bag using
@@ -1115,6 +1112,7 @@ bool lookupImage(// Inputs
 
 // A function to copy image data from maps to vectors with the data stored
 // chronologically in them, to speed up traversal.
+// TODO(oalexan1): Wipe this
 void ImageDataToVectors(// Inputs
                         dense_map::RigSet const& R,
                         std::vector<std::map<double, dense_map::ImageMessage>> const& image_maps,
@@ -1170,10 +1168,10 @@ void ImageDataToVectors(// Inputs
 void lookupImagesAndBrackets(// Inputs
                              double bracket_len,
                              double timestamp_offsets_max_change,
-                             dense_map::RigSet const& R,
+                             dense_map::RigSet   const& R,
                              std::vector<double> const& ref_timestamps,
-                             std::vector<std::vector<ImageMessage>> const& image_data,
-                             std::vector<std::vector<ImageMessage>> const& depth_data,
+                             std::vector<MsgMap> const& image_data,
+                             std::vector<MsgMap> const& depth_data,
                              // Outputs
                              std::vector<dense_map::cameraImage>& cams,
                              std::vector<double>& min_timestamp_offset,
@@ -1198,9 +1196,14 @@ void lookupImagesAndBrackets(// Inputs
   // A lot of care is needed with positions. This remembers how we travel in time
   // for each camera type so we have fewer messages to search.
   // But if a mistake is done below it will mess up this bookkeeping.
-  std::vector<int> image_start_positions(num_cam_types, 0);
-  std::vector<int> cloud_start_positions(num_cam_types, 0);
-
+  std::cout << "---fix here!" << std::endl;
+  std::vector<MsgMapIter> image_start_positions(num_cam_types);
+  std::vector<MsgMapIter> depth_start_positions(num_cam_types);
+  for (int cam_it = 0; cam_it < num_cam_types; cam_it++) {
+    image_start_positions[cam_it] = image_data[cam_it].begin();
+    depth_start_positions[cam_it] = depth_data[cam_it].begin();
+  }
+  
   // Populate the data for each camera image
   for (int beg_ref_it = 0; beg_ref_it < num_ref_cams; beg_ref_it++) {
 
@@ -1268,8 +1271,8 @@ void lookupImagesAndBrackets(// Inputs
         // with it so it does not go too far forward in time
         // so that at the next iteration we are passed what we
         // search for.
-        int start_pos = image_start_positions[cam_type];  // care here
-        double curr_timestamp = beg_timestamp;            // start here
+        MsgMapIter start_pos = image_start_positions[cam_type]; // care here
+        double curr_timestamp = beg_timestamp;                  // start here
         cv::Mat best_image;
         std::string best_image_name;
         double best_dist = 1.0e+100;
@@ -1348,7 +1351,7 @@ void lookupImagesAndBrackets(// Inputs
           = std::min(max_timestamp_offset[cam_type], cam.timestamp - ref_timestamps[beg_ref_it]);
       }
 
-      // Look up the closest cloud in time (either before or after cam.timestamp)
+      // Look up the closest depth in time (either before or after cam.timestamp)
       // This need not succeed.
       cam.cloud_timestamp = -1.0;  // will change
       if (!depth_data.empty()) 
@@ -1356,7 +1359,7 @@ void lookupImagesAndBrackets(// Inputs
                                depth_data[cam_type],
                                // Outputs
                                cam.depth_cloud, cam.depth_name, 
-                               cloud_start_positions[cam_type],  // this will move forward
+                               depth_start_positions[cam_type],  // this will move forward
                                cam.cloud_timestamp);             // found time
       
       cams.push_back(cam);
@@ -1394,8 +1397,8 @@ void lookupImagesAndBrackets(// Inputs
 // on bracketing takes place.
 void lookupImagesNoBrackets(// Inputs
                             dense_map::RigSet const& R,
-                            std::vector<std::vector<ImageMessage>> const& image_data,
-                            std::vector<std::vector<ImageMessage>> const& depth_data,
+                            std::vector<MsgMap> const& image_data,
+                            std::vector<MsgMap> const& depth_data,
                             // Outputs
                             std::vector<dense_map::cameraImage>& cams,
                             std::vector<double>& min_timestamp_offset,
@@ -1413,17 +1416,25 @@ void lookupImagesNoBrackets(// Inputs
   // A lot of care is needed with positions. This remembers how we travel in time
   // for each camera type so we have fewer messages to search.
   // But if a mistake is done below it will mess up this bookkeeping.
-  std::vector<int> image_start_positions(num_cam_types, 0);
-  std::vector<int> cloud_start_positions(num_cam_types, 0);
+  std::cout << "---fix here!" << std::endl;
+  std::vector<MsgMapIter> image_start_positions(num_cam_types);
+  std::vector<MsgMapIter> depth_start_positions(num_cam_types);
+  for (int cam_it = 0; cam_it < num_cam_types; cam_it++) {
+    image_start_positions[cam_it] = image_data[cam_it].begin();
+    depth_start_positions[cam_it] = depth_data[cam_it].begin();
+  }
 
   // Populate the data for each camera image
   for (int cam_type = 0; cam_type < num_cam_types; cam_type++) {
 
-    for (size_t cam_it = 0; cam_it < image_data[cam_type].size(); cam_it++) {
-
+    int cam_it = -1;
+    for (auto map_it = image_data[cam_type].begin(); map_it != image_data[cam_type].end();
+         map_it++) {
+      cam_it++;
+      
       dense_map::cameraImage cam;
       cam.camera_type   = cam_type;
-      cam.timestamp     = image_data[cam_type][cam_it].timestamp;
+      cam.timestamp     = (map_it->second).timestamp;
       cam.ref_timestamp = cam.timestamp; // no rig, so no timestamp offset
       // These two values below should not be needed with no rig
       cam.beg_ref_index = cam_it;
@@ -1456,7 +1467,7 @@ void lookupImagesNoBrackets(// Inputs
                                depth_data[cam_type],
                                // Outputs
                                cam.depth_cloud, cam.depth_name, 
-                               cloud_start_positions[cam_type],  // this will move forward
+                               depth_start_positions[cam_type],  // this will move forward
                                cam.cloud_timestamp);             // found time
 
       // Accept this camera
@@ -1501,12 +1512,12 @@ void lookupImages(// Inputs
     lookupImagesAndBrackets(// Inputs
                             bracket_len,  
                             timestamp_offsets_max_change,  
-                            R, ref_timestamps,  image_data, depth_data,  
+                            R, ref_timestamps,  image_maps, depth_maps,  
                             // Outputs
                             cams, min_timestamp_offset, max_timestamp_offset);
   else
     lookupImagesNoBrackets(// Inputs
-                           R, image_data, depth_data,  
+                           R, image_maps, depth_maps,  
                            // Outputs
                            cams, min_timestamp_offset, max_timestamp_offset);
   
@@ -1564,7 +1575,7 @@ void lookupImages(// Inputs
     for (auto pos = beg_pos[cam_type]; pos != end_pos[cam_type]; pos++) {
       if (cams[cam_it].timestamp == pos->first) {
         world_to_cam[cam_it] = (pos->second).world_to_cam;
-        std::cout << "--2parse! " <<  world_to_cam[cam_it].matrix() << std::endl;
+        std::cout << "--3parse! " <<  world_to_cam[cam_it].matrix() << std::endl;
         beg_pos[cam_type] = pos;  // save for next time
         break;
       }
