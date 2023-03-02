@@ -110,6 +110,7 @@
 
 #include <rig_calibrator/basic_algs.h>
 #include <rig_calibrator/dense_map_utils.h>
+#include <rig_calibrator/image_lookup.h>
 #include <rig_calibrator/system_utils.h>
 #include <rig_calibrator/transform_utils.h>
 #include <rig_calibrator/interpolation_utils.h>

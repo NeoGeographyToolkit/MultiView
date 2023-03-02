@@ -17,10 +17,12 @@
  * under the License.
  */
 
-#ifndef CAMERA_IMAGE_H_
-#define CAMERA_IMAGE_H_
+#ifndef RIG_CALIBRATOR_CAMERA_IMAGE_H_
+#define RIG_CALIBRATOR_CAMERA_IMAGE_H_
 
 #include <opencv2/imgproc.hpp>
+#include <Eigen/Core>
+#include <Eigen/Geometry>
 
 namespace dense_map {
 
@@ -73,4 +75,4 @@ struct ImageMessage {
   
 }  // namespace dense_map
 
-#endif  // CAMERA_IMAGE_H_
+#endif  // RIG_CALIBRATOR_CAMERA_IMAGE_H_

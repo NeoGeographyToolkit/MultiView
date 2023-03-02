@@ -218,25 +218,6 @@ void genImageAndDepthFileNames(  // Inputs
   // Outputs
   std::vector<std::string>& image_files, std::vector<std::string>& depth_files);
 
-// Look up images, with or without the rig constraint. See individual functions
-// below for more details.
-typedef std::map<double, dense_map::ImageMessage> MsgMap;
-typedef MsgMap::const_iterator MsgMapIter;
-void lookupImages(// Inputs
-                  bool no_rig, double bracket_len,
-                  double timestamp_offsets_max_change,
-                  dense_map::RigSet const& R,
-                  std::vector<MsgMap> const& image_maps,
-                  std::vector<MsgMap> const& depth_maps,
-                  // Outputs
-                  std::vector<double>                 & ref_timestamps,
-                  std::vector<Eigen::Affine3d>        & world_to_ref,
-                  std::vector<std::string>            & ref_image_files,
-                  std::vector<dense_map::cameraImage> & cams,
-                  std::vector<Eigen::Affine3d>        & world_to_cam,
-                  std::vector<double>                 & min_timestamp_offset,
-                  std::vector<double>                 & max_timestamp_offset);
-  
 // Convert a string of space-separated numbers to a vector
 void strToVec(std::string const& str, std::vector<double> & vec);
   
