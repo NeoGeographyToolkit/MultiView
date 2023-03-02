@@ -73,15 +73,6 @@ void parse_camera_names(std::vector<std::string> const& cam_names,
                         std::set<std::string>&
                         depth_to_image_transforms_to_float);
   
-// A  function to split a string like 'haz_cam sci_cam' into
-// its two constituents and validate against the list of known cameras.
-// Do not allow to float the transform from ref cam to itself, as that
-// is the identity.
-void parse_rig_transforms_to_float(std::vector<std::string> const& cam_names,
-                                   int ref_cam_type,
-                                   std::string const& rig_transforms_to_float_str,
-                                   std::set<std::string>& rig_transforms_to_float);
-
 // Convert a string of values separated by spaces to a vector of doubles.
 std::vector<double> string_to_vector(std::string const& str);
 

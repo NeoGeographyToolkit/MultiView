@@ -155,18 +155,9 @@ DEFINE_double(bracket_len, 0.6,
 DEFINE_string(intrinsics_to_float, "", "Specify which intrinsics to float for each sensor. "
               "Example: 'cam1:focal_length,optical_center,distortion cam2:focal_length'.");
 
-DEFINE_string(rig_transforms_to_float, "",
-              "Specify the names of sensors whose transforms to float, relative to the ref "
-              "sensor. Use quotes around this string if it has spaces. Also can use comma "
-              "as separator. Example: 'cam1 cam2'.");
-
-// TODO(oalexan1): With the rig constraint on, only ref cam poses can float on their own,
-// as the others are tied to it.
 DEFINE_string(camera_poses_to_float, "",
-              "Specify the cameras of which sensor types can have their poses floated. "
-              "Allowing the cameras for all sensors types to float can "
-              "invalidate the registration and scale (while making the overall "
-              "configuration more internally consistent). Example: 'cam1 cam3'.");
+              "Specify the cameras of which sensor types can have their poses "
+              "floated. Example: 'cam1 cam3'.");
 
 DEFINE_string(depth_to_image_transforms_to_float, "",
               "Specify for which sensors to float the depth-to-image transform "
@@ -1323,12 +1314,6 @@ int main(int argc, char** argv) {
   dense_map::parse_intrinsics_to_float(FLAGS_intrinsics_to_float, R.cam_names,
                                        intrinsics_to_float);
 
-  // TODO(oalexan1): When --no_rig is on, these must be empty!
-  // TODO(oalexan1): Merge this into --camera_poses_to_float.
-  std::set<std::string> rig_transforms_to_float;
-  dense_map::parse_rig_transforms_to_float(R.cam_names, ref_cam_type,
-                                           FLAGS_rig_transforms_to_float, rig_transforms_to_float);
-  
   std::set<std::string> camera_poses_to_float;
   dense_map::parse_camera_names(R.cam_names, 
                                 FLAGS_camera_poses_to_float,
@@ -1650,6 +1635,13 @@ int main(int argc, char** argv) {
           problem.SetParameterBlockConstant(end_cam_ptr);
         }
         
+        // ref_to_cam is kept fixed at the identity if the cam is the ref type or
+        // no rig
+        if (camera_poses_to_float.find(R.cam_names[cam_type]) == camera_poses_to_float.end() ||
+            R.isRefSensor(R.cam_names[cam_type]) || FLAGS_no_rig) {
+          problem.SetParameterBlockConstant(ref_to_cam_ptr);
+        }
+
         if (!FLAGS_float_timestamp_offsets || R.isRefSensor(R.cam_names[cam_type]) ||
             FLAGS_no_rig) {
           // Either we don't float timestamp offsets at all, or the cam is the ref type,
@@ -1660,12 +1652,6 @@ int main(int argc, char** argv) {
                                          min_timestamp_offset[cam_type]);
           problem.SetParameterUpperBound(&R.ref_to_cam_timestamp_offsets[cam_type], 0,
                                          max_timestamp_offset[cam_type]);
-        }
-        // ref_to_cam is kept fixed at the identity if the cam is the ref type or
-        // no rig
-        if (rig_transforms_to_float.find(R.cam_names[cam_type]) == rig_transforms_to_float.end() ||
-            R.isRefSensor(R.cam_names[cam_type]) || FLAGS_no_rig) {
-          problem.SetParameterBlockConstant(ref_to_cam_ptr);
         }
 
         Eigen::Vector3d depth_xyz(0, 0, 0);

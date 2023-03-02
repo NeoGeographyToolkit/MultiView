@@ -135,28 +135,6 @@ void parse_camera_names(std::vector<std::string> const& cam_names,
   return;
 }  
   
-// A  function to split a string like 'haz_cam sci_cam' into
-// its two constituents and validate against the list of known cameras.
-// Do not allow to float the transform from ref cam to itself, as that
-// is the identity.
-void parse_rig_transforms_to_float(std::vector<std::string> const& cam_names,
-                                   int ref_cam_type,
-                                   std::string const& rig_transforms_to_float_str,
-                                   std::set<std::string>& rig_transforms_to_float) {
-
-  // Reuse earlier logic
-  parse_camera_names(cam_names, 
-                     rig_transforms_to_float_str,  
-                     rig_transforms_to_float);
-
-  // Additional sanity check
-  for (auto it = rig_transforms_to_float.begin(); it != rig_transforms_to_float.end(); it++)
-    if (*it == cam_names[ref_cam_type]) 
-      LOG(FATAL) << "Cannot float the rig transform from reference camera to itself.\n";
-
-  return;
-}
-  
 // Read a 4x4 pose matrix of doubles from disk
 void readPoseMatrix(cv::Mat& pose, std::string const& filename) {
   pose = cv::Mat::zeros(4, 4, CV_64F);
