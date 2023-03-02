@@ -61,7 +61,6 @@ void lookupImages(// Inputs
                   // Outputs
                   std::vector<double>                 & ref_timestamps,
                   std::vector<Eigen::Affine3d>        & world_to_ref,
-                  std::vector<std::string>            & ref_image_files,
                   std::vector<dense_map::cameraImage> & cams,
                   std::vector<Eigen::Affine3d>        & world_to_cam,
                   std::vector<double>                 & min_timestamp_offset,

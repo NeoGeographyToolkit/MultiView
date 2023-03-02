@@ -221,6 +221,11 @@ Eigen::Affine3d registrationTransform(std::string                  const& hugin_
                                       camera::CameraParameters     const& cam_params,
                                       std::vector<std::string>     const& cid_to_filename,
                                       std::vector<Eigen::Affine3d> const& world_to_cam_trans); 
+
+// TODO(oalexan1): Move to transform_utils
+// Find the name of the camera of the images used in registration.
+// The registration images must all be acquired with the same sensor.  
+std::string registrationCamName(std::string const& hugin_file);
   
 struct cameraImage;
 

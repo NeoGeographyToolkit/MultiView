@@ -1353,6 +1353,25 @@ void readXyzImage(std::string const& filename, cv::Mat & img) {
 std::string camName(std::string const& image_file) {
   return fs::path(image_file).parent_path().filename().string();
 }
+
+// Find the name of the camera of the images used in registration.
+// The registration images must all be acquired with the same sensor.  
+std::string registrationCamName(std::string const& hugin_file) {
+  std::vector<std::string> images;
+  Eigen::MatrixXd user_ip;
+  Eigen::MatrixXd user_xyz;
+  ParseHuginControlPoints(hugin_file, &images, &user_ip);
+
+  std::set<std::string> sensors;
+  for (size_t cid = 0; cid < images.size(); cid++) 
+    sensors.insert(camName(images[cid]));
+
+  if (sensors.size() != 1) 
+    LOG(FATAL) << "All images used in registration must be for the same sensor. "
+               << "Check the registration file: " << hugin_file << ".\n";
+  
+  return *sensors.begin();
+}
   
 void findCamTypeAndTimestamp(std::string const& image_file,
                              std::vector<std::string> const& cam_names,

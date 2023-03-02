@@ -1130,34 +1130,40 @@ void writeResiduals(std::string                           const& out_dir,
 } // end namespace dense_map
 // TODO(oalexan1): Test this with multiple rigs. It should work.
 // TODO(oalexan1): Need to fix ref_cam_type.
-// TODO(oalexan1): ref_image_files must be first_rig_ref_image_files.
 // Apply registration to each camera, rig (if present), and depth-to-image, if desired
-void applyRegistration(bool no_rig, bool scale_depth, int ref_cam_type,
+void applyRegistration(bool no_rig, bool scale_depth, 
                        std::string                           const & hugin_file,
                        std::string                           const & xyz_file,
                        std::vector<bool>                     const & has_depth,
-                       std::vector<std::string>              const & ref_image_files,
-                       std::vector<camera::CameraParameters> const & cam_params,
+                       std::vector<dense_map::cameraImage>   const & cams,
                        // Outputs
                        Eigen::Affine3d                             & registration_trans,
                        std::vector<Eigen::Affine3d>                & world_to_ref,
                        std::vector<Eigen::Affine3d>                & world_to_cam,
-                       std::vector<Eigen::Affine3d>                & ref_to_cam_trans,
-                       std::vector<Eigen::Affine3d>                & depth_to_image) {
+                       dense_map::RigSet                           &R) {
   
-  if (cam_params.size() != has_depth.size())
+  if (R.cam_params.size() != has_depth.size())
     LOG(FATAL) << "Number of camera types must equal the number of depth flags.";
-  
-  int num_cam_types = cam_params.size();
 
+  // All cameras used in registration must be from the same sensor.
+  // That is enforced in registrationCamName().
+  std::string reg_cam_name = dense_map::registrationCamName(hugin_file);
+  int reg_cam_index = R.sensorIndex(reg_cam_name);
+  std::cout << "--reg cam index " << reg_cam_index << std::endl;
+  
+  // Find the image files. These are one-to-one with world_to_cam.
+  std::vector<std::string> image_files;
+  for (size_t cid = 0; cid < cams.size(); cid++)
+    image_files.push_back(cams[cid].image_name);
+  
   // Find the registration transform.
   // TODO(oalexan1): Pass to this the whole set of cameras and camera
   // params, as it need not be the first rig images that are used.
   registration_trans
     = dense_map::registrationTransform(hugin_file, xyz_file,  
-                                       cam_params[ref_cam_type],  
-                                       ref_image_files,  
-                                       world_to_ref);
+                                       R.cam_params[reg_cam_index],  
+                                       image_files,  
+                                       world_to_cam);
 
   // Apply the transform to world_to_ref and world_to_cam
   dense_map::TransformCameras(registration_trans, world_to_ref);
@@ -1165,15 +1171,16 @@ void applyRegistration(bool no_rig, bool scale_depth, int ref_cam_type,
 
   // Transform the rig
   if (!no_rig)
-    dense_map::TransformRig(registration_trans, ref_to_cam_trans);
+    dense_map::TransformRig(registration_trans, R.ref_to_cam_trans);
 
   // Transform the depth-to-image transforms, if desired
   if (scale_depth) {
     double scale = pow(registration_trans.linear().determinant(), 1.0 / 3.0);
+    int num_cam_types = R.cam_params.size();
     for (int cam_type = 0; cam_type < num_cam_types; cam_type++) {
       if (has_depth[cam_type]) {
-        depth_to_image[cam_type].linear() *= scale;
-        depth_to_image[cam_type].translation() *= scale;
+        R.depth_to_image[cam_type].linear() *= scale;
+        R.depth_to_image[cam_type].translation() *= scale;
       }
     }
   }
@@ -1230,16 +1237,14 @@ int main(int argc, char** argv) {
   //  getting out of the bracket.
   std::vector<double> min_timestamp_offset, max_timestamp_offset;
   std::vector<double> ref_timestamps; // Timestamps for the ref cameras
-  std::vector<std::string> ref_image_files;
   // Select the images to use. If the rig is used, keep non-ref images
   // only within the bracket.
-  int ref_cam_type = 0; // TODO(oalexan1): Remove this
   dense_map::lookupImages(// Inputs
                           FLAGS_no_rig, FLAGS_bracket_len,
                           FLAGS_timestamp_offsets_max_change,
                           R, image_maps, depth_maps,
                           // Outputs
-                          ref_timestamps, world_to_ref, ref_image_files,
+                          ref_timestamps, world_to_ref,
                           cams, world_to_cam, min_timestamp_offset, max_timestamp_offset);
   // De-allocate data we no longer need
   image_maps = std::vector<dense_map::MsgMap>();
@@ -1277,12 +1282,10 @@ int main(int argc, char** argv) {
     // cameras from Theia's abstract coordinate system to world coordinates.
     bool scale_depth = false;
     Eigen::Affine3d registration_trans;
-    applyRegistration(FLAGS_no_rig, scale_depth, ref_cam_type,  
-                      FLAGS_hugin_file, FLAGS_xyz_file, has_depth,  
-                      ref_image_files, R.cam_params,  
+    applyRegistration(FLAGS_no_rig, scale_depth, FLAGS_hugin_file, FLAGS_xyz_file,
+                      has_depth, cams,
                       // Outputs
-                      registration_trans,
-                      world_to_ref, world_to_cam, R.ref_to_cam_trans, R.depth_to_image);
+                      registration_trans, world_to_ref, world_to_cam, R);
   }
 
   // Put the rig transforms in arrays, so we can optimize them
@@ -1920,12 +1923,10 @@ int main(int argc, char** argv) {
     // This time adjust the depth-to-image scale to be consistent with optimized cameras
     bool scale_depth = true;
     Eigen::Affine3d registration_trans;
-    applyRegistration(FLAGS_no_rig, scale_depth, ref_cam_type,  
-                      FLAGS_hugin_file, FLAGS_xyz_file, has_depth,  
-                      ref_image_files, R.cam_params,  
+    applyRegistration(FLAGS_no_rig, scale_depth, FLAGS_hugin_file, FLAGS_xyz_file,
+                      has_depth, cams,
                       // Outputs
-                      registration_trans,
-                      world_to_ref, world_to_cam, R.ref_to_cam_trans, R.depth_to_image);
+                      registration_trans, world_to_ref, world_to_cam, R);
 
     // Transform accordingly the triangulated points
     dense_map::transformInlierTriPoints(registration_trans, pid_to_cid_fid, pid_cid_fid_inlier,  

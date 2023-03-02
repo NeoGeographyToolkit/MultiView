@@ -165,8 +165,7 @@ void lookupFilesPoses(// Inputs
                       std::vector<std::map<double, dense_map::ImageMessage>> const& depth_maps,
                       // Outputs
                       std::vector<double>& ref_timestamps,
-                      std::vector<Eigen::Affine3d> & world_to_ref,
-                      std::vector<std::string> & ref_image_files) {
+                      std::vector<Eigen::Affine3d> & world_to_ref) {
 
   // Sanity checks
   if (image_maps.size() != depth_maps.size() || image_maps.size() != R.cam_names.size())
@@ -175,7 +174,6 @@ void lookupFilesPoses(// Inputs
   // Wipe the outputs
   ref_timestamps.clear();
   world_to_ref.clear();
-  ref_image_files.clear();
 
   int num_cams = R.cam_names.size();
   for (size_t cam_type = 0; cam_type < image_maps.size(); cam_type++) {
@@ -183,12 +181,10 @@ void lookupFilesPoses(// Inputs
     auto const& image_map = image_maps[cam_type];
 
     for (auto it = image_map.begin(); it != image_map.end(); it++) {
-      // Collect the ref cam timestamps, world_to_ref, and image names,
-      // in chronological order
+      // Collect the ref cam timestamps, world_to_ref, in chronological order
       if (R.isRefSensor(R.cam_names[cam_type])) {
         world_to_ref.push_back(it->second.world_to_cam);
         ref_timestamps.push_back(it->second.timestamp);
-        ref_image_files.push_back(it->second.name);
       }
     }
   }
@@ -523,7 +519,6 @@ void lookupImagesOneRig(// Inputs
                         // Outputs
                         std::vector<double>                 & ref_timestamps,
                         std::vector<Eigen::Affine3d>        & world_to_ref,
-                        std::vector<std::string>            & ref_image_files,
                         std::vector<dense_map::cameraImage> & cams,
                         std::vector<Eigen::Affine3d>        & world_to_cam,
                         std::vector<double>                 & min_timestamp_offset,
@@ -532,7 +527,7 @@ void lookupImagesOneRig(// Inputs
   dense_map::lookupFilesPoses(// Inputs
                               R, image_maps, depth_maps,
                               // Outputs
-                              ref_timestamps, world_to_ref, ref_image_files);
+                              ref_timestamps, world_to_ref);
   
   if (!no_rig) 
     lookupImagesAndBrackets(// Inputs
@@ -620,7 +615,6 @@ void lookupImages(// Inputs
                   // Outputs
                   std::vector<double>                 & ref_timestamps,
                   std::vector<Eigen::Affine3d>        & world_to_ref,
-                  std::vector<std::string>            & ref_image_files,
                   std::vector<dense_map::cameraImage> & cams,
                   std::vector<Eigen::Affine3d>        & world_to_cam,
                   std::vector<double>                 & min_timestamp_offset,
@@ -629,7 +623,6 @@ void lookupImages(// Inputs
   // Wipe the outputs
   ref_timestamps.clear();
   world_to_ref.clear();
-  ref_image_files.clear();
   cams.clear();
   world_to_cam.clear();
   min_timestamp_offset.clear();
@@ -655,7 +648,6 @@ void lookupImages(// Inputs
 
     std::vector<double>                 sub_ref_timestamps;
     std::vector<Eigen::Affine3d>        sub_world_to_ref;
-    std::vector<std::string>            sub_ref_image_files;
     std::vector<dense_map::cameraImage> sub_cams;
     std::vector<Eigen::Affine3d>        sub_world_to_cam;
     std::vector<double>                 sub_min_timestamp_offset;
@@ -666,7 +658,7 @@ void lookupImages(// Inputs
                        no_rig, bracket_len, timestamp_offsets_max_change, sub_rig,  
                        sub_image_maps, sub_depth_maps,  
                        // Outputs
-                       sub_ref_timestamps, sub_world_to_ref, sub_ref_image_files, sub_cams,  
+                       sub_ref_timestamps, sub_world_to_ref, sub_cams,  
                        sub_world_to_cam, sub_min_timestamp_offset, sub_max_timestamp_offset);
 
     // Save the endpoints for ref timestamps and all cams, before concatenation
@@ -680,8 +672,6 @@ void lookupImages(// Inputs
     ref_timestamps.insert(ref_timestamps.end(), sub_ref_timestamps.begin(),
                           sub_ref_timestamps.end());
     world_to_ref.insert(world_to_ref.end(), sub_world_to_ref.begin(), sub_world_to_ref.end());
-    ref_image_files.insert(ref_image_files.end(), sub_ref_image_files.begin(),
-                           sub_ref_image_files.end());
     cams.insert(cams.end(), sub_cams.begin(), sub_cams.end());
     world_to_cam.insert(world_to_cam.end(), sub_world_to_cam.begin(), sub_world_to_cam.end());
     min_timestamp_offset.insert(min_timestamp_offset.end(), sub_min_timestamp_offset.begin(),
