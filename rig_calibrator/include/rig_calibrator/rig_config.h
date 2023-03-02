@@ -65,11 +65,16 @@ struct RigSet {
   // Return the id of the rig given the index of the camera
   // in cam_names.
   int rigId(int cam_id) const;
+
+  int sensorIndex(std::string const& sensor_name) const;
+  
+  // Create a rig set having a single rig  
+  RigSet subRig(int rig_id) const;
   
   // Sanity checks
   void validate() const;
 };
-
+  
 // Save the optimized rig configuration
 void writeRigConfig(std::string const& out_dir, bool model_rig, RigSet const& R);
   

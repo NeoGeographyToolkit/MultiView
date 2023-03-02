@@ -514,21 +514,21 @@ void lookupImagesNoBrackets(// Inputs
 
 // Look up images, with or without the rig constraint. See individual functions
 // below for more details.
-void lookupImages(// Inputs
-                  bool no_rig, double bracket_len,
-                  double timestamp_offsets_max_change,
-                  dense_map::RigSet const& R,
-                  std::vector<MsgMap> const& image_maps,
-                  std::vector<MsgMap> const& depth_maps,
-                  // Outputs
-                  std::vector<double>                 & ref_timestamps,
-                  std::vector<Eigen::Affine3d>        & world_to_ref,
-                  std::vector<std::string>            & ref_image_files,
-                  std::vector<dense_map::cameraImage> & cams,
-                  std::vector<Eigen::Affine3d>        & world_to_cam,
-                  std::vector<double>                 & min_timestamp_offset,
-                  std::vector<double>                 & max_timestamp_offset) {
-
+void lookupImagesOneRig(// Inputs
+                        bool no_rig, double bracket_len,
+                        double timestamp_offsets_max_change,
+                        dense_map::RigSet const& R,
+                        std::vector<MsgMap> const& image_maps,
+                        std::vector<MsgMap> const& depth_maps,
+                        // Outputs
+                        std::vector<double>                 & ref_timestamps,
+                        std::vector<Eigen::Affine3d>        & world_to_ref,
+                        std::vector<std::string>            & ref_image_files,
+                        std::vector<dense_map::cameraImage> & cams,
+                        std::vector<Eigen::Affine3d>        & world_to_cam,
+                        std::vector<double>                 & min_timestamp_offset,
+                        std::vector<double>                 & max_timestamp_offset) {
+  
   dense_map::lookupFilesPoses(// Inputs
                               R, image_maps, depth_maps,
                               // Outputs
@@ -609,4 +609,111 @@ void lookupImages(// Inputs
   return; 
 }
 
+// Look up images for a set of rigs. This requires looking up images for individual rigs,
+// then concatenating the results and adjusting the book-keeping.
+void lookupImages(// Inputs
+                  bool no_rig, double bracket_len,
+                  double timestamp_offsets_max_change,
+                  dense_map::RigSet const& R,
+                  std::vector<MsgMap> const& image_maps,
+                  std::vector<MsgMap> const& depth_maps,
+                  // Outputs
+                  std::vector<double>                 & ref_timestamps,
+                  std::vector<Eigen::Affine3d>        & world_to_ref,
+                  std::vector<std::string>            & ref_image_files,
+                  std::vector<dense_map::cameraImage> & cams,
+                  std::vector<Eigen::Affine3d>        & world_to_cam,
+                  std::vector<double>                 & min_timestamp_offset,
+                  std::vector<double>                 & max_timestamp_offset) {
+
+  // Wipe the outputs
+  ref_timestamps.clear();
+  world_to_ref.clear();
+  ref_image_files.clear();
+  cams.clear();
+  world_to_cam.clear();
+  min_timestamp_offset.clear();
+  max_timestamp_offset.clear();
+
+  for (size_t rig_id = 0; rig_id < R.cam_set.size(); rig_id++) {
+
+    // Create a single rig
+    std::cout << "--rig id is " << rig_id << std::endl;
+    dense_map::RigSet sub_rig = R.subRig(rig_id);
+
+    // Prepare the inputs for the subrig
+    std::vector<MsgMap> sub_image_maps;
+    std::vector<MsgMap> sub_depth_maps;
+    for (size_t sub_it = 0; sub_it < sub_rig.cam_names.size(); sub_it++) {
+      std::string sensor_name = sub_rig.cam_names[sub_it];
+      std::cout << "sensor name " << sensor_name << std::endl;
+      int rig_set_it = R.sensorIndex(sensor_name); // index in the larger rig
+      std::cout << "---got " << sub_it << ' ' << sensor_name << ' ' << rig_set_it << std::endl;
+      sub_image_maps.push_back(image_maps[rig_set_it]);
+      sub_depth_maps.push_back(depth_maps[rig_set_it]);
+    }
+
+    std::vector<double>                 sub_ref_timestamps;
+    std::vector<Eigen::Affine3d>        sub_world_to_ref;
+    std::vector<std::string>            sub_ref_image_files;
+    std::vector<dense_map::cameraImage> sub_cams;
+    std::vector<Eigen::Affine3d>        sub_world_to_cam;
+    std::vector<double>                 sub_min_timestamp_offset;
+    std::vector<double>                 sub_max_timestamp_offset;
+
+    // Do the work for the subrig
+    lookupImagesOneRig(// Inputs
+                       no_rig, bracket_len, timestamp_offsets_max_change, sub_rig,  
+                       sub_image_maps, sub_depth_maps,  
+                       // Outputs
+                       sub_ref_timestamps, sub_world_to_ref, sub_ref_image_files, sub_cams,  
+                       sub_world_to_cam, sub_min_timestamp_offset, sub_max_timestamp_offset);
+
+    // Save the endpoints for ref timestamps and all cams, before concatenation
+    size_t prev_ref_end = ref_timestamps.size();
+    size_t prev_end = cams.size();
+
+    std::cout << "--prev ref end " << prev_ref_end << std::endl;
+    std::cout << "--prev end " << prev_end << std::endl;
+
+    // Append the answers
+    ref_timestamps.insert(ref_timestamps.end(), sub_ref_timestamps.begin(),
+                          sub_ref_timestamps.end());
+    world_to_ref.insert(world_to_ref.end(), sub_world_to_ref.begin(), sub_world_to_ref.end());
+    ref_image_files.insert(ref_image_files.end(), sub_ref_image_files.begin(),
+                           sub_ref_image_files.end());
+    cams.insert(cams.end(), sub_cams.begin(), sub_cams.end());
+    world_to_cam.insert(world_to_cam.end(), sub_world_to_cam.begin(), sub_world_to_cam.end());
+    min_timestamp_offset.insert(min_timestamp_offset.end(), sub_min_timestamp_offset.begin(),
+                                sub_min_timestamp_offset.end());
+    max_timestamp_offset.insert(max_timestamp_offset.end(), sub_max_timestamp_offset.begin(),
+                                sub_max_timestamp_offset.end());
+
+    std::cout << "--curr ref end " << ref_timestamps.size() << std::endl;
+    std::cout << "--curr end " << cams.size() << std::endl;
+    
+    // Update the bookkeeping in 'cams'
+    for (size_t cam_it = prev_end; cam_it < cams.size(); cam_it++) {
+
+      // Find the current sensor index in the larger rig set
+      int subrig_sensor_index = cams[cam_it].camera_type;
+      std::string subrig_sensor = sub_rig.cam_names[subrig_sensor_index];
+      int rig_sensor_index = R.sensorIndex(subrig_sensor);
+      cams[cam_it].camera_type = rig_sensor_index;
+
+      std::cout << "--sub and full sensor index " << subrig_sensor_index << ' ' << rig_sensor_index
+                << std::endl;
+      
+      // Update the pointers to indices in ref_timestamps
+      std::cout << "--sub ref beg end " << cams[cam_it].beg_ref_index << ' ' << cams[cam_it].end_ref_index << std::endl;
+      cams[cam_it].beg_ref_index += prev_ref_end;     
+      cams[cam_it].end_ref_index += prev_ref_end;
+
+      std::cout << "--full ref beg end " << cams[cam_it].beg_ref_index << ' ' << cams[cam_it].end_ref_index << std::endl;
+    }
+  }
+
+  return;
+}
+  
 }  // end namespace dense_map

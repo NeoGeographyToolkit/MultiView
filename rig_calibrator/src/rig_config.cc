@@ -92,13 +92,57 @@ int RigSet::rigId(int cam_id) const {
   LOG(FATAL) << "Could not look up in the rig the sensor: " << cam_name << "\n";
   return -1;
 }
+
+// Find index in rig
+int RigSet::sensorIndex(std::string const& sensor_name) const {
+  std::cout << "-=--lookup " << sensor_name << std::endl;
+  auto it = std::find(cam_names.begin(), cam_names.end(), sensor_name);
+
+  std::cout << "--cam names size " << cam_names.size() << std::endl;
+  
+  for (size_t p = 0; p < cam_names.size(); p++) {
+    std::cout << "--have in rig " << p << ' ' << cam_names[p] << std::endl;
+  }
+  std::cout << "--but it minus first " << it - cam_names.begin() << std::endl;
+  
+  if (it == cam_names.end()) 
+    LOG(FATAL) << "Could not find sensor in rig. That is unexpected.\n";
+  return it - cam_names.begin();
+}
+  
+// Create a rig set having a single rig  
+RigSet RigSet::subRig(int rig_id) const {
+
+  if (rig_id < 0 || rig_id >= cam_set.size()) 
+    LOG(FATAL) << "Out of range in rig set.\n";
+
+  std::cout << "--now in subRig " << std::endl;
+  RigSet sub_rig;
+  sub_rig.cam_set.push_back(cam_set[rig_id]);
+
+  // Add the relevant portion of each rig member
+  for (size_t subrig_it = 0; subrig_it < cam_set[rig_id].size(); subrig_it++) {
+    
+    std::string sensor_name = cam_set[rig_id][subrig_it];
+    std::cout << "--sensor name " << sensor_name << std::endl;
+    int rig_index = sensorIndex(sensor_name);
+
+    sub_rig.cam_names.push_back(cam_names[rig_index]);
+    sub_rig.ref_to_cam_trans.push_back(ref_to_cam_trans[rig_index]);
+    sub_rig.depth_to_image.push_back(depth_to_image[rig_index]);
+    sub_rig.ref_to_cam_timestamp_offsets.push_back(ref_to_cam_timestamp_offsets[rig_index]);
+    sub_rig.cam_params.push_back(cam_params[rig_index]);
+  }
+  sub_rig.validate();
+
+  return sub_rig;
+}
   
 const std::string FISHEYE_DISTORTION = "fisheye";
 const std::string RADTAN_DISTORTION  = "radtan";
 const std::string RPC_DISTORTION     = "rpc";
 const std::string NO_DISTORION       = "no_distortion";
 
-  
 // Save the optimized rig configuration
 void writeRigConfig(std::string const& out_dir, bool model_rig, RigSet const& R) {
 
