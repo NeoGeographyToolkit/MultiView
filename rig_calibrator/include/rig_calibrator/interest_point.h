@@ -211,14 +211,16 @@ void TransformPoints(Eigen::Affine3d const& T, std::vector<Eigen::Vector3d> *xyz
 // systems of various cameras.
 void TransformRig(Eigen::Affine3d const& T, std::vector<Eigen::Affine3d> & ref_to_cam_trans);
 
-// TODO(oalexan1): Move this to transform_utils.
-// Find the 3D transform from an abstract coordinate system to the
-// world, given control points (pixel matches) and corresponding 3D
-// measurements. It is assumed all images are acquired with the same camera.
-Eigen::Affine3d registrationTransform(std::string const& hugin_file, std::string const& xyz_file,
-                                      camera::CameraParameters const& cam_params,
-                                      std::vector<std::string> const& cid_to_filename,
-                                      std::vector<Eigen::Affine3d>  & world_to_cam_trans); 
+// TODO(oalexan1): Move this to transform_utils.  Find the 3D
+// transform from an abstract coordinate system to the world, given
+// control points (pixel matches) and corresponding 3D
+// measurements. It is assumed all images are acquired with the same
+// camera.
+Eigen::Affine3d registrationTransform(std::string                  const& hugin_file,
+                                      std::string                  const& xyz_file,
+                                      camera::CameraParameters     const& cam_params,
+                                      std::vector<std::string>     const& cid_to_filename,
+                                      std::vector<Eigen::Affine3d> const& world_to_cam_trans); 
   
 struct cameraImage;
 

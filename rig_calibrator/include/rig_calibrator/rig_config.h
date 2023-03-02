@@ -66,8 +66,12 @@ struct RigSet {
   // in cam_names.
   int rigId(int cam_id) const;
 
+  // The name of the ref sensor for the rig having the given sensor id
+  std::string refSensor(int cam_id) const;
+
+  // Index in the list of sensors of the sensor with given name
   int sensorIndex(std::string const& sensor_name) const;
-  
+
   // Create a rig set having a single rig  
   RigSet subRig(int rig_id) const;
   

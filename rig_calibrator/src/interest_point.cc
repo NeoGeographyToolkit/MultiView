@@ -799,7 +799,10 @@ void saveInlinerMatchPairs(// Inputs
 
 // TODO(oalexan1): All the logic below has little to do with interest
 // points, and should be distributed to some other existing or new files.
-
+  
+// TODO(oalexan1): Move this to transform_utils.  There already should
+// exist something similar copied from Astrobee, used in map merging.
+  
 // Given a set of points in 3D, heuristically estimate what it means
 // for two points to be "not far" from each other. The logic is to
 // find a bounding box of an inner cluster and multiply that by 0.2.
@@ -838,6 +841,7 @@ double estimateCloseDistance(std::vector<Eigen::Vector3d> const& vec) {
 // which best maps the first set to the second.
 // Source: http://en.wikipedia.org/wiki/Kabsch_algorithm
 // TODO(oalexan1): Use the version robust to outliers!  
+// TODO(oalexan1): Move this to transform_utils.
 void Find3DAffineTransform(Eigen::Matrix3Xd const & in,
                            Eigen::Matrix3Xd const & out,
                            Eigen::Affine3d* result) {
@@ -896,6 +900,7 @@ void Find3DAffineTransform(Eigen::Matrix3Xd const & in,
   result->translation() = scale*(out_ctr - R*in_ctr);
 }
   
+// TODO(oalexan1): Move this to transform_utils.
 // Extract control points and the images they correspond 2 from
 // a hugin project file
 void ParseHuginControlPoints(std::string const& hugin_file,
@@ -1003,6 +1008,7 @@ void ParseXYZ(std::string const& xyz_file,
   }
 }
 
+// TODO(oalexan1): Move this to transform_utils.
 // Apply a given transform to the given set of cameras.
 // We assume that the transform is of the form
 // T(x) = scale * rotation * x + translation
@@ -1019,12 +1025,14 @@ void TransformCameras(Eigen::Affine3d const& T, std::vector<Eigen::Affine3d> &wo
   }
 }
 
+// TODO(oalexan1): Move this to transform_utils.
 // Apply same transform as above to points
 void TransformPoints(Eigen::Affine3d const& T, std::vector<Eigen::Vector3d> *xyz) {
   for (size_t pid = 0; pid < (*xyz).size(); pid++)
     (*xyz)[pid] = T * (*xyz)[pid];
 }
 
+// TODO(oalexan1): Move this to transform_utils.
 // Apply a given transform to the specified xyz points, and adjust accordingly the cameras
 // for consistency. We assume that the transform is of the form
 // A(x) = scale * rotation * x + translation
@@ -1035,6 +1043,7 @@ void TransformCamerasAndPoints(Eigen::Affine3d const& A,
   TransformPoints(A, xyz);
 }
   
+// TODO(oalexan1): Move this to transform_utils.
 // Apply a registration transform to a rig. The only thing that
 // changes is scale, as the rig transforms are between coordinate
 // systems of various cameras.
@@ -1060,10 +1069,11 @@ std::string print_vec(Eigen::Vector3d a) {
 // Find the 3D transform from an abstract coordinate system to the
 // world, given control points (pixel matches) and corresponding 3D
 // measurements. It is assumed all images are acquired with the same camera.
-Eigen::Affine3d registrationTransform(std::string const& hugin_file, std::string const& xyz_file,
-                                      camera::CameraParameters const& cam_params,
-                                      std::vector<std::string> const& cid_to_filename,
-                                      std::vector<Eigen::Affine3d>  & world_to_cam_trans) { 
+Eigen::Affine3d registrationTransform(std::string                  const& hugin_file,
+                                      std::string                  const& xyz_file,
+                                      camera::CameraParameters     const& cam_params,
+                                      std::vector<std::string>     const& cid_to_filename,
+                                      std::vector<Eigen::Affine3d> const& world_to_cam_trans) { 
   
   // Get the interest points in the images, and their positions in
   // the world coordinate system, as supplied by a user.
@@ -1215,7 +1225,6 @@ Eigen::Affine3d registrationTransform(std::string const& hugin_file, std::string
               << std::endl;
   }
 
-
   // Find the transform from the computed map coordinate system
   // to the world coordinate system.
   int np = unreg_pid_to_xyz.size();
@@ -1226,9 +1235,6 @@ Eigen::Affine3d registrationTransform(std::string const& hugin_file, std::string
   Eigen::Affine3d registration_trans;  
   Find3DAffineTransform(in, user_xyz, &registration_trans);
 
-  // Transform the map to the world coordinate system
-  TransformCameras(registration_trans, world_to_cam_trans);
-  
   mean_err = 0.0;
   for (int i = 0; i < user_xyz.cols(); i++)
     mean_err += (registration_trans*in.col(i) - user_xyz.col(i)).norm();
@@ -1261,7 +1267,6 @@ Eigen::Affine3d registrationTransform(std::string const& hugin_file, std::string
               << images[id1] << ' '
               << images[id2] << std::endl;
   }
-
 
   return registration_trans;
 }
@@ -1343,6 +1348,12 @@ void readXyzImage(std::string const& filename, cv::Mat & img) {
   return;
 }
 
+// The cam name is the subdir having the images.
+// Example: mydir/nav_cam/file.jpg has nav_cam as the cam name.
+std::string camName(std::string const& image_file) {
+  return fs::path(image_file).parent_path().filename().string();
+}
+  
 void findCamTypeAndTimestamp(std::string const& image_file,
                              std::vector<std::string> const& cam_names,
                              // Outputs
@@ -1354,8 +1365,7 @@ void findCamTypeAndTimestamp(std::string const& image_file,
   timestamp = 0.0;
   
   // The cam name is the subdir having the images
-  std::string cam_name =
-    fs::path(image_file).parent_path().filename().string();
+  std::string cam_name = camName(image_file);
     
   std::string basename = fs::path(image_file).filename().string();
   if (basename.empty() || basename[0] < '0' || basename[0] > '9')

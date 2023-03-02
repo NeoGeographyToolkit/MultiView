@@ -1150,8 +1150,7 @@ void applyRegistration(bool no_rig, bool scale_depth, int ref_cam_type,
   
   int num_cam_types = cam_params.size();
 
-  // Find the registration transform, and apply to to world_to_ref.
-  // It is a bit confusing that world_to_ref changes here.
+  // Find the registration transform.
   // TODO(oalexan1): Pass to this the whole set of cameras and camera
   // params, as it need not be the first rig images that are used.
   registration_trans
@@ -1160,10 +1159,8 @@ void applyRegistration(bool no_rig, bool scale_depth, int ref_cam_type,
                                        ref_image_files,  
                                        world_to_ref);
 
-  // TODO(oalexan1): Do not apply transform to world_to_ref inside that function,
-  // do it here instead.
-  
-  // The above transformed world_to_ref. Also transform world_to_cam.
+  // Apply the transform to world_to_ref and world_to_cam
+  dense_map::TransformCameras(registration_trans, world_to_ref);
   dense_map::TransformCameras(registration_trans, world_to_cam);
 
   // Transform the rig
@@ -1171,14 +1168,16 @@ void applyRegistration(bool no_rig, bool scale_depth, int ref_cam_type,
     dense_map::TransformRig(registration_trans, ref_to_cam_trans);
 
   // Transform the depth-to-image transforms, if desired
-  double scale = pow(registration_trans.linear().determinant(), 1.0 / 3.0);
-  for (int cam_type = 0; cam_type < num_cam_types; cam_type++) {
-    if (has_depth[cam_type] && scale_depth) {
-      depth_to_image[cam_type].linear() *= scale;
-      depth_to_image[cam_type].translation() *= scale;
+  if (scale_depth) {
+    double scale = pow(registration_trans.linear().determinant(), 1.0 / 3.0);
+    for (int cam_type = 0; cam_type < num_cam_types; cam_type++) {
+      if (has_depth[cam_type]) {
+        depth_to_image[cam_type].linear() *= scale;
+        depth_to_image[cam_type].translation() *= scale;
+      }
     }
   }
-
+  
   return;
 }
 
@@ -1617,7 +1616,7 @@ int main(int argc, char** argv) {
         // down.
         if (!FLAGS_no_rig) {
           // See if to float the ref cameras
-          if (camera_poses_to_float.find(R.cam_names[ref_cam_type]) == camera_poses_to_float.end())
+          if (camera_poses_to_float.find(R.refSensor(cam_type)) == camera_poses_to_float.end())
             problem.SetParameterBlockConstant(beg_cam_ptr);
         } else {
           // There is no rig. Then beg_cam_ptr refers to camera
@@ -1628,9 +1627,9 @@ int main(int argc, char** argv) {
           }
         }
 
-        // The end cam floats only if told to, and if it brackets
-        // a given non-ref cam.
-        if (camera_poses_to_float.find(R.cam_names[ref_cam_type]) == camera_poses_to_float.end() ||
+        // The end cam floats only if the ref cam can float and end cam brackets
+        // a non-ref cam and we have a rig.
+        if (camera_poses_to_float.find(R.refSensor(cam_type)) == camera_poses_to_float.end() ||
             R.isRefSensor(R.cam_names[cam_type]) || FLAGS_no_rig) {
           problem.SetParameterBlockConstant(end_cam_ptr);
         }

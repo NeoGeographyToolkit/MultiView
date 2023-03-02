@@ -93,7 +93,14 @@ int RigSet::rigId(int cam_id) const {
   return -1;
 }
 
-// Find index in rig
+// The name of the ref sensor for the rig having the given sensor id
+std::string RigSet::refSensor(int cam_id) const {
+  std::cout << "--ref sensor for given sensor id " << cam_id << " is "
+            << cam_set[rigId(cam_id)][0] << std::endl;
+  return cam_set[rigId(cam_id)][0];
+}
+  
+// Index in the list of sensors of the sensor with given name
 int RigSet::sensorIndex(std::string const& sensor_name) const {
   std::cout << "-=--lookup " << sensor_name << std::endl;
   auto it = std::find(cam_names.begin(), cam_names.end(), sensor_name);
