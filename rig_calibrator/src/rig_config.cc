@@ -95,23 +95,12 @@ int RigSet::rigId(int cam_id) const {
 
 // The name of the ref sensor for the rig having the given sensor id
 std::string RigSet::refSensor(int cam_id) const {
-  std::cout << "--ref sensor for given sensor id " << cam_id << " is "
-            << cam_set[rigId(cam_id)][0] << std::endl;
   return cam_set[rigId(cam_id)][0];
 }
   
 // Index in the list of sensors of the sensor with given name
 int RigSet::sensorIndex(std::string const& sensor_name) const {
-  std::cout << "-=--lookup " << sensor_name << std::endl;
   auto it = std::find(cam_names.begin(), cam_names.end(), sensor_name);
-
-  std::cout << "--cam names size " << cam_names.size() << std::endl;
-  
-  for (size_t p = 0; p < cam_names.size(); p++) {
-    std::cout << "--have in rig " << p << ' ' << cam_names[p] << std::endl;
-  }
-  std::cout << "--but it minus first " << it - cam_names.begin() << std::endl;
-  
   if (it == cam_names.end()) 
     LOG(FATAL) << "Could not find sensor in rig. That is unexpected.\n";
   return it - cam_names.begin();
@@ -123,7 +112,6 @@ RigSet RigSet::subRig(int rig_id) const {
   if (rig_id < 0 || rig_id >= cam_set.size()) 
     LOG(FATAL) << "Out of range in rig set.\n";
 
-  std::cout << "--now in subRig " << std::endl;
   RigSet sub_rig;
   sub_rig.cam_set.push_back(cam_set[rig_id]);
 
@@ -131,7 +119,6 @@ RigSet RigSet::subRig(int rig_id) const {
   for (size_t subrig_it = 0; subrig_it < cam_set[rig_id].size(); subrig_it++) {
     
     std::string sensor_name = cam_set[rig_id][subrig_it];
-    std::cout << "--sensor name " << sensor_name << std::endl;
     int rig_index = sensorIndex(sensor_name);
 
     sub_rig.cam_names.push_back(cam_names[rig_index]);
@@ -353,12 +340,6 @@ void readRigConfig(std::string const& rig_config, bool have_rig_transforms, RigS
         return;
       }
       std::string sensor_name = str_vals[0];
-
-      // Sanity check
-      if ((sensor_it == ref_sensor_count - 1 && sensor_name != ref_sensor_name) ||  
-          (sensor_it != ref_sensor_count - 1 && sensor_name == ref_sensor_name))
-        LOG(FATAL) << "The reference sensor must be the first sensor specified for each "
-                   << "rig in the rig set.\n";  
 
       // It is convenient to store each sensor in cam_set, which has the rig set structure,
       // and in R.cam_names, which is enough for almost all processing.

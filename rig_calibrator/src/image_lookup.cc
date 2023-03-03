@@ -631,7 +631,6 @@ void lookupImages(// Inputs
   for (size_t rig_id = 0; rig_id < R.cam_set.size(); rig_id++) {
 
     // Create a single rig
-    std::cout << "--rig id is " << rig_id << std::endl;
     dense_map::RigSet sub_rig = R.subRig(rig_id);
 
     // Prepare the inputs for the subrig
@@ -639,9 +638,7 @@ void lookupImages(// Inputs
     std::vector<MsgMap> sub_depth_maps;
     for (size_t sub_it = 0; sub_it < sub_rig.cam_names.size(); sub_it++) {
       std::string sensor_name = sub_rig.cam_names[sub_it];
-      std::cout << "sensor name " << sensor_name << std::endl;
       int rig_set_it = R.sensorIndex(sensor_name); // index in the larger rig
-      std::cout << "---got " << sub_it << ' ' << sensor_name << ' ' << rig_set_it << std::endl;
       sub_image_maps.push_back(image_maps[rig_set_it]);
       sub_depth_maps.push_back(depth_maps[rig_set_it]);
     }
@@ -665,9 +662,6 @@ void lookupImages(// Inputs
     size_t prev_ref_end = ref_timestamps.size();
     size_t prev_end = cams.size();
 
-    std::cout << "--prev ref end " << prev_ref_end << std::endl;
-    std::cout << "--prev end " << prev_end << std::endl;
-
     // Append the answers
     ref_timestamps.insert(ref_timestamps.end(), sub_ref_timestamps.begin(),
                           sub_ref_timestamps.end());
@@ -679,9 +673,6 @@ void lookupImages(// Inputs
     max_timestamp_offset.insert(max_timestamp_offset.end(), sub_max_timestamp_offset.begin(),
                                 sub_max_timestamp_offset.end());
 
-    std::cout << "--curr ref end " << ref_timestamps.size() << std::endl;
-    std::cout << "--curr end " << cams.size() << std::endl;
-    
     // Update the bookkeeping in 'cams'
     for (size_t cam_it = prev_end; cam_it < cams.size(); cam_it++) {
 
@@ -691,15 +682,9 @@ void lookupImages(// Inputs
       int rig_sensor_index = R.sensorIndex(subrig_sensor);
       cams[cam_it].camera_type = rig_sensor_index;
 
-      std::cout << "--sub and full sensor index " << subrig_sensor_index << ' ' << rig_sensor_index
-                << std::endl;
-      
       // Update the pointers to indices in ref_timestamps
-      std::cout << "--sub ref beg end " << cams[cam_it].beg_ref_index << ' ' << cams[cam_it].end_ref_index << std::endl;
       cams[cam_it].beg_ref_index += prev_ref_end;     
       cams[cam_it].end_ref_index += prev_ref_end;
-
-      std::cout << "--full ref beg end " << cams[cam_it].beg_ref_index << ' ' << cams[cam_it].end_ref_index << std::endl;
     }
   }
 

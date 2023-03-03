@@ -1198,8 +1198,11 @@ int main(int argc, char** argv) {
   dense_map::RigSet R;
   dense_map::readRigConfig(FLAGS_rig_config, FLAGS_use_initial_rig_transforms, R);
 
-  int num_cam_types = R.cam_params.size();
-  if (FLAGS_extra_list != "" && FLAGS_num_overlaps < num_cam_types)
+  // Sanity check
+  size_t max_num_sensors_per_rig = 0;
+  for (size_t rig_it = 0; rig_it < R.cam_set.size(); rig_it++) 
+    max_num_sensors_per_rig = std::max(max_num_sensors_per_rig, R.cam_set[rig_it].size()); 
+  if (FLAGS_extra_list != "" && FLAGS_num_overlaps < max_num_sensors_per_rig)
     LOG(FATAL) << "If inserting extra images, must have --num_overlaps be at least the number "
                << "of sensors in the rig, and ideally more, to be able to tie well the "
                << "new images with the existing ones.\n";
@@ -1269,6 +1272,7 @@ int main(int argc, char** argv) {
   }
   
   // Determine if a given camera type has any depth information
+  int num_cam_types = R.cam_names.size();
   std::vector<bool> has_depth(num_cam_types, false);
   for (size_t cid = 0; cid < cams.size(); cid++) {
     int cam_type = cams[cid].camera_type;
