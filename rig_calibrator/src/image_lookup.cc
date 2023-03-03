@@ -572,8 +572,9 @@ void lookupImagesOneRig(// Inputs
   // that this does not affect the book-keeping of beg_ref_index
   // and end_ref_it in this vector because those indices point to
   // world_to_ref and ref_timestamp, which do not change.
-  // TODO(oalexan1): This will be wrong with multiple rigs.
-  // Matches should be among images on same rig?
+  // Note that this happens for each rig. So, different rigs
+  // have the ref timestamps individually sorted, and later
+  // these will be concatenated.
   std::sort(cams.begin(), cams.end(), dense_map::timestampLess);
 
   // Parse the transform from the world to each cam, which were known

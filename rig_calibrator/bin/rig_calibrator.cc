@@ -1149,7 +1149,6 @@ void applyRegistration(bool no_rig, bool scale_depth,
   // That is enforced in registrationCamName().
   std::string reg_cam_name = dense_map::registrationCamName(hugin_file);
   int reg_cam_index = R.sensorIndex(reg_cam_name);
-  std::cout << "--reg cam index " << reg_cam_index << std::endl;
   
   // Find the image files. These are one-to-one with world_to_cam.
   std::vector<std::string> image_files;
