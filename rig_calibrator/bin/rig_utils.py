@@ -260,10 +260,10 @@ def parse_images_and_camera_poses(image_list, rig_sensor,
         
     return (images, world_to_cam)
 
-def undistort_images(args, images, tools_base_dir, extension, extra_opts, suff):
+def undistort_images(args, rig_sensor, images, tools_base_dir, extension, extra_opts, suff):
 
     # Form the list of distorted images
-    dist_image_list = args.out_dir + "/" + args.rig_sensor + "/distorted_index.txt"
+    dist_image_list = args.out_dir + "/" + rig_sensor + "/distorted_index.txt"
     mkdir_p(os.path.dirname(dist_image_list))
     print("Writing: " + dist_image_list)
     dist_images = []
@@ -273,7 +273,7 @@ def undistort_images(args, images, tools_base_dir, extension, extra_opts, suff):
             f.write(image + "\n")
 
     # Form the list of unundistorted images
-    undist_dir = args.out_dir + "/" + args.rig_sensor + "/undistorted" + suff
+    undist_dir = args.out_dir + "/" + rig_sensor + "/undistorted" + suff
 
     if os.path.isdir(undist_dir):
         # Wipe the existing directory, as it may have stray files
@@ -299,12 +299,12 @@ def undistort_images(args, images, tools_base_dir, extension, extra_opts, suff):
            "--image_list", dist_image_list,
            "--output_list", undist_image_list,
            "--rig_config", args.rig_config,
-           "--rig_sensor", args.rig_sensor,
+           "--rig_sensor", rig_sensor,
            "--undistorted_crop_win", args.undistorted_crop_win,
            "--undistorted_intrinsics", undist_intrinsics] + \
            extra_opts
     
-    print("Undistorting " + args.rig_sensor + " images.")
+    print("Undistorting " + rig_sensor + " images.")
     run_cmd(cmd)
 
     return (undist_intrinsics, undistorted_images, undist_dir)

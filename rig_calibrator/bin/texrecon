@@ -55,6 +55,9 @@ def process_args(args):
                         default="2048",
                         help="The maximum size (in pixels) of each texture file created " + \
                         "for the produced textured mesh.")
+
+    parser.add_argument('--skip_local_seam_leveling', dest = "skip_local_seam_leveling",
+                        action='store_true')
     
     parser.add_argument("--out_dir", dest="out_dir",
                         default="", help="The directory where to write the textured mesh " + \
@@ -134,7 +137,7 @@ def create_texrecon_cameras(undistorted_images, world_to_cam, nf, d0, d1, paspec
             g.write("%0.17g %0.17g %0.17g %0.17g %0.17g %0.17g\n"
                 % (nf, d0, d1, paspect, ncx, ncy))
     
-def run_texrecon(tools_base_dir, undist_dir, mesh, texture_dir):
+def run_texrecon(tools_base_dir, undist_dir, mesh, skip_local_seam_leveling, texture_dir):
 
     # That is one long path
     texrecon_path = tools_base_dir + "/bin/texrecon_bin"
@@ -148,6 +151,9 @@ def run_texrecon(tools_base_dir, undist_dir, mesh, texture_dir):
            "-d", "view_dir_dot_face_dir", # TODO(oalexan1): The -d option needs study
            "--keep_unseen_faces",
            "--max_texture_size=" + str(args.max_texture_size)]
+
+    if skip_local_seam_leveling:
+        cmd += ['--skip_local_seam_leveling']
 
     log_file = os.path.join(texture_dir, "texrecon_log.txt")
     print("Running texrecon.\n")
@@ -175,7 +181,8 @@ if __name__ == "__main__":
     extra_opts = ["--save_bgr"] # create color images
     suff = "_texrecon"
     (undist_intrinsics_file, undistorted_images, undist_dir) \
-                        = rig_utils.undistort_images(args, images, tools_base_dir,
+                        = rig_utils.undistort_images(args, args.rig_sensor,
+                                                     images, tools_base_dir,
                                                      extension, extra_opts, suff)
 
     (nf, d0, d1, paspect, ncx, ncy) = convert_intrinsics_to_texrecon(undist_intrinsics_file)
@@ -183,5 +190,6 @@ if __name__ == "__main__":
     create_texrecon_cameras(undistorted_images, world_to_cam, nf, d0, d1, paspect, ncx, ncy)
 
     texture_dir = args.out_dir + "/" + args.rig_sensor + "/texture"
-    run_texrecon(tools_base_dir, undist_dir, args.mesh, texture_dir)
+    run_texrecon(tools_base_dir, undist_dir, args.mesh, args.skip_local_seam_leveling,
+                 texture_dir)
 

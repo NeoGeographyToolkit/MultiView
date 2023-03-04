@@ -276,7 +276,7 @@ if __name__ == "__main__":
     extra_opts = []
     suff = ""
     (undist_intrinsics_file, undistorted_images, undist_dir) \
-                        = rig_utils.undistort_images(args, distorted_images,
+                             = rig_utils.undistort_images(args, args.rig_sensor, distorted_images,
                                                      tools_base_dir, extension, extra_opts, suff)
 
     # Write camera poses in the format of ASP and voxblox
