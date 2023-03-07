@@ -763,6 +763,9 @@ void exportToVoxblox(std::vector<std::string> const& cam_names,
   // Must take a pass for each camera type, and then visit
   // all images while ignoring those of a different type. There are very
   // few camera types, so this is not unreasonable.
+  // Keep the 2D image structure of the cloud. Replace the invalid
+  // entries with Inf.
+  double inf = std::numeric_limits<double>::infinity();
   for (size_t cam_type = 0; cam_type < cam_names.size(); cam_type++) {
 
     std::string voxblox_subdir = voxblox_dir + "/" + cam_names[cam_type];
@@ -798,26 +801,25 @@ void exportToVoxblox(std::vector<std::string> const& cam_names,
       if (cam_images[cid].image.channels() != 1) 
         LOG(FATAL) << "Expecting a grayscale input image.\n";
       
-      // Form a pcl point cloud. Add the first band of the image as an intensity
-      // Later will reduce its dimensions as we will skip invalid pixels.
-      // Use fields as expected by voxblox.
+      // Form the pcl point cloud. Add the first band of the image as an intensity.
       // TODO(oalexan1): Make this a subroutine
       pcl::PointCloud<pcl::PointNormal> pc;
-      pc.width = std::int64_t(depth_cols) * std::int64_t(depth_rows); // int64 to avoid overflow
-      pc.height = 1;
-      pc.points.resize(pc.width * pc.height);
+      pc.width = depth_cols;
+      pc.height = depth_rows;
+      pc.points.resize(std::int64_t(pc.width) * std::int64_t(pc.height)); // avoid overflow
       int count = 0;
       for (int row = 0; row < depth_rows; row++) {
         for (int col = 0; col < depth_cols; col++) {
           cv::Vec3f xyz = cam_images[cid].depth_cloud.at<cv::Vec3f>(row, col);
-          if (xyz == cv::Vec3f(0, 0, 0)) // skip invalid points
-            continue;
-
-          // Transform from depth cloud coordinates to camera coordinates
-          // (later voxblox will transform to world coordinates)
-          Eigen::Vector3d P(xyz[0], xyz[1], xyz[2]);
-          P = depth_to_image[cam_images[cid].camera_type] * P;
-          
+          Eigen::Vector3d P;
+          if (xyz == cv::Vec3f(0, 0, 0)) {
+            P = Eigen::Vector3d(inf, inf, inf);
+          } else{
+            // Transform from depth cloud coordinates to camera coordinates
+            // (later voxblox will transform to world coordinates)
+            P = Eigen::Vector3d(xyz[0], xyz[1], xyz[2]);
+            P = depth_to_image[cam_images[cid].camera_type] * P;
+          }
           pc.points[count].x         = P[0];
           pc.points[count].y         = P[1];
           pc.points[count].z         = P[2];
@@ -829,12 +831,6 @@ void exportToVoxblox(std::vector<std::string> const& cam_names,
           count++;
         }
       }
-      // Shrink the cloud as invalid data was skipped
-      if (count > pc.width) 
-        LOG(FATAL) << "Book-keeping error in processing point clouds.\n";
-      pc.width = count;
-      pc.height = 1;
-      pc.points.resize(pc.width * pc.height);
 
       // Save the transform
       std::string transform_file = voxblox_subdir + "/" + timestamp_buffer + "_cam2world.txt";
