@@ -265,8 +265,11 @@ if __name__ == "__main__":
     rig_utils.mkdir_p(args.out_dir)
 
     # Read the images and camera poses
+    subset_list = "" # part of the api, not used
     (distorted_images, world_to_cam) \
-             = rig_utils.parse_images_and_camera_poses(args.camera_poses, args.rig_sensor,
+             = rig_utils.parse_images_and_camera_poses(args.camera_poses,
+                                                       subset_list,
+                                                       args.rig_sensor,
                                                        args.first_image_index,
                                                        args.last_image_index)
 

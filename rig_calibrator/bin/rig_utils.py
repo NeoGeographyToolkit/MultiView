@@ -204,11 +204,23 @@ def imageExtension(images):
     if len(extensions) == 0:
         raise Exception("The input image set is invalid.")
     return list(extensions)[0]
-        
-def parse_images_and_camera_poses(image_list, rig_sensor,
+
+def parse_images_and_camera_poses(image_list, subset_list, rig_sensor,
                                   # These indices will start from 1, if specified
                                   first_image_index = None, last_image_index = None):
 
+    # If desired to process only a subset
+    subset = set()
+    if subset_list != "":
+        with open(subset_list, 'r') as f:
+            lines = f.readlines()
+            for line in lines:
+                line = line.rstrip()
+                if line == "":
+                    continue
+                subset.add(line)
+
+    # Read the limage file
     with open(image_list, 'r') as f:
         lines = f.readlines()
 
@@ -230,6 +242,10 @@ def parse_images_and_camera_poses(image_list, rig_sensor,
 
         image = vals[0]
         vals = vals[1:13]
+
+        if (len(subset) > 0) and (image not in subset):
+            # Use only the subset
+            continue
         
         curr_sensor = os.path.basename(os.path.dirname(image))
         if curr_sensor != rig_sensor:

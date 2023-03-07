@@ -43,11 +43,15 @@ def process_args(args):
     
     parser.add_argument("--rig_sensor", dest="rig_sensor", default="",
                         help="Which rig sensor images to texture. Must be among the " + \
-                        "sensors specified via --rig_config.")
+                        "sensors specified via --rig_config. To use images from several sensors, "
+                        "pass in a quoted list of them, separated by space.")
 
     parser.add_argument("--camera_poses", dest="camera_poses",
                         default="", help= "Read images and camera poses from this list.")
 
+    parser.add_argument("--subset", dest="subset",
+                        default="", help= "Use only the subset of images from this list.")
+    
     parser.add_argument("--mesh", dest="mesh",
                         default="", help="The mesh to use for texturing, in .ply format.")
 
@@ -117,9 +121,11 @@ def create_texrecon_cameras(undistorted_images, world_to_cam, nf, d0, d1, paspec
     if len(undistorted_images) != len(world_to_cam):
         raise Exception("Expecting as many images as cameras.")
 
+    cams = []
     for it in range(len(undistorted_images)):
         path, ext = os.path.splitext(undistorted_images[it])
         cam = path + ".cam"
+        cams.append(cam)
 
         print("Writing: " + cam)
         with open(cam, "w") as g:
@@ -136,8 +142,10 @@ def create_texrecon_cameras(undistorted_images, world_to_cam, nf, d0, d1, paspec
             # normalized inrinsics
             g.write("%0.17g %0.17g %0.17g %0.17g %0.17g %0.17g\n"
                 % (nf, d0, d1, paspect, ncx, ncy))
+    return cams
     
-def run_texrecon(tools_base_dir, undist_dir, mesh, skip_local_seam_leveling, texture_dir):
+def run_texrecon(tools_base_dir, undistorted_images, cams, mesh,
+                 skip_local_seam_leveling, texture_dir):
 
     # That is one long path
     texrecon_path = tools_base_dir + "/bin/texrecon_bin"
@@ -146,10 +154,24 @@ def run_texrecon(tools_base_dir, undist_dir, mesh, skip_local_seam_leveling, tex
     
     rig_utils.mkdir_p(texture_dir)
 
-    cmd = [texrecon_path, undist_dir, mesh, texture_dir,
+    # Form the list of images to pass in
+    index = texture_dir + "/index.txt"
+    if len(undistorted_images) != len(cams):
+        print("Must have as many images as cameras.")
+        sys.exit(1)
+    print("Writing: " + index)
+    with open(index, "w") as fh:
+        for it in range(len(undistorted_images)):
+            # texrecon likes the cameras first
+            fh.write(cams[it] + "\n")
+            fh.write(undistorted_images[it] + "\n")
+    
+    cmd = [texrecon_path, index, mesh, texture_dir,
            "-o", "gauss_clamping",
            "-d", "view_dir_dot_face_dir", # TODO(oalexan1): The -d option needs study
            "--keep_unseen_faces",
+           # TODO(oalexan1): Need to understand why texrecon insists on an equal sign
+           # for the option below while it does not need that for other options.
            "--max_texture_size=" + str(args.max_texture_size)]
 
     if skip_local_seam_leveling:
@@ -168,28 +190,36 @@ def run_texrecon(tools_base_dir, undist_dir, mesh, skip_local_seam_leveling, tex
 if __name__ == "__main__":
 
     args = process_args(sys.argv)
+    tools_base_dir = os.path.dirname(os.path.dirname(os.path.abspath(sys.argv[0])))
 
     sanity_checks(args)
 
     rig_utils.mkdir_p(args.out_dir)
+    all_undistorted_images = []
+    all_cams   = []
 
-    (images, world_to_cam) \
-             = rig_utils.parse_images_and_camera_poses(args.camera_poses, args.rig_sensor)
-    
-    tools_base_dir = os.path.dirname(os.path.dirname(os.path.abspath(sys.argv[0])))
-    extension = '.jpg' # extension of undistorted images, as preferred by texrecon
-    extra_opts = ["--save_bgr"] # create color images
-    suff = "_texrecon"
-    (undist_intrinsics_file, undistorted_images, undist_dir) \
-                        = rig_utils.undistort_images(args, args.rig_sensor,
-                                                     images, tools_base_dir,
-                                                     extension, extra_opts, suff)
+    # Can handle multiple sensors
+    sensors = args.rig_sensor.split()
+    for sensor in sensors:
+        (images, world_to_cam) \
+                 = rig_utils.parse_images_and_camera_poses(args.camera_poses, args.subset,
+                                                           sensor)
+        
+        extension = '.jpg' # extension of undistorted images, as preferred by texrecon
+        extra_opts = ["--save_bgr"] # create color images
+        suff = "_texrecon"
+        (undist_intrinsics_file, undistorted_images, undist_dir) \
+                                 = rig_utils.undistort_images(args, sensor,
+                                                              images, tools_base_dir,
+                                                              extension, extra_opts, suff)
+        (nf, d0, d1, paspect, ncx, ncy) = convert_intrinsics_to_texrecon(undist_intrinsics_file)
+        cams = create_texrecon_cameras(undistorted_images, world_to_cam,
+                                       nf, d0, d1, paspect, ncx, ncy)
 
-    (nf, d0, d1, paspect, ncx, ncy) = convert_intrinsics_to_texrecon(undist_intrinsics_file)
+        all_undistorted_images += undistorted_images
+        all_cams += cams
 
-    create_texrecon_cameras(undistorted_images, world_to_cam, nf, d0, d1, paspect, ncx, ncy)
-
-    texture_dir = args.out_dir + "/" + args.rig_sensor + "/texture"
-    run_texrecon(tools_base_dir, undist_dir, args.mesh, args.skip_local_seam_leveling,
-                 texture_dir)
+    texture_dir = args.out_dir + "/" + "_".join(sensors) + "/texture"
+    run_texrecon(tools_base_dir, all_undistorted_images, all_cams, args.mesh,
+                 args.skip_local_seam_leveling, texture_dir)
 
