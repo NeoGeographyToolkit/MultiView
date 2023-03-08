@@ -39,12 +39,6 @@ DEFINE_int32(min_pairwise_matches, 10,
              "Minimum number of valid inlier matches required to keep matches for given "
              "image pair.");
 
-DEFINE_int32(max_pairwise_matches, 2000,
-             "Maximum number of pairwise matches in an image pair to keep.");
-
-DEFINE_bool(silent_matching, false,
-            "Do not print a lot of verbose info when matching.");
-
 namespace sparse_mapping {
 
 ceres::LossFunction* GetLossFunction(std::string cost_fun, double th) {

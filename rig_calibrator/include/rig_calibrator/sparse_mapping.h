@@ -201,6 +201,10 @@ namespace sparse_mapping {
                          std::vector<Eigen::Affine3d> * cid_to_cam_t,
                          std::vector<std::string> * good_images);
 
+void InitializeCidFidToPid(int num_cid,
+                           std::vector<std::map<int, int>> const& pid_to_cid_fid,
+                           std::vector<std::map<int, int>> * cid_fid_to_pid);
+  
 }  // namespace sparse_mapping
 
 #endif  // SPARSE_MAPPING_SPARSE_MAPPING_H_

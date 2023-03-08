@@ -71,6 +71,8 @@ void setMapValue(std::vector<std::map<int, std::map<int, T>>> & pid_cid_fid,
 
   fid_it->second = val;
 }
+
+std::string file_extension(std::string const& file);
   
 }  // end namespace dense_map
 

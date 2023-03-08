@@ -24,7 +24,8 @@
 #include <sys/time.h>
 #include <thread>
 
-DEFINE_int32(num_threads, (std::thread::hardware_concurrency() == 0 ? 2 : std::thread::hardware_concurrency()),
+DEFINE_int32(num_threads, (std::thread::hardware_concurrency() == 0 ?
+                           8 : std::thread::hardware_concurrency()),
              "Number of threads to use for processing.");
 
 void* dense_map::HolderFunction(void* ptr) {

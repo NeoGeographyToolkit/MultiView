@@ -20,6 +20,8 @@
 #ifndef TRANSFORM_UTILS_H_
 #define TRANSFORM_UTILS_H_
 
+#include <vector>
+#include <string>
 #include <Eigen/Core>
 #include <Eigen/Geometry>
 
@@ -73,6 +75,16 @@ void array_to_rigid_transform(Eigen::Affine3d& aff, const double* arr);
 void Find3DAffineTransform(Eigen::Matrix3Xd const & in,
                            Eigen::Matrix3Xd const & out,
                            Eigen::Affine3d* result);
+
+// Extract control points and the images they correspond 2 from
+// a hugin project file
+void ParseHuginControlPoints(std::string const& hugin_file,
+                             std::vector<std::string> * images,
+                             Eigen::MatrixXd * points);
+
+// Parse a file having on each line xyz coordinates
+void ParseXYZ(std::string const& xyz_file,
+              Eigen::MatrixXd * xyz);
   
 }  // end namespace dense_map
 
