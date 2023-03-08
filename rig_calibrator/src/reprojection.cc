@@ -39,9 +39,8 @@ DEFINE_int32(min_pairwise_matches, 10,
              "Minimum number of valid inlier matches required to keep matches for given "
              "image pair.");
 
-DEFINE_int32(max_pairwise_matches, 1000,
-             "Maximum number of pairwise matches to keep. If more than that, "
-             "keep the most promising ones.");
+DEFINE_int32(max_pairwise_matches, 2000,
+             "Maximum number of pairwise matches in an image pair to keep.");
 
 DEFINE_bool(silent_matching, false,
             "Do not print a lot of verbose info when matching.");
@@ -131,11 +130,13 @@ Eigen::Vector3d TriangulatePoint(Eigen::Vector3d const& unnormalized_pt1,
   
 void BundleAdjust(std::vector<std::map<int, int> > const& pid_to_cid_fid,
                   std::vector<Eigen::Matrix2Xd> const& cid_to_keypoint_map, double focal_length,
-                  std::vector<Eigen::Affine3d>* cid_to_cam_t_global, std::vector<Eigen::Vector3d>* pid_to_xyz,
+                  std::vector<Eigen::Affine3d>* cid_to_cam_t_global,
+                  std::vector<Eigen::Vector3d>* pid_to_xyz,
                   std::vector<std::map<int, int> > const& user_pid_to_cid_fid,
                   std::vector<Eigen::Matrix2Xd> const& user_cid_to_keypoint_map,
                   std::vector<Eigen::Vector3d>* user_pid_to_xyz, ceres::LossFunction* loss,
-                  ceres::Solver::Options const& options, ceres::Solver::Summary* summary, int first, int last,
+                  ceres::Solver::Options const& options, ceres::Solver::Summary* summary,
+                  int first, int last,
                   bool fix_all_cameras, std::set<int> const& fixed_cameras) {
   // Perform bundle adjustment. Keep fixed all cameras with cid
   // not within [first, last] and all xyz points which project only
@@ -231,7 +232,6 @@ void BundleAdjust(std::vector<std::map<int, int> > const& pid_to_cid_fid,
     cid_to_cam_t_global->at(cid).linear() = r;
   }
 }
-
 
 // This is a very specialized function
 void BundleAdjustSmallSet(std::vector<Eigen::Matrix2Xd> const& features_n,
@@ -353,27 +353,29 @@ void SelectRandomObservations(const std::vector<Eigen::Vector3d> & all_landmarks
 }
 
 bool P3P(const std::vector<cv::Point3d> & landmarks, const std::vector<cv::Point2d> & observations,
-         const camera::CameraParameters & params, Eigen::Vector3d * pos, Eigen::Matrix3d * rotation) {
+         const camera::CameraParameters & params, Eigen::Vector3d * pos,
+         Eigen::Matrix3d * rotation) {
 
-  std::cout << "---P3P " << std::endl;
   cv::Mat camera_matrix(3, 3, cv::DataType<double>::type);
-  std::cout << "--intrinsics " << params.GetIntrinsicMatrix<camera::UNDISTORTED_C>() << std::endl;
   cv::eigen2cv(params.GetIntrinsicMatrix<camera::UNDISTORTED_C>(), camera_matrix);
   cv::Mat rvec(3, 1, cv::DataType<double>::type, cv::Scalar(0));
   cv::Mat tvec(3, 1, cv::DataType<double>::type, cv::Scalar(0));
   cv::Mat distortion(4, 1, cv::DataType<double>::type, cv::Scalar(0));
-  bool result = cv::solvePnP(landmarks, observations, camera_matrix, distortion, rvec, tvec, false, cv::SOLVEPNP_P3P);
+  bool result = cv::solvePnP(landmarks, observations, camera_matrix, distortion, rvec, tvec,
+                             false, cv::SOLVEPNP_P3P);
   if (!result)
     return false;
   cv::cv2eigen(tvec, *pos);
-  camera::RodriguesToRotation(Eigen::Vector3d(rvec.at<double>(0), rvec.at<double>(1), rvec.at<double>(2)), rotation);
+  camera::RodriguesToRotation(Eigen::Vector3d(rvec.at<double>(0), rvec.at<double>(1),
+                                              rvec.at<double>(2)), rotation);
   
-  std::cout << "--final rotation " << *rotation << std::endl;
   return true;
 }
 
-size_t CountInliers(const std::vector<Eigen::Vector3d> & landmarks, const std::vector<Eigen::Vector2d> & observations, 
-                 const camera::CameraModel & camera, int tolerance, std::vector<size_t>* inliers) {
+size_t CountInliers(const std::vector<Eigen::Vector3d> & landmarks,
+                    const std::vector<Eigen::Vector2d> & observations, 
+                    const camera::CameraModel & camera, int tolerance,
+                    std::vector<size_t>* inliers) {
   int num_inliers = 0;
   if (inliers) {
     // To save ourselves some allocation time. We'll prealloc for a 50% inlier
