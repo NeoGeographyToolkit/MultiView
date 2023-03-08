@@ -199,5 +199,67 @@ void array_to_rigid_transform(Eigen::Affine3d& aff, const double* arr) {
 
   aff = Eigen::Affine3d(Eigen::Translation3d(arr[0], arr[1], arr[2])) * Eigen::Affine3d(R);
 }
+
+// Given two sets of 3D points, find the rotation + translation + scale
+// which best maps the first set to the second.
+// Source: http://en.wikipedia.org/wiki/Kabsch_algorithm
+// TODO(oalexan1): Use the version robust to outliers!  
+void Find3DAffineTransform(Eigen::Matrix3Xd const & in,
+                           Eigen::Matrix3Xd const & out,
+                           Eigen::Affine3d* result) {
+  // Default output
+  result->linear() = Eigen::Matrix3d::Identity(3, 3);
+  result->translation() = Eigen::Vector3d::Zero();
+
+  if (in.cols() != out.cols())
+    LOG(FATAL) << "Find3DAffineTransform(): input data mis-match.";
+
+  // Local copies we can modify
+  Eigen::Matrix3Xd local_in = in, local_out = out;
+
+  // First find the scale, by finding the ratio of sums of some distances,
+  // then bring the datasets to the same scale.
+  double dist_in = 0, dist_out = 0;
+  for (int col = 0; col < local_in.cols()-1; col++) {
+    dist_in  += (local_in.col(col+1) - local_in.col(col)).norm();
+    dist_out += (local_out.col(col+1) - local_out.col(col)).norm();
+  }
+  if (dist_in <= 0 || dist_out <= 0)
+    return;
+  double scale = dist_out/dist_in;
+  local_out /= scale;
+
+  // Find the centroids then shift to the origin
+  Eigen::Vector3d in_ctr = Eigen::Vector3d::Zero();
+  Eigen::Vector3d out_ctr = Eigen::Vector3d::Zero();
+  for (int col = 0; col < local_in.cols(); col++) {
+    in_ctr  += local_in.col(col);
+    out_ctr += local_out.col(col);
+  }
+  in_ctr /= local_in.cols();
+  out_ctr /= local_out.cols();
+  for (int col = 0; col < local_in.cols(); col++) {
+    local_in.col(col)  -= in_ctr;
+    local_out.col(col) -= out_ctr;
+  }
+
+  // SVD
+  Eigen::Matrix3d Cov = local_in * local_out.transpose();
+  Eigen::JacobiSVD<Eigen::Matrix3d> svd(Cov, Eigen::ComputeFullU | Eigen::ComputeFullV);
+
+  // Find the rotation
+  double d = (svd.matrixV() * svd.matrixU().transpose()).determinant();
+  if (d > 0)
+    d = 1.0;
+  else
+    d = -1.0;
+  Eigen::Matrix3d I = Eigen::Matrix3d::Identity(3, 3);
+  I(2, 2) = d;
+  Eigen::Matrix3d R = svd.matrixV() * I * svd.matrixU().transpose();
+
+  // The final transform
+  result->linear() = scale * R;
+  result->translation() = scale*(out_ctr - R*in_ctr);
+}
   
 }  // end namespace dense_map

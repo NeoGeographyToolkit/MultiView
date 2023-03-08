@@ -17,10 +17,6 @@
  * under the License.
  */
 
-#include <opencv2/xfeatures2d.hpp>
-#include <opencv2/highgui.hpp>
-#include <opencv2/calib3d/calib3d.hpp>
-
 #include <rig_calibrator/basic_algs.h>
 #include <rig_calibrator/interest_point.h>
 #include <rig_calibrator/camera_image.h>
@@ -30,9 +26,14 @@
 #include <rig_calibrator/transform_utils.h>
 #include <rig_calibrator/interpolation_utils.h>
 #include <rig_calibrator/rig_config.h>
+#include <rig_calibrator/random_set.h>
 #include <rig_calibrator/nvm.h>
 
 #include <camera_model/camera_params.h>
+
+#include <opencv2/xfeatures2d.hpp>
+#include <opencv2/highgui.hpp>
+#include <opencv2/calib3d/calib3d.hpp>
 
 // Get rid of warnings beyond our control
 #pragma GCC diagnostic ignored "-Wdeprecated-declarations"
@@ -53,12 +54,14 @@ namespace fs = boost::filesystem;
 
 // SIFT is doing so much better than SURF for haz cam images.
 DEFINE_string(feature_detector, "SIFT", "The feature detector to use. SIFT or SURF.");
-DEFINE_int32(sift_nFeatures, 10000, "Number of SIFT features");
-DEFINE_int32(sift_nOctaveLayers, 3, "Number of SIFT octave layers");
+DEFINE_int32(sift_nFeatures, 10000, "Number of SIFT features.");
+DEFINE_int32(sift_nOctaveLayers, 3, "Number of SIFT octave layers.");
 DEFINE_double(sift_contrastThreshold, 0.02,
               "SIFT contrast threshold");  // decrease for more ip
-DEFINE_double(sift_edgeThreshold, 10, "SIFT edge threshold");
-DEFINE_double(sift_sigma, 1.6, "SIFT sigma");
+DEFINE_double(sift_edgeThreshold, 10, "SIFT edge threshold.");
+DEFINE_double(sift_sigma, 1.6, "SIFT sigma.");
+
+DECLARE_int32(max_pairwise_matches); // declared externally
 
 namespace dense_map {
 
@@ -109,7 +112,28 @@ void detectFeatures(const cv::Mat& image, bool verbose,
   }
 }
 
+void reduceMatches(std::vector<InterestPoint> & left_ip,
+                   std::vector<InterestPoint> & right_ip) {
+  
+  // pick a random subset
+  std::vector<int> subset;
+  dense_map::pick_random_indices_in_range(left_ip.size(), FLAGS_max_pairwise_matches, subset);
+  std::sort(subset.begin(), subset.end()); // sort the indices; not strictly necessary
+  
+  std::vector<InterestPoint> left_ip_full, right_ip_full;
+  left_ip_full.swap(left_ip);
+  right_ip_full.swap(right_ip);
+  
+  left_ip.resize(FLAGS_max_pairwise_matches);
+  right_ip.resize(FLAGS_max_pairwise_matches);
+  for (size_t it = 0; it < subset.size(); it++) {
+    left_ip[it] = left_ip_full[subset[it]];
+    right_ip[it] = right_ip_full[subset[it]];
+  }
+}
+  
 // This really likes haz cam first and nav cam second
+// Note: The function matchFeaturesWithCams() is used instead.
 void matchFeatures(std::mutex* match_mutex, int left_image_index, int right_image_index,
                    cv::Mat const& left_descriptors, cv::Mat const& right_descriptors,
                    Eigen::Matrix2Xd const& left_keypoints,
@@ -176,12 +200,16 @@ void matchFeatures(std::mutex* match_mutex, int left_image_index, int right_imag
               << left_image_index << ' ' << right_image_index << ": "
               << left_ip.size() << std::endl;
 
+  if (FLAGS_max_pairwise_matches >= 0 && (int)left_ip.size() > FLAGS_max_pairwise_matches)
+    reduceMatches(left_ip, right_ip);
+
   *matches = std::make_pair(left_ip, right_ip);
   match_mutex->unlock();
 }
 
 // Match features while assuming that the input cameras can be used to filter out
 // outliers by reprojection error.
+// TODO(oalexan1): This can be fragile. What if input cameras have poor pointing info?
 void matchFeaturesWithCams(std::mutex* match_mutex, int left_image_index, int right_image_index,
                            camera::CameraParameters const& left_params,
                            camera::CameraParameters const& right_params,
@@ -267,6 +295,8 @@ void matchFeaturesWithCams(std::mutex* match_mutex, int left_image_index, int ri
   // affine2D works better than homography
   // cv::Mat H = cv::findHomography(left_vec, right_vec, cv::RANSAC,
   // ransacReprojThreshold, inlier_mask, maxIters, confidence);
+  // TODO(oalexan1): The logic in BuildMapFindEssentialAndInliers()
+  // is much better at eliminating outliers, but is likely slower.
   cv::Mat H = cv::estimateAffine2D(left_vec, right_vec, inlier_mask, cv::RANSAC,
                                    ransacReprojThreshold, maxIters, confidence);
 
@@ -290,6 +320,9 @@ void matchFeaturesWithCams(std::mutex* match_mutex, int left_image_index, int ri
     right_ip.push_back(right);
   }
 
+  if (FLAGS_max_pairwise_matches >= 0 && (int)left_ip.size() > FLAGS_max_pairwise_matches)
+    reduceMatches(left_ip, right_ip);
+  
   // Update the shared variable using a lock
   match_mutex->lock();
 
@@ -837,69 +870,6 @@ double estimateCloseDistance(std::vector<Eigen::Vector3d> const& vec) {
   return range_val;
 }
 
-// Given two sets of 3D points, find the rotation + translation + scale
-// which best maps the first set to the second.
-// Source: http://en.wikipedia.org/wiki/Kabsch_algorithm
-// TODO(oalexan1): Use the version robust to outliers!  
-// TODO(oalexan1): Move this to transform_utils.
-void Find3DAffineTransform(Eigen::Matrix3Xd const & in,
-                           Eigen::Matrix3Xd const & out,
-                           Eigen::Affine3d* result) {
-  // Default output
-  result->linear() = Eigen::Matrix3d::Identity(3, 3);
-  result->translation() = Eigen::Vector3d::Zero();
-
-  if (in.cols() != out.cols())
-    throw "Find3DAffineTransform(): input data mis-match";
-
-  // Local copies we can modify
-  Eigen::Matrix3Xd local_in = in, local_out = out;
-
-  // First find the scale, by finding the ratio of sums of some distances,
-  // then bring the datasets to the same scale.
-  double dist_in = 0, dist_out = 0;
-  for (int col = 0; col < local_in.cols()-1; col++) {
-    dist_in  += (local_in.col(col+1) - local_in.col(col)).norm();
-    dist_out += (local_out.col(col+1) - local_out.col(col)).norm();
-  }
-  if (dist_in <= 0 || dist_out <= 0)
-    return;
-  double scale = dist_out/dist_in;
-  local_out /= scale;
-
-  // Find the centroids then shift to the origin
-  Eigen::Vector3d in_ctr = Eigen::Vector3d::Zero();
-  Eigen::Vector3d out_ctr = Eigen::Vector3d::Zero();
-  for (int col = 0; col < local_in.cols(); col++) {
-    in_ctr  += local_in.col(col);
-    out_ctr += local_out.col(col);
-  }
-  in_ctr /= local_in.cols();
-  out_ctr /= local_out.cols();
-  for (int col = 0; col < local_in.cols(); col++) {
-    local_in.col(col)  -= in_ctr;
-    local_out.col(col) -= out_ctr;
-  }
-
-  // SVD
-  Eigen::Matrix3d Cov = local_in * local_out.transpose();
-  Eigen::JacobiSVD<Eigen::Matrix3d> svd(Cov, Eigen::ComputeFullU | Eigen::ComputeFullV);
-
-  // Find the rotation
-  double d = (svd.matrixV() * svd.matrixU().transpose()).determinant();
-  if (d > 0)
-    d = 1.0;
-  else
-    d = -1.0;
-  Eigen::Matrix3d I = Eigen::Matrix3d::Identity(3, 3);
-  I(2, 2) = d;
-  Eigen::Matrix3d R = svd.matrixV() * I * svd.matrixU().transpose();
-
-  // The final transform
-  result->linear() = scale * R;
-  result->translation() = scale*(out_ctr - R*in_ctr);
-}
-  
 // TODO(oalexan1): Move this to transform_utils.
 // Extract control points and the images they correspond 2 from
 // a hugin project file
@@ -1453,7 +1423,7 @@ void readImageEntry(// Inputs
 // Add poses for the extra desired images based on interpolation, extrapolation,
 // and/or the rig transform.
 void calcExtraPoses(std::string const& extra_list, bool use_initial_rig_transforms,
-                    double bracket_len,
+                    double bracket_len, bool nearest_neighbor_interp,
                     dense_map::RigSet const& R,
                     // Append here
                     std::vector<std::string>     & cid_to_filename,
@@ -1549,7 +1519,7 @@ void calcExtraPoses(std::string const& extra_list, bool use_initial_rig_transfor
 
     std::vector<std::string> found_images;
     std::vector<Eigen::Affine3d> found_poses;
-    interpOrExtrap(input_map, target_map, bracket_len, 
+    interpOrExtrap(input_map, target_map, bracket_len, nearest_neighbor_interp,
                    found_images, found_poses); // outputs
 
     for (size_t found_it = 0; found_it < found_images.size(); found_it++) {
@@ -1610,7 +1580,7 @@ void readListOrNvm(// Inputs
                    std::string const& nvm_file,
                    std::string const& extra_list,
                    bool use_initial_rig_transforms,
-                   double bracket_len,
+                   double bracket_len, bool nearest_neighbor_interp,
                    dense_map::RigSet const& R,
                    // Outputs
                    nvmData & nvm,
@@ -1644,7 +1614,7 @@ void readListOrNvm(// Inputs
   // entries do not mess up the bookkeeping of pid_to_cid_fid, etc,
   // if their cid is larger than the ones read from NVM.
   if (extra_list != "")
-    calcExtraPoses(extra_list, use_initial_rig_transforms, bracket_len,
+    calcExtraPoses(extra_list, use_initial_rig_transforms, bracket_len, nearest_neighbor_interp,
                    R, nvm.cid_to_filename, nvm.cid_to_cam_t_global); // append here
   
   for (size_t it = 0; it < nvm.cid_to_filename.size(); it++) {

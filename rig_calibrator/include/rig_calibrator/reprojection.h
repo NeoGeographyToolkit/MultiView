@@ -26,17 +26,14 @@
 #include <limits>
 #include <string>
 #include <set>
-#include <mutex>
 
 namespace camera {
   class CameraModel;
-  class CameraParameters;
 }
 
 namespace cv {
   template <class T>
   class Point_;
-  class DMatch;
   template <class T>
   class Point3_;
   typedef Point_<double> Point2d;
@@ -45,10 +42,6 @@ namespace cv {
 
 namespace sparse_mapping {
 
-  typedef std::map<std::pair<int, int>, Eigen::Affine3d, std::less<std::pair<int, int>>,
-                   Eigen::aligned_allocator<std::pair<std::pair<int , int> const, Eigen::Affine3d>>>
-  CIDPairAffineMap;
-  
   ceres::LossFunction* GetLossFunction(std::string cost_fun, double th);
 
 /**
@@ -64,13 +57,13 @@ namespace sparse_mapping {
  * Ceres loss function and options can be specified, and summary returns results from ceres.
  * Optimize only the cameras with indices in [first, last].
  **/
-void BundleAdjust(std::vector<std::map<int, int>> const& pid_to_cid_fid,
-                  std::vector<Eigen::Matrix2Xd> const& cid_to_keypoint_map,
+void BundleAdjust(std::vector<std::map<int, int> > const& pid_to_cid_fid,
+                  std::vector<Eigen::Matrix2Xd > const& cid_to_keypoint_map,
                   double focal_length,
                   std::vector<Eigen::Affine3d> * cid_to_cam_t_global,
                   std::vector<Eigen::Vector3d> * pid_to_xyz,
-                  std::vector<std::map<int, int>> const& user_pid_to_cid_fid,
-                  std::vector<Eigen::Matrix2Xd> const& user_cid_to_keypoint_map,
+                  std::vector<std::map<int, int> > const& user_pid_to_cid_fid,
+                  std::vector<Eigen::Matrix2Xd > const& user_cid_to_keypoint_map,
                   std::vector<Eigen::Vector3d> * user_pid_to_xyz,
                   ceres::LossFunction * loss,
                   ceres::Solver::Options const& options,
@@ -139,19 +132,6 @@ int RansacEstimateCamera(const std::vector<Eigen::Vector3d> & landmarks,
                          std::vector<Eigen::Vector2d> * inlier_observations_out = NULL,
                          bool verbose = false);
 
-// Filter the matches by a geometric constraint. Compute the essential matrix.
-void BuildMapFindEssentialAndInliers(Eigen::Matrix2Xd const& keypoints1,
-                                     Eigen::Matrix2Xd const& keypoints2,
-                                     std::vector<cv::DMatch> const& matches,
-                                     camera::CameraParameters const& camera_params,
-                                     bool compute_inliers_only,
-                                     size_t cam_a_idx, size_t cam_b_idx,
-                                     std::mutex * match_mutex,
-                                     CIDPairAffineMap * relative_affines,
-                                     std::vector<cv::DMatch> * inlier_matches,
-                                     bool compute_rays_angle,
-                                     double * rays_angle);
-  
 }  // namespace sparse_mapping
 
 #endif  // SPARSE_MAPPING_REPROJECTION_H_

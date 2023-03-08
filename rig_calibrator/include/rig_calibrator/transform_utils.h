@@ -65,6 +65,14 @@ void rigid_transform_to_array(Eigen::Affine3d const& aff, double* arr);
 // Convert an array of length NUM_RIGID_PARAMS to a rigid
 // transform. Normalize the quaternion to make it into a rotation.
 void array_to_rigid_transform(Eigen::Affine3d& aff, const double* arr);
+
+// Given two sets of 3D points, find the rotation + translation + scale
+// which best maps the first set to the second.
+// Source: http://en.wikipedia.org/wiki/Kabsch_algorithm
+// TODO(oalexan1): Use the version robust to outliers!  
+void Find3DAffineTransform(Eigen::Matrix3Xd const & in,
+                           Eigen::Matrix3Xd const & out,
+                           Eigen::Affine3d* result);
   
 }  // end namespace dense_map
 
