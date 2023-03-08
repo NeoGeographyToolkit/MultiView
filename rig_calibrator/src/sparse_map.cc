@@ -17,7 +17,8 @@
  */
 
 #include <rig_calibrator/sparse_map.h>
+#include <rig_calibrator/sparse_mapping.h>
 
-void xx() {
-  // x;
+void placeholder() {
+  return;
 }

@@ -141,7 +141,7 @@ namespace fs = boost::filesystem;
 DEFINE_double(robust_threshold, 0.5,
               "Residual pixel errors and 3D point residuals (the latter multiplied "
               "by corresponding weight) much larger than this will be "
-              "exponentially attenuated to affect less the cost function.\n");
+              "logarithmically attenuated to affect less the cost function.\n");
 
 DEFINE_int32(num_iterations, 20, "How many solver iterations to perform in calibration.");
 
@@ -225,10 +225,7 @@ DEFINE_double(max_reprojection_error, 25.0, "If filtering outliers, remove inter
               "happens after each optimization pass finishes, unless disabled. It is better to not "
               "filter too aggressively unless confident of the solution.");
 
-DEFINE_double(min_triangulation_angle, 0.01, "If filtering outliers, remove triangulated points "
-              "for which all rays converging to it make an angle (in degrees) less than this. "
-              "Note that some cameras in the rig may be very close to each other relative to "
-              "the triangulated points, so care is needed here.");
+DECLARE_double(min_triangulation_angle); // declared externally 
 
 DEFINE_string(out_texture_dir, "", "If non-empty and if an input mesh was provided, "
               "project the camera images using the optimized poses onto the mesh "
