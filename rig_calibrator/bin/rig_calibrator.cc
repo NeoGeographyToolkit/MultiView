@@ -21,10 +21,11 @@
 
 // The algorithm:
 
-// We assume our camera rig has n camera types. Each can be image or
-// depth + image. One camera must be the reference camera. It is used
-// to bracket other cameras in time. The camera rig acquires many
-// sets of pictures.
+// We assume our camera set has n rigs, each with one or more camera
+// types. Each camera can be image or depth + image. One camera must
+// be the reference camera in each rig in the set. It is used to
+// bracket other cameras on the rig in time. The camera rig acquires
+// many sets of pictures.
 
 // We assume we know the precise time every camera image is acquired.
 // Every non-ref camera will be bracketed by two ref cameras very
@@ -137,7 +138,7 @@
 
 namespace fs = boost::filesystem;
 
-DEFINE_double(robust_threshold, 3.0,
+DEFINE_double(robust_threshold, 0.5,
               "Residual pixel errors and 3D point residuals (the latter multiplied "
               "by corresponding weight) much larger than this will be "
               "exponentially attenuated to affect less the cost function.\n");
@@ -157,7 +158,9 @@ DEFINE_string(intrinsics_to_float, "", "Specify which intrinsics to float for ea
 
 DEFINE_string(camera_poses_to_float, "",
               "Specify the cameras of which sensor types can have their poses "
-              "floated. Example: 'cam1 cam3'.");
+              "floated. Example: 'cam1 cam3'. With this example, the rig transform "
+              "from cam1 to cam3 will be floated with the rig constraint, and the "
+              "cam3 poses will be floated without the rig constraint.");
 
 DEFINE_string(depth_to_image_transforms_to_float, "",
               "Specify for which sensors to float the depth-to-image transform "
@@ -296,7 +299,9 @@ DEFINE_int32(num_overlaps, 0, "Match an image with this many images (of all came
 
 DEFINE_bool(use_initial_rig_transforms, false,
             "Use the transforms among the sensors of the rig specified via --rig_config. "
-            "Otherwise derive it from the poses of individual cameras.");
+            "That regardless if we continue with using a rig (--no_rig is not set) or not. "
+            "If this option is not set, and a rig is desired, derive the "
+            "rig transforms from the poses of individual cameras.");
 
 DEFINE_string(extra_list, "",
               "Add to the SfM solution the camera poses for the additional images/depth "
@@ -306,6 +311,13 @@ DEFINE_string(extra_list, "",
               "This can give incorrect results if the new images are not very similar "
               "or not close in time to the existing ones. This list can contain entries "
               "for the data already present.");
+
+DEFINE_string(fixed_image_list, "",
+              "A file having a list of of images, one per line, whose cameras will be "
+              "fixed during optimization.");
+
+DEFINE_bool(nearest_neighbor_interp, false,
+              "Use nearest neighbor interpolation (in time) when inserting extra camera poses.");
 
 DEFINE_bool(read_nvm_no_shift, false,
             "Read an nvm file assuming that interest point matches were not shifted "
@@ -886,9 +898,6 @@ void parameterValidation() {
   if (FLAGS_out_dir == "")
     LOG(FATAL) << "The output directory was not specified.\n";
 
-  if (FLAGS_use_initial_rig_transforms && FLAGS_no_rig)
-    LOG(FATAL) << "Cannot use initial rig transforms if not modeling the rig.\n";
-
   if (FLAGS_out_texture_dir != "" && FLAGS_mesh == "")
       LOG(FATAL) << "Cannot project camera images onto a mesh if a mesh was not provided.\n";
 
@@ -1214,6 +1223,11 @@ int main(int argc, char** argv) {
   if (FLAGS_mesh != "")
     dense_map::loadMeshBuildTree(FLAGS_mesh, mesh, mesh_info, graph, bvh_tree);
 
+  // Read a list of images to keep fixed, if provided
+  std::set<std::string> fixed_images;
+  if (!FLAGS_fixed_image_list.empty()) 
+    dense_map::readList(FLAGS_fixed_image_list, fixed_images);
+
   // world_to_ref has the transforms from the ref cameras to the world,
   // while world_to_cam has the transforms from the world to all cameras,
   // including world_to_ref. Both of these are needed in certain circumstances,
@@ -1229,7 +1243,7 @@ int main(int argc, char** argv) {
   dense_map::nvmData nvm;
   dense_map::readListOrNvm(FLAGS_camera_poses, FLAGS_nvm, FLAGS_extra_list,
                            FLAGS_use_initial_rig_transforms,
-                           FLAGS_bracket_len, R,
+                           FLAGS_bracket_len, FLAGS_nearest_neighbor_interp, R,
                            // outputs
                            nvm, image_maps, depth_maps); // out
   
@@ -1252,22 +1266,24 @@ int main(int argc, char** argv) {
   image_maps = std::vector<dense_map::MsgMap>();
   depth_maps = std::vector<dense_map::MsgMap>();
   
-  if (!FLAGS_no_rig) { // if we have a rig
-    if (FLAGS_use_initial_rig_transforms) {
-      // If we can use the initial rig transform, compute and
-      // overwrite overwrite world_to_cam, the transforms from the
-      // world to each camera.
-      dense_map::calc_world_to_cam_using_rig(// Inputs
-                                             cams, world_to_ref, ref_timestamps, R.ref_to_cam_trans,
-                                             R.ref_to_cam_timestamp_offsets,
-                                             // Output
-                                             world_to_cam);
-    } else {
-      // Using the transforms from the world to each camera, compute
-      // the rig transforms.
-      dense_map::calc_rig_trans(cams, world_to_ref, world_to_cam, ref_timestamps,
-                                R); // update this
-    }
+  if (FLAGS_use_initial_rig_transforms) {
+    // If we can use the initial rig transform, compute and
+    // overwrite overwrite world_to_cam, the transforms from the
+    // world to each camera. This regardless if use continue
+    // using a rig later on.
+     dense_map::calc_world_to_cam_using_rig(// Inputs
+                                            cams, world_to_ref, ref_timestamps, R.ref_to_cam_trans,
+                                            R.ref_to_cam_timestamp_offsets,
+                                            // Output
+                                            world_to_cam);
+  }
+  
+  if (!FLAGS_no_rig && !FLAGS_use_initial_rig_transforms) {
+    // If we want a rig, and cannot use the initial rig, use the
+    // transforms from the world to each camera, compute the rig
+    // transforms.
+    dense_map::calc_rig_trans(cams, world_to_ref, world_to_cam, ref_timestamps,
+                              R); // update this
   }
   
   // Determine if a given camera type has any depth information
@@ -1522,6 +1538,7 @@ int main(int argc, char** argv) {
         // definition is spelled out below.
         double *beg_cam_ptr = NULL, *end_cam_ptr = NULL, *ref_to_cam_ptr = NULL;
 
+        // TODO(oalexan1): Move the block below to: rigOrNoRigOptPtrs().
         if (!FLAGS_no_rig) {
           // Model the rig, use timestamps
           int beg_ref_index = cams[cid].beg_ref_index;
@@ -1628,25 +1645,29 @@ int main(int argc, char** argv) {
           // There is no rig. Then beg_cam_ptr refers to camera
           // for cams[cid], and not to its ref bracketing cam.
           // See if the user wants it floated.
-          if (camera_poses_to_float.find(R.cam_names[cam_type]) == camera_poses_to_float.end()) {
+          if (camera_poses_to_float.find(R.cam_names[cam_type]) == camera_poses_to_float.end()) 
             problem.SetParameterBlockConstant(beg_cam_ptr);
-          }
         }
 
         // The end cam floats only if the ref cam can float and end cam brackets
         // a non-ref cam and we have a rig.
         if (camera_poses_to_float.find(R.refSensor(cam_type)) == camera_poses_to_float.end() ||
-            R.isRefSensor(R.cam_names[cam_type]) || FLAGS_no_rig) {
+            R.isRefSensor(R.cam_names[cam_type]) || FLAGS_no_rig) 
           problem.SetParameterBlockConstant(end_cam_ptr);
-        }
         
         // ref_to_cam is kept fixed at the identity if the cam is the ref type or
         // no rig
         if (camera_poses_to_float.find(R.cam_names[cam_type]) == camera_poses_to_float.end() ||
-            R.isRefSensor(R.cam_names[cam_type]) || FLAGS_no_rig) {
+            R.isRefSensor(R.cam_names[cam_type]) || FLAGS_no_rig) 
           problem.SetParameterBlockConstant(ref_to_cam_ptr);
-        }
 
+        // See if to fix some images. For that, an image must be in the list,
+        // and its camera must be either of ref type or there must be no rig.
+        if (!fixed_images.empty() &&
+            (fixed_images.find(cams[cid].image_name) != fixed_images.end()) &&
+            (R.isRefSensor(R.cam_names[cam_type]) || FLAGS_no_rig))
+          problem.SetParameterBlockConstant(beg_cam_ptr);
+        
         if (!FLAGS_float_timestamp_offsets || R.isRefSensor(R.cam_names[cam_type]) ||
             FLAGS_no_rig) {
           // Either we don't float timestamp offsets at all, or the cam is the ref type,

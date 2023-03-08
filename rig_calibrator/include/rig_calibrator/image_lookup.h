@@ -48,8 +48,12 @@ class cameraImage;
 class ImageMessage;
 class RigSet;
 
-// Look up images, with or without the rig constraint. See individual functions
-// below for more details.
+// Read a vector of strings from a file, with spaces and newlines
+// acting as separators.  Store them in a set.
+void readList(std::string const& file, std::set<std::string> & list);
+
+// Look up images, with or without the rig constraint. See individual
+// functions below for more details.
 typedef std::map<double, dense_map::ImageMessage> MsgMap;
 typedef MsgMap::const_iterator MsgMapIter;
 void lookupImages(// Inputs

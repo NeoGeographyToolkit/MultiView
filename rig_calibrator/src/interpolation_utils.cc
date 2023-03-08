@@ -96,7 +96,7 @@ bool findInterpPose(double desired_time, std::map<double, Eigen::Affine3d> const
 // complexity linear rather than quadratic.
 void interpOrExtrap(std::map<double, Eigen::Affine3d> const& input_poses,
                     std::map<double, std::string> const& target,
-                    double extrap_len,
+                    double extrap_len,  bool nearest_neighbor_interp,
                     // Outputs
                     std::vector<std::string> & found_images,
                     std::vector<Eigen::Affine3d> & found_poses) {
@@ -120,9 +120,11 @@ void interpOrExtrap(std::map<double, Eigen::Affine3d> const& input_poses,
     std::string const& image_file = curr_it->second;
     
     if (curr_timestamp < beg_timestamp - extrap_len ||
-        curr_timestamp > end_timestamp + extrap_len)
-    LOG(FATAL) << "Cannot find camera pose for image " << image_file
-               << " as it is too far in time from existing images.\n";
+        curr_timestamp > end_timestamp + extrap_len) {
+      std::cout << "Warning: Cannot find camera pose for image " << image_file
+               << " as it is too far in time from existing images. Ignoring it.\n";
+      continue;
+    }
     
     Eigen::Affine3d found_pose;
     if (curr_timestamp <= beg_timestamp) {
@@ -156,6 +158,16 @@ void interpOrExtrap(std::map<double, Eigen::Affine3d> const& input_poses,
         bool is_good = (curr_timestamp <= right_timestamp);
         if (!is_good) 
           continue; // too early
+
+        if (nearest_neighbor_interp) {
+          // Use the nearest neighbor
+          if (std::abs(left_timestamp - curr_timestamp) <=
+              std::abs(right_timestamp - curr_timestamp)) {
+            curr_timestamp = left_timestamp;
+          } else {
+            curr_timestamp = right_timestamp;
+          }
+        }
         
         // Interpolate at desired time
         found_pose
@@ -168,8 +180,10 @@ void interpOrExtrap(std::map<double, Eigen::Affine3d> const& input_poses,
         break;
       }
       
-      if (!success)
-        LOG(FATAL) << "Cannot compute camera pose for image " << image_file << ".\n";
+      if (!success) {
+        std::cout << "Warning: Cannot compute camera pose for image " << image_file
+                  << ". Ignoring it.\n";
+      }
     }
   }  
 }

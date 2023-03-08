@@ -48,7 +48,7 @@ bool findInterpPose(double desired_time, std::map<double, Eigen::Affine3d> const
 // complexity linear rather than quadratic.
 void interpOrExtrap(std::map<double, Eigen::Affine3d> const& input_poses,
                     std::map<double, std::string> const& target,
-                    double extrap_len,
+                    double extrap_len, bool nearest_neighbor,
                     // Outputs
                     std::vector<std::string> & found_images,
                     std::vector<Eigen::Affine3d> & found_poses);

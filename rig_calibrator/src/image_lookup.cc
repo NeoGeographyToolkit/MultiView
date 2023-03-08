@@ -29,6 +29,17 @@
 #include <iomanip>
 
 namespace dense_map {
+
+// Read a vector of strings from a file, with spaces and newlines
+// acting as separators.  Store them in a set.
+void readList(std::string const& file, std::set<std::string> & list) {
+  list.clear();
+  std::ifstream fh(file);
+  std::string val;
+  while (fh >> val)
+    list.insert(val);
+  fh.close();
+}
   
 // Sort by timestamps adjusted to be relative to the ref camera clock
 bool timestampLess(cameraImage i, cameraImage j) {
