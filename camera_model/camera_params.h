@@ -60,8 +60,8 @@ namespace camera {
    public:
     EIGEN_MAKE_ALIGNED_OPERATOR_NEW;
 
-    // Please load from file or specify all variables
-    CameraParameters() = delete;
+    CameraParameters() {} // empty constructor; will create an undefined model
+    
     explicit CameraParameters(std::string const& filename, std::string const& base_dir = "");
     //explicit CameraParameters(config_reader::ConfigReader* config, const char* name);
     CameraParameters(Eigen::Vector2i const& image_size,

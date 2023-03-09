@@ -35,35 +35,37 @@ namespace dense_map {
 
 // Reads the NVM control network format. The interest points may or may not
 // be shifted relative to optical center. The user is responsible for knowing that.
-void ReadNVM(std::string const& input_filename,
-             std::vector<Eigen::Matrix2Xd> * cid_to_keypoint_map,
-             std::vector<std::string> * cid_to_filename,
-             std::vector<std::map<int, int> > * pid_to_cid_fid,
-             std::vector<Eigen::Vector3d> * pid_to_xyz,
-             std::vector<Eigen::Affine3d> * cid_to_cam_t_global) {
+void ReadNvm(std::string               const & input_filename,
+             std::vector<Eigen::Matrix2Xd>   & cid_to_keypoint_map,
+             std::vector<std::string>        & cid_to_filename,
+             std::vector<std::map<int, int>> & pid_to_cid_fid,
+             std::vector<Eigen::Vector3d>    & pid_to_xyz,
+             std::vector<Eigen::Affine3d>    & cid_to_cam_t_global) {
+
+  std::cout << "Reading: " << input_filename << std::endl;
   std::ifstream f(input_filename, std::ios::in);
   std::string token;
   std::getline(f, token);
   
   // Assert that we start with our NVM token
   if (token.compare(0, 6, "NVM_V3") != 0) {
-    LOG(FATAL) << "File doesn't start with NVM token";
+    LOG(FATAL) << "File doesn't start with NVM token.";
   }
 
   // Read the number of cameras
   ptrdiff_t number_of_cid;
   f >> number_of_cid;
   if (number_of_cid < 1) {
-    LOG(FATAL) << "NVM file is missing cameras";
+    LOG(FATAL) << "NVM file is missing cameras.";
   }
 
   // Resize all our structures to support the number of cameras we now expect
-  cid_to_keypoint_map->resize(number_of_cid);
-  cid_to_filename->resize(number_of_cid);
-  cid_to_cam_t_global->resize(number_of_cid);
+  cid_to_keypoint_map.resize(number_of_cid);
+  cid_to_filename.resize(number_of_cid);
+  cid_to_cam_t_global.resize(number_of_cid);
   for (ptrdiff_t cid = 0; cid < number_of_cid; cid++) {
     // Clear keypoints from map. We'll read these in shortly
-    cid_to_keypoint_map->at(cid).resize(Eigen::NoChange_t(), 2);
+    cid_to_keypoint_map.at(cid).resize(Eigen::NoChange_t(), 2);
 
     // Read the line that contains camera information
     double focal, dist1, dist2;
@@ -72,12 +74,12 @@ void ReadNVM(std::string const& input_filename,
     f >> token >> focal;
     f >> q.w() >> q.x() >> q.y() >> q.z();
     f >> c[0] >> c[1] >> c[2] >> dist1 >> dist2;
-    cid_to_filename->at(cid) = token;
+    cid_to_filename.at(cid) = token;
 
     // Solve for t, which is part of the affine transform
     Eigen::Matrix3d r = q.matrix();
-    cid_to_cam_t_global->at(cid).linear() = r;
-    cid_to_cam_t_global->at(cid).translation() = -r * c;
+    cid_to_cam_t_global.at(cid).linear() = r;
+    cid_to_cam_t_global.at(cid).translation() = -r * c;
   }
 
   // Read the number of points
@@ -88,28 +90,28 @@ void ReadNVM(std::string const& input_filename,
   }
 
   // Read the point
-  pid_to_cid_fid->resize(number_of_pid);
-  pid_to_xyz->resize(number_of_pid);
+  pid_to_cid_fid.resize(number_of_pid);
+  pid_to_xyz.resize(number_of_pid);
   Eigen::Vector3d xyz;
   Eigen::Vector3i color;
   Eigen::Vector2d pt;
   ptrdiff_t cid, fid;
   for (ptrdiff_t pid = 0; pid < number_of_pid; pid++) {
-    pid_to_cid_fid->at(pid).clear();
+    pid_to_cid_fid.at(pid).clear();
 
     ptrdiff_t number_of_measures;
     f >> xyz[0] >> xyz[1] >> xyz[2] >>
       color[0] >> color[1] >> color[2] >> number_of_measures;
-    pid_to_xyz->at(pid) = xyz;
+    pid_to_xyz.at(pid) = xyz;
     for (ptrdiff_t m = 0; m < number_of_measures; m++) {
       f >> cid >> fid >> pt[0] >> pt[1];
 
-      pid_to_cid_fid->at(pid)[cid] = fid;
+      pid_to_cid_fid.at(pid)[cid] = fid;
 
-      if (cid_to_keypoint_map->at(cid).cols() <= fid) {
-        cid_to_keypoint_map->at(cid).conservativeResize(Eigen::NoChange_t(), fid + 1);
+      if (cid_to_keypoint_map.at(cid).cols() <= fid) {
+        cid_to_keypoint_map.at(cid).conservativeResize(Eigen::NoChange_t(), fid + 1);
       }
-      cid_to_keypoint_map->at(cid).col(fid) = pt;
+      cid_to_keypoint_map.at(cid).col(fid) = pt;
     }
 
     if (!f.good())
@@ -118,7 +120,7 @@ void ReadNVM(std::string const& input_filename,
 }
 
 // Write the inliers in nvm format. The keypoints are shifted relative to the optical
-// center, as written by Theia.
+// center, as written by Theia if shift_keypoints is specified.
 void writeInliersToNvm(std::string                                       const& nvm_file,
                        bool                                                     shift_keypoints, 
                        std::vector<camera::CameraParameters>             const& cam_params,
@@ -143,11 +145,9 @@ void writeInliersToNvm(std::string                                       const& 
   // and focal lengths.
   std::vector<Eigen::Matrix2Xd> cid_to_keypoint_map(keypoint_vec.size());
   std::vector<std::string> cid_to_filename(keypoint_vec.size());
-  std::vector<double> focal_lengths(keypoint_vec.size());
   for (size_t cid = 0; cid < cams.size(); cid++) {
     cid_to_keypoint_map[cid] = Eigen::MatrixXd(2, keypoint_vec[cid].size());
     cid_to_filename[cid] = cams[cid].image_name;
-    focal_lengths[cid] = cam_params[cams[cid].camera_type].GetFocalLength();
   }
   
   // Copy over only inliers
@@ -192,7 +192,7 @@ void writeInliersToNvm(std::string                                       const& 
   for (size_t cid = 0; cid < cams.size(); cid++)
     cid_to_keypoint_map.at(cid).conservativeResize(Eigen::NoChange_t(), fid_count[cid]);
 
-  writeNvm(cid_to_keypoint_map, cid_to_filename, focal_lengths, nvm_pid_to_cid_fid,  
+  WriteNvm(cid_to_keypoint_map, cid_to_filename, nvm_pid_to_cid_fid,  
            nvm_pid_to_xyz, world_to_cam, nvm_file);
 
   // Write the optical center per image
@@ -210,13 +210,11 @@ void writeInliersToNvm(std::string                                       const& 
     }
   }
 }
-  
-// Write an nvm file. Note that a single focal length is assumed and no distortion.
-// Those are ignored, and only camera poses, matches, and keypoints are used.
-// It is assumed the interest point matches are shifted relative to the optical center.
-void writeNvm(std::vector<Eigen::Matrix2Xd> const& cid_to_keypoint_map,
+
+// Write an nvm file. Keypoints may or may not be shifted relative to the optical center.
+// The focal length is set to 0. Intrinsics need to be saved in some other data structure.
+void WriteNvm(std::vector<Eigen::Matrix2Xd> const& cid_to_keypoint_map,
               std::vector<std::string> const& cid_to_filename,
-              std::vector<double> const& focal_lengths,
               std::vector<std::map<int, int>> const& pid_to_cid_fid,
               std::vector<Eigen::Vector3d> const& pid_to_xyz,
               std::vector<Eigen::Affine3d> const& cid_to_cam_t_global,
@@ -250,7 +248,7 @@ void writeNvm(std::vector<Eigen::Matrix2Xd> const& cid_to_keypoint_map,
     Eigen::Vector3d camera_center =
       - cid_to_cam_t_global[cid].rotation().inverse() * t;
 
-    f << cid_to_filename[cid] << " " << focal_lengths[cid]
+    f << cid_to_filename[cid] << " " << 0 // focal length is set to 0, not used
       << " " << q.w() << " " << q.x() << " " << q.y() << " " << q.z() << " "
       << camera_center[0] << " " << camera_center[1] << " "
       << camera_center[2] << " " << "0 0\n"; // zero distortion, not used

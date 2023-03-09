@@ -1429,7 +1429,8 @@ void readCameraPoses(// Inputs
 
 // TODO(oalexan1): Move this to fileio.cc.  
 // Read camera information and images from a list or from an NVM file.
-// Can interpolate/extrapolate poses for data from an extra list.  
+// Can interpolate/extrapolate poses for data from an extra list.
+// Only later we will consider if the features are shifted or not in the nvm.
 void readListOrNvm(// Inputs
                    std::string const& camera_poses_list,
                    std::string const& nvm_file,
@@ -1457,12 +1458,12 @@ void readListOrNvm(// Inputs
                                // Outputs
                                nvm);
   else
-    dense_map::ReadNVM(nvm_file, 
-                       &nvm.cid_to_keypoint_map,  
-                       &nvm.cid_to_filename,  
-                       &nvm.pid_to_cid_fid,  
-                       &nvm.pid_to_xyz,  
-                       &nvm.cid_to_cam_t_global);
+    dense_map::ReadNvm(nvm_file, 
+                       nvm.cid_to_keypoint_map,  
+                       nvm.cid_to_filename,  
+                       nvm.pid_to_cid_fid,  
+                       nvm.pid_to_xyz,  
+                       nvm.cid_to_cam_t_global);
 
   // Extra poses need be be added right after reading the original ones,
   // to ensure the same book-keeping is done for all of them. The extra

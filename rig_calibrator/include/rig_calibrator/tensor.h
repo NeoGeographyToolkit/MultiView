@@ -44,6 +44,10 @@ namespace cv {
   class DMatch;
 }
 
+namespace dense_map {
+  struct nvmData;
+}
+
 namespace sparse_mapping {
 
   typedef std::map<std::pair<int, int>, Eigen::Affine3d, std::less<std::pair<int, int>>,
@@ -113,20 +117,9 @@ namespace sparse_mapping {
                  std::string const& output_map,
                  sparse_mapping::SparseMap * C_out);
 
-  /**
-     Take a map. Form a map with only a subset of the images.
-     Bundle adjustment will happen later.
-  */
-  void ExtractSubmap(std::vector<std::string> * keep_ptr,
-                     sparse_mapping::SparseMap * map_ptr);
-
-  /**
-   * Register the map to the world coordinate system or verify
-   * how well registration did.
-   **/
-  double RegistrationOrVerification(std::vector<std::string> const& data_files,
-                                  bool verification,
-                                  sparse_mapping::SparseMap * s);
+  // Extract a submap in-place.
+  void ExtractSubmap(std::vector<std::string> const& images_to_keep,
+                     dense_map::nvmData & nvm);
 
   // I/O Functions for writing and reading affine solutions.
   void WriteAffineCSV(CIDPairAffineMap const& relative_affines,

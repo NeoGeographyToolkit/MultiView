@@ -13,6 +13,8 @@ namespace cv {
   class DMatch;
 }
 
+// TODO(oalexan1): Wipe this class
+
 namespace sparse_mapping {
 
 /**
@@ -23,6 +25,11 @@ namespace sparse_mapping {
  **/
 struct SparseMap {
   EIGEN_MAKE_ALIGNED_OPERATOR_NEW
+
+  // Create an empty map. It is strongly recommended to not use this function,
+  // as it requires carefully initializing many members. Hence this is made
+  // private. Consider using the other constructors.
+  SparseMap() {}
 
   /**
    * Constructs a new sparse map from a list of image files and their
@@ -61,27 +68,6 @@ struct SparseMap {
    **/
   void DetectFeatures();
 
-  /**
-   * Save the map to a protobuf file.
-   **/
-  void Save(const std::string & protobuf_file) const;
-
-  /**
-   * Estimate the camera pose for an image file.
-   **/
-  bool Localize(std::string const& img_file, camera::CameraModel* pose,
-      std::vector<Eigen::Vector3d>* inlier_landmarks = NULL,
-                std::vector<Eigen::Vector2d>* inlier_observations = NULL,
-                std::vector<int> * cid_list = NULL);
-  bool Localize(const cv::Mat & image,
-      camera::CameraModel* pose, std::vector<Eigen::Vector3d>* inlier_landmarks = NULL,
-                std::vector<Eigen::Vector2d>* inlier_observations = NULL,
-                std::vector<int> * cid_list = NULL);
-  bool Localize(const cv::Mat & test_descriptors, const Eigen::Matrix2Xd & test_keypoints,
-                camera::CameraModel* pose,
-                std::vector<Eigen::Vector3d>* inlier_landmarks,
-                std::vector<Eigen::Vector2d>* inlier_observations,
-                std::vector<int> * cid_list = NULL);
   // access map frames
   /**
    * Get the number of keyframes in the map.
@@ -237,10 +223,6 @@ struct SparseMap {
   std::mutex mutex_detector_;
 
  private:
-  // Create an empty map. It is strongly recommended to not use this function,
-  // as it requires carefully initializing many members. Hence this is made
-  // private. Consider using the other constructors.
-  SparseMap();
 
   // I found out the hard way that sparse maps cannot be copied
   // correctly, hence prohibit this. The only good way seems to be to

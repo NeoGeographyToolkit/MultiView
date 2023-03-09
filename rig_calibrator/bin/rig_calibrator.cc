@@ -322,7 +322,7 @@ DEFINE_bool(read_nvm_no_shift, false,
 
 DEFINE_bool(save_nvm_no_shift, false,
             "Save the optimized camera poses and inlier interest point matches to "
-            "<out dir>/cameras_noshift.nvm. Interest point matches are not offset "
+            "<out dir>/cameras_no_shift.nvm. Interest point matches are not offset "
             "relative to the optical center, which is not standard, but which "
             "allows this file to be self-contained and for the matches to be "
             "drawn with stereo_gui.");
@@ -900,7 +900,6 @@ void parameterValidation() {
 
   if (FLAGS_rig_config == "")
     LOG(FATAL) << "Must specify the initial rig configuration via --rig_config.\n";
-
 
   if (FLAGS_camera_poses != "" && FLAGS_nvm != "")
     LOG(FATAL) << "Cannot specify both --nvm and --camera_poses.\n";
