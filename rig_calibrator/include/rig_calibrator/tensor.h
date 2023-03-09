@@ -32,12 +32,9 @@
 #include <vector>
 #include <limits>
 #include <memory>
+#include <mutex>
 
 EIGEN_DEFINE_STL_VECTOR_SPECIALIZATION(std::array<std::pair<std::pair<int, int>, Eigen::Affine3d>, 3>)
-
-namespace std {
-  class mutex;
-}
 
 namespace cv {
   class Mat;
