@@ -43,6 +43,7 @@ namespace cv {
 
 namespace dense_map {
   struct nvmData;
+  struct RigSet;
 }
 
 namespace sparse_mapping {
@@ -96,22 +97,19 @@ namespace sparse_mapping {
                         bool fix_all_cameras = false,
                         std::set<int> const& fixed_cameras = std::set<int>());
 
-  /**
-     Append map file.
-  **/
-  void AppendMapFile(std::string const& mapOut, std::string const& mapIn,
-                     int num_image_overlaps_at_endpoints,
-                     double outlier_factor,
-                     bool bundle_adjust, bool fix_first_map);
+// Merge two maps
+void MergeMaps(dense_map::nvmData const& A_in,
+               dense_map::nvmData const& B_in,
+               dense_map::RigSet const& R,
+               int num_image_overlaps_at_endpoints,
+               double close_dist,
+               dense_map::nvmData & C_out);
 
-  /**
-     Merge two maps.
-  **/
+  // TODO(oalexan1): Wipe this!
   void MergeMaps(sparse_mapping::SparseMap * A_in,
                  sparse_mapping::SparseMap * B_in,
                  int num_image_overlaps_at_endpoints,
                  double outlier_factor,
-                 std::string const& output_map,
                  sparse_mapping::SparseMap * C_out);
 
   // Extract a submap in-place.

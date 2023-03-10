@@ -180,7 +180,7 @@ DEFINE_double(timestamp_offsets_max_change, 1.0,
               "(measured in seconds). Existing image bracketing acts as an additional "
               "constraint.");
 
-DEFINE_double(depth_tri_weight, 0.0,
+DEFINE_double(depth_tri_weight, 1000.0,
               "The weight to give to the constraint that depth measurements agree with "
               "triangulated points. Use a bigger number as depth errors are usually on the "
               "order of 0.01 meters while reprojection errors are on the order of 1 pixel.");
@@ -197,18 +197,18 @@ DEFINE_double(depth_mesh_weight, 0.0,
               "A larger value will give more weight to the constraint that the depth clouds "
               "stay close to the mesh. Not suggested by default.");
 
-DEFINE_double(tri_weight, 0.0,
+DEFINE_double(tri_weight, 0.1,
               "The weight to give to the constraint that optimized triangulated "
               "points stay close to original triangulated points. A positive value will "
               "help ensure the cameras do not move too far, but a large value may prevent "
               "convergence.");
 
-DEFINE_double(tri_robust_threshold, 0.0,
+DEFINE_double(tri_robust_threshold, 0.1,
               "The robust threshold to use with the triangulation weight. Must be positive.");
 
 DEFINE_bool(affine_depth_to_image, false, "Assume that the depth-to-image transform "
-            "for each depth + image camera is an arbitrary affine transform rather than a "
-            "rotation times a scale.");
+            "for each depth + image camera is an arbitrary affine transform rather than "
+            "scale * rotation + translation.");
 
 DEFINE_int32(calibrator_num_passes, 2, "How many passes of optimization to do. Outliers will be "
              "removed after every pass. Each pass will start with the previously optimized "
@@ -1399,11 +1399,15 @@ int main(int argc, char** argv) {
   // these are read from the nvm file only, as below.
   dense_map::KeypointVec keypoint_vec;
   std::vector<std::map<int, int>> pid_to_cid_fid;
+  bool filter_matches_using_cams = true;
+  std::vector<std::pair<int, int>> input_image_pairs; // will use num_overlaps instead
+
   if (FLAGS_num_overlaps > 0)
     dense_map::detectMatchFeatures(// Inputs
                                    cams, R.cam_params, FLAGS_out_dir, FLAGS_save_matches,
-                                   world_to_cam,
-                                   FLAGS_num_overlaps, FLAGS_initial_max_reprojection_error,
+                                   filter_matches_using_cams, world_to_cam,
+                                   FLAGS_num_overlaps, input_image_pairs,
+                                   FLAGS_initial_max_reprojection_error,
                                    FLAGS_num_match_threads,
                                    FLAGS_verbose,
                                    // Outputs

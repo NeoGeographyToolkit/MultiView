@@ -21,9 +21,9 @@
 
 #include <glog/logging.h>
 
+#include <iostream>
 #include <ctime>
 #include <climits>
-
 #include <string>
 #include <vector>
 #include <random>
@@ -76,7 +76,7 @@ class RandomSampleConsensus {
       if (m_error_func(H, p1[i], p2[i]) < m_inlier_threshold)
         result.push_back(i);
 
-    LOG(INFO) << "RANSAC inliers / total = " << result.size() << " / " << p1.size() << ".\n";
+    //LOG(INFO) << "RANSAC inliers / total = " << result.size() << " / " << p1.size() << ".\n";
 
     return result;
   }
@@ -124,14 +124,14 @@ class RandomSampleConsensus {
           success = true;
           break;
         } catch (const std::exception& e) {
-          LOG(INFO) << e.what() << "\n";
+          std::cout << e.what() << "\n";
           if (!m_reduce_min_num_output_inliers_if_no_fit)
             break;
           reduce_min_num_output_inliers();
           // A similarity transform needs at least 3 samples
           if (m_min_num_output_inliers < 3)
             break;
-          LOG(INFO) << "Attempting RANSAC with " << m_min_num_output_inliers
+          std::cout << "Attempting RANSAC with " << m_min_num_output_inliers
                     << " output inliers.\n";
         }
       }
@@ -143,12 +143,12 @@ class RandomSampleConsensus {
 
       m_min_num_output_inliers = orig_num_inliers;  // restore this
       m_inlier_threshold *= 1.5;
-      LOG(INFO) << "Increasing the inlier threshold to: " << m_inlier_threshold << ".\n";
+      std::cout << "Increasing the inlier threshold to: " << m_inlier_threshold << ".\n";
     }
 
     if (!success)
-      LOG(FATAL) << "RANSAC was unable to find a fit that matched the supplied data.";
-
+      throw std::runtime_error("RANSAC was unable to find a fit that matched the supplied data.");
+    
     return H;
   }
 
@@ -223,7 +223,8 @@ class RandomSampleConsensus {
     if (num_inliers < m_min_num_output_inliers) {
       // Here throw, to be able to catch it in the caller.
       std::ostringstream os;
-      os << "RANSAC was unable to find a fit with " << m_min_num_output_inliers << " inliers.";
+      os << "RANSAC was unable to find a fit with "
+         << m_min_num_output_inliers << " inliers.";
       throw std::runtime_error(os.str());
     }
     return best_H;

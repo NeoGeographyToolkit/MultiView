@@ -35,8 +35,8 @@ def sanityChecks(args):
     if args.rig_config == "":
         raise Exception("The path to the rig configuration file was not specified.")
 
-    if args.images == "":
-        raise Exception("The input images were not specified.")
+    if int(args.images == "") + int(args.image_list == "") != 1:
+        raise Exception("Must set the input images using --images or --image_list but not both.")
 
     if args.theia_flags == "":
         raise Exception("The path to the Theia flags was not specified.")
@@ -62,6 +62,9 @@ def processArgs(args, base_dir):
     parser.add_argument("--images",  dest="images", default="",
                         help = "Images, as individual wildcards. Example: 'dir/cam1/*tif dir/cam2/*tif.")
 
+    parser.add_argument("--image_list",  dest="image_list", default="",
+                        help = "Use the images from this list, instead of setting --images.")
+    
     parser.add_argument("--theia_flags", dest="theia_flags",
                         default="", help="The flags to pass to Theia. By default, " + \
                         "the file ``share/theia_flags.txt`` in the software "       + \
@@ -101,6 +104,12 @@ def genTheiaCalibFile(rig_config, args):
     image_array = []
     for image_wildcard in args.images.split():
         image_array += glob.glob(image_wildcard)
+    # Use the image list, if provided
+    if args.image_list != "":
+        with open(args.image_list, 'r') as f:
+            image_array = f.readlines()
+        for it in range(len(image_array)):
+            image_array[it] = image_array[it].rstrip() # rm newlines
 
     # Parse the images for all cameras
     image_array = sorted(image_array)
@@ -136,6 +145,9 @@ def genTheiaCalibFile(rig_config, args):
     for sensor_id in range(len(rig_config)):
         sensor_name = rig_config[sensor_id]['sensor_name']
         sym_images[sensor_name] = []
+        if sensor_name not in images:
+            # Canot continue, as the .json file will then be invalid and Theia will fail
+            raise Exception("Found a sensor name with no images: " + sensor_name)
         num_images = len(images[sensor_name])
         timestamps = set() # timestamps for given sensor
         for it in range(num_images):
@@ -171,6 +183,8 @@ def genTheiaCalibFile(rig_config, args):
         for sensor_id in range(len(rig_config)):
             sensor_name = rig_config[sensor_id]['sensor_name']
             num_images = len(sym_images[sensor_name])
+            if num_images == 0:
+                continue
             for it in range(num_images):
                 image = os.path.basename(sym_images[sensor_name][it])
                 fh.write('{"CameraIntrinsicsPrior" : {\n')

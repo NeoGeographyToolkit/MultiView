@@ -27,6 +27,7 @@
 #include <rig_calibrator/interpolation_utils.h>
 #include <rig_calibrator/rig_config.h>
 #include <rig_calibrator/random_set.h>
+#include <rig_calibrator/image_lookup.h>
 #include <rig_calibrator/nvm.h>
 
 #include <camera_model/camera_params.h>
@@ -134,7 +135,8 @@ void reduceMatches(std::vector<InterestPoint> & left_ip,
   
 // This really likes haz cam first and nav cam second
 // Note: The function matchFeaturesWithCams() is used instead.
-void matchFeatures(std::mutex* match_mutex, int left_image_index, int right_image_index,
+void matchFeatures(std::mutex* match_mutex,
+                   int left_image_index, int right_image_index,
                    cv::Mat const& left_descriptors, cv::Mat const& right_descriptors,
                    Eigen::Matrix2Xd const& left_keypoints,
                    Eigen::Matrix2Xd const& right_keypoints, bool verbose,
@@ -213,6 +215,7 @@ void matchFeatures(std::mutex* match_mutex, int left_image_index, int right_imag
 void matchFeaturesWithCams(std::mutex* match_mutex, int left_image_index, int right_image_index,
                            camera::CameraParameters const& left_params,
                            camera::CameraParameters const& right_params,
+                           bool filter_matches_using_cams,
                            Eigen::Affine3d const& left_world_to_cam,
                            Eigen::Affine3d const& right_world_to_cam,
                            double reprojection_error,
@@ -234,46 +237,50 @@ void matchFeaturesWithCams(std::mutex* match_mutex, int left_image_index, int ri
     int left_ip_index = cv_matches.at(j).queryIdx;
     int right_ip_index = cv_matches.at(j).trainIdx;
 
-    Eigen::Vector2d dist_left_ip(left_keypoints.col(left_ip_index)[0],
-                                 left_keypoints.col(left_ip_index)[1]);
 
-    Eigen::Vector2d dist_right_ip(right_keypoints.col(right_ip_index)[0],
-                                  right_keypoints.col(right_ip_index)[1]);
+    // We may not always have the cameras to use in filtering
+    if (filter_matches_using_cams) {
+      Eigen::Vector2d dist_left_ip(left_keypoints.col(left_ip_index)[0],
+                                   left_keypoints.col(left_ip_index)[1]);
 
-    Eigen::Vector2d undist_left_ip;
-    Eigen::Vector2d undist_right_ip;
-    left_params.Convert<camera::DISTORTED,  camera::UNDISTORTED_C>
-      (dist_left_ip, &undist_left_ip);
-    right_params.Convert<camera::DISTORTED, camera::UNDISTORTED_C>
-      (dist_right_ip, &undist_right_ip);
+      Eigen::Vector2d dist_right_ip(right_keypoints.col(right_ip_index)[0],
+                                    right_keypoints.col(right_ip_index)[1]);
 
-    Eigen::Vector3d X =
-      dense_map::TriangulatePair(left_params.GetFocalLength(), right_params.GetFocalLength(),
-                                 left_world_to_cam, right_world_to_cam,
-                                 undist_left_ip, undist_right_ip);
+      Eigen::Vector2d undist_left_ip;
+      Eigen::Vector2d undist_right_ip;
+      left_params.Convert<camera::DISTORTED,  camera::UNDISTORTED_C>
+        (dist_left_ip, &undist_left_ip);
+      right_params.Convert<camera::DISTORTED, camera::UNDISTORTED_C>
+        (dist_right_ip, &undist_right_ip);
 
-    // Project back into the cameras
-    Eigen::Vector3d left_cam_X = left_world_to_cam * X;
-    Eigen::Vector2d undist_left_pix
-      = left_params.GetFocalVector().cwiseProduct(left_cam_X.hnormalized());
-    Eigen::Vector2d dist_left_pix;
-    left_params.Convert<camera::UNDISTORTED_C, camera::DISTORTED>(undist_left_pix,
-                                                                  &dist_left_pix);
+      Eigen::Vector3d X =
+        dense_map::TriangulatePair(left_params.GetFocalLength(), right_params.GetFocalLength(),
+                                   left_world_to_cam, right_world_to_cam,
+                                   undist_left_ip, undist_right_ip);
 
-    Eigen::Vector3d right_cam_X = right_world_to_cam * X;
-    Eigen::Vector2d undist_right_pix
-      = right_params.GetFocalVector().cwiseProduct(right_cam_X.hnormalized());
-    Eigen::Vector2d dist_right_pix;
-    right_params.Convert<camera::UNDISTORTED_C, camera::DISTORTED>(undist_right_pix,
-                                                                   &dist_right_pix);
+      // Project back into the cameras
+      Eigen::Vector3d left_cam_X = left_world_to_cam * X;
+      Eigen::Vector2d undist_left_pix
+        = left_params.GetFocalVector().cwiseProduct(left_cam_X.hnormalized());
+      Eigen::Vector2d dist_left_pix;
+      left_params.Convert<camera::UNDISTORTED_C, camera::DISTORTED>(undist_left_pix,
+                                                                    &dist_left_pix);
 
-    // Filter out points whose reprojection error is too big
-    bool is_good = ((dist_left_ip - dist_left_pix).norm() <= reprojection_error &&
-                    (dist_right_ip - dist_right_pix).norm() <= reprojection_error);
+      Eigen::Vector3d right_cam_X = right_world_to_cam * X;
+      Eigen::Vector2d undist_right_pix
+        = right_params.GetFocalVector().cwiseProduct(right_cam_X.hnormalized());
+      Eigen::Vector2d dist_right_pix;
+      right_params.Convert<camera::UNDISTORTED_C, camera::DISTORTED>(undist_right_pix,
+                                                                     &dist_right_pix);
 
-    // If any values above are Inf or NaN, is_good will be false as well
-    if (!is_good) continue;
+      // Filter out points whose reprojection error is too big
+      bool is_good = ((dist_left_ip - dist_left_pix).norm() <= reprojection_error &&
+                      (dist_right_ip - dist_right_pix).norm() <= reprojection_error);
 
+      // If any values above are Inf or NaN, is_good will be false as well
+      if (!is_good) continue;
+    }
+    
     // Get the keypoints from the good matches
     left_vec.push_back(cv::Point2f(left_keypoints.col(left_ip_index)[0],
                                    left_keypoints.col(left_ip_index)[1]));
@@ -491,7 +498,10 @@ void detectMatchFeatures(// Inputs
                          std::vector<dense_map::cameraImage> const& cams,
                          std::vector<camera::CameraParameters> const& cam_params,
                          std::string const& out_dir, bool save_matches,
-                         std::vector<Eigen::Affine3d> const& world_to_cam, int num_overlaps,
+                         bool filter_matches_using_cams,
+                         std::vector<Eigen::Affine3d> const& world_to_cam,
+                         int num_overlaps,
+                         std::vector<std::pair<int, int>> const& input_image_pairs, // may override num_overlaps
                          int initial_max_reprojection_error, int num_match_threads,
                          bool verbose,
                          // Outputs
@@ -532,13 +542,18 @@ void detectMatchFeatures(// Inputs
 
   MATCH_MAP matches;
 
-  std::vector<std::pair<int, int> > image_pairs;
-  for (size_t it1 = 0; it1 < num_images; it1++) {
-    for (size_t it2 = it1 + 1; it2 < std::min(num_images, it1 + num_overlaps + 1); it2++) {
-      image_pairs.push_back(std::make_pair(it1, it2));
+  std::vector<std::pair<int, int>> image_pairs;
+  if (!input_image_pairs.empty()) {
+    // Use provided image pairs
+    image_pairs = input_image_pairs;
+  } else {
+    for (size_t it1 = 0; it1 < num_images; it1++) {
+      for (size_t it2 = it1 + 1; it2 < std::min(num_images, it1 + num_overlaps + 1); it2++) {
+        image_pairs.push_back(std::make_pair(it1, it2));
+      }
     }
   }
-
+  
   {
     std::cout << "Matching features." << std::endl;
     dense_map::ThreadPool thread_pool;
@@ -550,8 +565,9 @@ void detectMatchFeatures(// Inputs
         (&dense_map::matchFeaturesWithCams,   // multi-threaded  // NOLINT
          // dense_map::matchFeaturesWithCams( // single-threaded // NOLINT
          &match_mutex, left_image_it, right_image_it, cam_params[cams[left_image_it].camera_type],
-         cam_params[cams[right_image_it].camera_type], world_to_cam[left_image_it],
-         world_to_cam[right_image_it], initial_max_reprojection_error,
+         cam_params[cams[right_image_it].camera_type],
+         filter_matches_using_cams,
+         world_to_cam[left_image_it], world_to_cam[right_image_it], initial_max_reprojection_error,
          cid_to_descriptor_map[left_image_it], cid_to_descriptor_map[right_image_it],
          cid_to_keypoint_map[left_image_it], cid_to_keypoint_map[right_image_it], verbose,
          &matches[pair]);
@@ -560,6 +576,9 @@ void detectMatchFeatures(// Inputs
   }
   cid_to_descriptor_map = std::vector<cv::Mat>();  // Wipe, takes memory
 
+  // TODO(oalexan1): Make this into a function called buildTracksFromMatches().
+  // Then call it from the function that will merge tracks.
+  
   // Give all interest points in a given image a unique id, and put
   // them in a vector with the id corresponding to the interest point
   std::vector<std::map<std::pair<float, float>, int>> keypoint_map(num_images);
@@ -694,12 +713,18 @@ void multiViewTriangulation(// Inputs
                             std::vector<std::vector<std::pair<float, float>>>
                             const& keypoint_vec,
                             // Outputs
-                            std::vector<std::map<int, std::map<int, int>>>& pid_cid_fid_inlier,
+                            std::vector<std::map<int, std::map<int, int>>>&
+                            pid_cid_fid_inlier,
                             std::vector<Eigen::Vector3d>& xyz_vec) {
+
+  if (cams.size() != world_to_cam.size()) 
+    LOG(FATAL) << "Expecting as many images as cameras.\n";
   
   xyz_vec.clear();
   xyz_vec.resize(pid_to_cid_fid.size());
-
+  for (size_t pid = 0; pid < pid_to_cid_fid.size(); pid++)
+    xyz_vec[pid] = Eigen::Vector3d(0, 0, 0); // initialize to 0
+  
   for (size_t pid = 0; pid < pid_to_cid_fid.size(); pid++) {
     std::vector<double> focal_length_vec;
     std::vector<Eigen::Affine3d> world_to_cam_aff_vec;
@@ -727,7 +752,8 @@ void multiViewTriangulation(// Inputs
     if (pix_vec.size() < 2) {
       // If after outlier filtering less than two rays are left, can't triangulate.
       // Must set all features for this pid to outliers.
-      for (auto cid_fid = pid_to_cid_fid[pid].begin(); cid_fid != pid_to_cid_fid[pid].end();
+      for (auto cid_fid = pid_to_cid_fid[pid].begin();
+           cid_fid != pid_to_cid_fid[pid].end();
            cid_fid++) {
         int cid = cid_fid->first;
         int fid = cid_fid->second;
@@ -739,7 +765,8 @@ void multiViewTriangulation(// Inputs
     }
 
     // Triangulate n rays emanating from given undistorted and centered pixels
-    xyz_vec[pid] = dense_map::Triangulate(focal_length_vec, world_to_cam_aff_vec, pix_vec);
+    xyz_vec[pid] = dense_map::Triangulate(focal_length_vec, world_to_cam_aff_vec,
+                                          pix_vec);
 
     bool bad_xyz = false;
     for (int c = 0; c < xyz_vec[pid].size(); c++) {
@@ -1173,12 +1200,6 @@ void readXyzImage(std::string const& filename, cv::Mat & img) {
   return;
 }
 
-// The cam name is the subdir having the images.
-// Example: mydir/nav_cam/file.jpg has nav_cam as the cam name.
-std::string camName(std::string const& image_file) {
-  return fs::path(image_file).parent_path().filename().string();
-}
-
 // Find the name of the camera of the images used in registration.
 // The registration images must all be acquired with the same sensor.  
 std::string registrationCamName(std::string const& hugin_file) {
@@ -1197,39 +1218,7 @@ std::string registrationCamName(std::string const& hugin_file) {
   
   return *sensors.begin();
 }
-  
-void findCamTypeAndTimestamp(std::string const& image_file,
-                             std::vector<std::string> const& cam_names,
-                             // Outputs
-                             int    & cam_type,
-                             double & timestamp) {
 
-  // Initialize the outputs
-  cam_type = 0;
-  timestamp = 0.0;
-  
-  // The cam name is the subdir having the images
-  std::string cam_name = camName(image_file);
-    
-  std::string basename = fs::path(image_file).filename().string();
-  if (basename.empty() || basename[0] < '0' || basename[0] > '9')
-    LOG(FATAL) << "Image name (without directory) must start with digits. Got: "
-               << basename << "\n";
-  timestamp = atof(basename.c_str());
-
-  // Infer cam type from cam name
-  bool success = false;
-  for (size_t cam_it = 0; cam_it < cam_names.size(); cam_it++) {
-    if (cam_names[cam_it] == cam_name) {
-      cam_type = cam_it;
-      success = true;
-      break;
-    }
-  }
-  if (!success) 
-    LOG(FATAL) << "Could not determine sensor name from image path: " << image_file << "\n";
-}
-  
 void readImageEntry(// Inputs
                     std::string const& image_file,
                     Eigen::Affine3d const& world_to_cam,

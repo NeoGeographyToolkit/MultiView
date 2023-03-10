@@ -41,6 +41,13 @@ target_link_libraries(sfm_submap
 set_target_properties(sfm_submap PROPERTIES
     RUNTIME_OUTPUT_DIRECTORY "${CMAKE_BINARY_DIR}/bin")
 
+# Build the sfm_merge tool
+add_executable(sfm_merge bin/sfm_merge.cc)
+target_link_libraries(sfm_merge 
+    rig_calibrator_lib)
+set_target_properties(sfm_merge PROPERTIES
+    RUNTIME_OUTPUT_DIRECTORY "${CMAKE_BINARY_DIR}/bin")
+
 # Set RPATHS. 
 # TODO(oalexan1): Use a loop here, as there are too many lines
 if(APPLE)
@@ -54,6 +61,8 @@ if(APPLE)
     INSTALL_RPATH "@loader_path;@loader_path/../lib;${MULTIVIEW_DEPS_DIR}/lib")
   set_target_properties(sfm_submap PROPERTIES
     INSTALL_RPATH "@loader_path;@loader_path/../lib;${MULTIVIEW_DEPS_DIR}/lib")
+  set_target_properties(sfm_merge PROPERTIES
+    INSTALL_RPATH "@loader_path;@loader_path/../lib;${MULTIVIEW_DEPS_DIR}/lib")
 elseif(UNIX) # Unix which is not Apple
   set_target_properties(rig_calibrator_lib PROPERTIES
     INSTALL_RPATH "$ORIGIN:$ORIGIN/../lib:${MULTIVIEW_DEPS_DIR}/lib")
@@ -65,6 +74,8 @@ elseif(UNIX) # Unix which is not Apple
     INSTALL_RPATH "$ORIGIN:$ORIGIN/../lib:${MULTIVIEW_DEPS_DIR}/lib")
   set_target_properties(sfm_submap PROPERTIES
     INSTALL_RPATH "$ORIGIN:$ORIGIN/../lib:${MULTIVIEW_DEPS_DIR}/lib")
+  set_target_properties(sfm_merge PROPERTIES
+    INSTALL_RPATH "$ORIGIN:$ORIGIN/../lib:${MULTIVIEW_DEPS_DIR}/lib")
 endif()
 
 # Install the lib and the tools
@@ -73,6 +84,7 @@ install(TARGETS rig_calibrator_bin RUNTIME DESTINATION ${CMAKE_INSTALL_BINDIR})
 install(TARGETS undistort_image_texrecon RUNTIME DESTINATION ${CMAKE_INSTALL_BINDIR})
 install(TARGETS fit_rpc RUNTIME DESTINATION ${CMAKE_INSTALL_BINDIR})
 install(TARGETS sfm_submap RUNTIME DESTINATION ${CMAKE_INSTALL_BINDIR})
+install(TARGETS sfm_merge RUNTIME DESTINATION ${CMAKE_INSTALL_BINDIR})
 
 # Install the python tools.
 # TODO(oalexan1): Make a loop here.
