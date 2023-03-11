@@ -199,7 +199,8 @@ void writeInliersToNvm(std::string                                       const& 
   if (shift_keypoints) {
     int file_len = nvm_file.size(); // cast to int to make subtraction safe
     // Remove .nvm and add new suffix
-    std::string offset_path = nvm_file.substr(0, std::max(file_len - 4, 0)) + "_offsets.txt";
+    std::string offset_path = nvm_file.substr(0, std::max(file_len - 4, 0))
+      + "_offsets.txt";
     std::cout << "Writing optical center per image: " << offset_path << std::endl;
     std::ofstream offset_fh(offset_path.c_str());
     offset_fh.precision(17);   // Save with the highest precision
