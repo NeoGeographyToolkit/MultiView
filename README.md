@@ -1,11 +1,11 @@
-This software provides a collection of tools for calibration of a rig
-of *N* image and/or depth+image cameras, fusion of point clouds into a
-mesh, and seamless texturing of meshes with the input images and
-optimized cameras.
+This software provides a collection of tools for joint calibration of
+a set of rigs, each with one or more image and/or depth+image cameras,
+fusion of point clouds into a mesh, and seamless texturing of meshes
+with the input images and optimized cameras.
 
 The software was originally developed as part of the [NASA
-ISAAC](https://github.com/nasa/isaac#readme) project, which uses a
-robot with 3 front-facing cameras to scan and navigate the
+ISAAC](https://github.com/nasa/isaac#readme) project, which uses 
+several robots with 3 front-facing cameras to scan and navigate the
 International Space Station. The current version is self-contained
 and does not depend on ROS or other parts of ISAAC.
 
@@ -56,11 +56,11 @@ different on Linux and OSX:
 
     isMac=$(uname -s | grep Darwin)
     if [ "$isMac" != "" ]; then
-        cc_comp=clang
-        cxx_comp=clang++
+      cc_comp=clang
+      cxx_comp=clang++
     else
-        cc_comp=x86_64-conda_cos6-linux-gnu-gcc
-        cxx_comp=x86_64-conda_cos6-linux-gnu-g++
+      cc_comp=x86_64-conda_cos6-linux-gnu-gcc
+      cxx_comp=x86_64-conda_cos6-linux-gnu-g++
     fi
 
 Run ``cmake``:
@@ -86,6 +86,6 @@ which may tell ``cmake`` to look elsewhere. Then, run:
 
 The resulting tools will be installed in MultiView/install.
 
-If the Theia ``view_reconstruction`` tool is a challege to build
+If the Theia ``view_reconstruction`` tool can be challenging to build
 because of its dependence on OpenGL, it can be excluded from building
-by editing the approproate CMakeLists.txt file.
+by editing the appropriate CMakeLists.txt file.
