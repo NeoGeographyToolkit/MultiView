@@ -501,7 +501,7 @@ void detectMatchFeatures(// Inputs
                          bool filter_matches_using_cams,
                          std::vector<Eigen::Affine3d> const& world_to_cam,
                          int num_overlaps,
-                         std::vector<std::pair<int, int>> const& input_image_pairs, // may override num_overlaps
+                         std::vector<std::pair<int, int>> const& input_image_pairs, 
                          int initial_max_reprojection_error, int num_match_threads,
                          bool verbose,
                          // Outputs
@@ -540,20 +540,21 @@ void detectMatchFeatures(// Inputs
     thread_pool.Join();
   }
 
-  MATCH_MAP matches;
-
+  // Find which image pairs to match
   std::vector<std::pair<int, int>> image_pairs;
   if (!input_image_pairs.empty()) {
-    // Use provided image pairs
+    // Use provided image pairs instead of num_overlaps
     image_pairs = input_image_pairs;
   } else {
     for (size_t it1 = 0; it1 < num_images; it1++) {
-      for (size_t it2 = it1 + 1; it2 < std::min(num_images, it1 + num_overlaps + 1); it2++) {
+      int end = std::min(num_images, it1 + num_overlaps + 1);
+      for (size_t it2 = it1 + 1; it2 < end; it2++) {
         image_pairs.push_back(std::make_pair(it1, it2));
       }
     }
   }
   
+  MATCH_MAP matches;
   {
     std::cout << "Matching features." << std::endl;
     dense_map::ThreadPool thread_pool;
@@ -564,10 +565,12 @@ void detectMatchFeatures(// Inputs
       thread_pool.AddTask
         (&dense_map::matchFeaturesWithCams,   // multi-threaded  // NOLINT
          // dense_map::matchFeaturesWithCams( // single-threaded // NOLINT
-         &match_mutex, left_image_it, right_image_it, cam_params[cams[left_image_it].camera_type],
+         &match_mutex, left_image_it, right_image_it,
+         cam_params[cams[left_image_it].camera_type],
          cam_params[cams[right_image_it].camera_type],
          filter_matches_using_cams,
-         world_to_cam[left_image_it], world_to_cam[right_image_it], initial_max_reprojection_error,
+         world_to_cam[left_image_it], world_to_cam[right_image_it],
+         initial_max_reprojection_error,
          cid_to_descriptor_map[left_image_it], cid_to_descriptor_map[right_image_it],
          cid_to_keypoint_map[left_image_it], cid_to_keypoint_map[right_image_it], verbose,
          &matches[pair]);
@@ -673,6 +676,7 @@ void detectMatchFeatures(// Inputs
   keypoint_map.clear(); keypoint_map.shrink_to_fit();
   cid_to_keypoint_map.clear(); cid_to_keypoint_map.shrink_to_fit();
 
+  std::cout << "--now build tracks!" << std::endl;
   {
     // Build tracks
     // De-allocate these as soon as not needed to save memory
@@ -688,10 +692,12 @@ void detectMatchFeatures(// Inputs
     trackBuilder = openMVG::tracks::TracksBuilder();   // wipe it
 
     if (map_tracks.empty())
-      LOG(FATAL) << "No tracks left after filtering. Perhaps images are too dis-similar?\n";
+      LOG(FATAL)
+        << "No tracks left after filtering. Perhaps images are too dis-similar?\n";
 
     // Populate the filtered tracks
     size_t num_elems = map_tracks.size();
+    pid_to_cid_fid.clear();
     pid_to_cid_fid.resize(num_elems);
     size_t curr_id = 0;
     for (auto itr = map_tracks.begin(); itr != map_tracks.end(); itr++) {
@@ -851,8 +857,9 @@ void saveInlinerMatchPairs(// Inputs
                                                       cams[right_cid].image_name,
                                                       suffix);
 
-    std::cout << "Writing: " << cams[left_cid].image_name << ' ' << cams[right_cid].image_name
-              << " " << match_file << std::endl;
+    std::cout << "Writing: " << cams[left_cid].image_name << " "
+              << cams[right_cid].image_name << " "
+              << match_file << std::endl;
     dense_map::writeMatchFile(match_file, match_pair.first, match_pair.second);
   }
 }
@@ -864,7 +871,8 @@ void saveInlinerMatchPairs(// Inputs
 // Apply a given transform to the given set of cameras.
 // We assume that the transform is of the form
 // T(x) = scale * rotation * x + translation
-void TransformCameras(Eigen::Affine3d const& T, std::vector<Eigen::Affine3d> &world_to_cam) {
+void TransformCameras(Eigen::Affine3d const& T,
+                      std::vector<Eigen::Affine3d> &world_to_cam) {
   
   // Inverse of rotation component
   double scale = pow(T.linear().determinant(), 1.0 / 3.0);

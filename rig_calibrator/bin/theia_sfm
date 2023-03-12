@@ -142,12 +142,15 @@ def genTheiaCalibFile(rig_config, args):
     print("Creating sym links to the input images in: " + sym_image_dir)
     rig_utils.mkdir_p(sym_image_dir)
     sym_images = {}
+    nonempty_rig = []
     for sensor_id in range(len(rig_config)):
         sensor_name = rig_config[sensor_id]['sensor_name']
         sym_images[sensor_name] = []
         if sensor_name not in images:
-            # Canot continue, as the .json file will then be invalid and Theia will fail
-            raise Exception("Found a sensor name with no images: " + sensor_name)
+            print("Found a sensor name with no images: " + sensor_name)
+            continue
+
+        nonempty_rig.append(rig_config[sensor_id])
         num_images = len(images[sensor_name])
         timestamps = set() # timestamps for given sensor
         for it in range(num_images):
@@ -173,6 +176,10 @@ def genTheiaCalibFile(rig_config, args):
             
             sym_images[sensor_name].append(dst_file)
             os.symlink(src_file, dst_file)
+            
+    # Must use this later on, otherwise the syntax of the file created
+    # later is incorrect.
+    rig_config = nonempty_rig[:]
     
     calib_file = args.out_dir + "/" + "theia_calibration.json"
     print("Writing Theia calibration file: " + calib_file)

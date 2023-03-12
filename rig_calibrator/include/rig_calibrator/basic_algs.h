@@ -23,6 +23,7 @@
 
 #include <glog/logging.h>
 #include <map>
+#include <algorithm>
 
 namespace dense_map {
 
@@ -73,6 +74,19 @@ void setMapValue(std::vector<std::map<int, std::map<int, T>>> & pid_cid_fid,
 }
 
 std::string file_extension(std::string const& file);
+
+// Maximum value in a map
+template<typename K, typename V>
+V maxMapVal(const std::map<K,V> &map) {
+  if (map.empty()) 
+    LOG(FATAL) << "Cannot find the maximum value in an empty map.\n";
+  
+  auto key = std::max_element(map.begin(), map.end(),
+                              [](std::pair<K,V> const &x, std::pair<K,V> const &y) {
+                                return x.second < y.second;
+                              });
+  return key->second;
+}
   
 }  // end namespace dense_map
 
