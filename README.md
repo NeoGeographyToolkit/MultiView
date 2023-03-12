@@ -30,6 +30,11 @@ Pipeline](https://github.com/NeoGeographyToolkit/StereoPipeline/releases)
  * [stereo fusion](https://stereopipeline.readthedocs.io/en/latest/tools/multi_stereo.html)
 # Fetching the code
 
+# Build
+
+It is suggested to fetch the binary versions of this package, per
+above.
+
 This package depends on other repositories, which are included as
 submodules, and those may have their own dependencies. Hence, this
 repo should be cloned recursively, as:
@@ -40,10 +45,7 @@ Otherwise, after cloning it, run:
 
     git submodule update --init --recursive
 
-# Build
-
-The dependencies for this package can be fetched with conda. For
-Linux, use:
+Fetch the dependencies for this package with conda. For Linux, use:
 
     conda env create -f MultiView/conda/linux_deps_env_asp_3.2.0.yaml
 
@@ -86,6 +88,6 @@ which may tell ``cmake`` to look elsewhere. Then, run:
 
 The resulting tools will be installed in MultiView/install.
 
-If the Theia ``view_reconstruction`` tool can be challenging to build
-because of its dependence on OpenGL, it can be excluded from building
-by editing the appropriate CMakeLists.txt file.
+The Theia ``view_reconstruction`` tool can fail to build because of
+its dependence on OpenGL, it can be excluded from building by editing
+the appropriate CMakeLists.txt file.
