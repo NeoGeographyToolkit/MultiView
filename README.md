@@ -90,5 +90,5 @@ which may tell ``cmake`` to look elsewhere. Then, run:
 The resulting tools will be installed in MultiView/install.
 
 The Theia ``view_reconstruction`` tool can fail to build because of
-its dependence on OpenGL, it can be excluded from building by editing
+its dependence on OpenGL. It can be excluded from building by editing
 the appropriate CMakeLists.txt file.
