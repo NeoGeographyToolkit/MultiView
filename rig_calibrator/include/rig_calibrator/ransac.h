@@ -99,7 +99,8 @@ class RandomSampleConsensus {
     m_min_num_output_inliers(min_num_output_inliers),
     m_reduce_min_num_output_inliers_if_no_fit(reduce_min_num_output_inliers_if_no_fit),
     m_increase_threshold_if_no_fit(increase_threshold_if_no_fit),
-    m_generator(std::mt19937(std::time(0))) {}
+    m_generator(0) // use a fixed seed to give reproducible results
+  {}
 
   /// As attempt_ransac but keep trying with smaller numbers of required inliers.
   template <class ContainerT1, class ContainerT2>

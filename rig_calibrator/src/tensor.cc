@@ -1647,60 +1647,133 @@ void addMatchPairs(// Append from these
   return;
 }
 
-// Find matches among several images in map A and several in map B,
-// based on num_image_overlaps_at_endpoints. Then build tracks
-// (so merging the pairwise matches into tracks). 
-// If a track is partially in A and partially in B,
-// (with at least two features in each), that makes it possible
-// to find a triangulated point in A and one in B for that track.
-// Doing RANSAC between them will find the transform from B to A.
-// We assume C.cid_to_filename is already A.cid_to_filename concatenated
-// with B.cid_to_filename.
-void findMatchingTracks(dense_map::nvmData const& A,
-                        dense_map::nvmData const& B,
-                        dense_map::RigSet  const& R,
-                        int num_image_overlaps_at_endpoints,
-                        double close_dist,
-                        // output
-                        dense_map::nvmData & C) {
+// If two maps share images, can match tracks between the maps
+// just based on that, which is fast.
+void findTracksForSharedImages(sparse_mapping::SparseMap * A_in,
+                               sparse_mapping::SparseMap * B_in,
+                               // Outputs
+                               std::map<int, int> & A2B,
+                               std::map<int, int> & B2A) {
+  // Wipe the outputs
+  A2B.clear();
+  B2A.clear();
 
-//   // Wipe the outputs
-//   A2B.clear();
-//   B2A.clear();
+  // Create aliases to not use pointers all the time.
+  sparse_mapping::SparseMap & A = *A_in;
+  sparse_mapping::SparseMap & B = *B_in;
 
-//   // Create aliases to not use pointers all the time.
-//   sparse_mapping::SparseMap & A = *A_in;
-//   sparse_mapping::SparseMap & B = *B_in;
-//   sparse_mapping::SparseMap & C = *C_out;
+  size_t num_acid = A.cid_to_filename_.size();
+  size_t num_bcid = B.cid_to_filename_.size();
 
-  int num_acid = A.cid_to_filename.size();
-  int num_bcid = B.cid_to_filename.size();
+  // Map from file name to cid
+  std::map<std::string, int> A_file_to_cid, B_file_to_cid;
+  for (size_t cid = 0; cid < num_acid; cid++)
+    A_file_to_cid[A.cid_to_filename_[cid]] = cid;
+  for (size_t cid = 0; cid < num_bcid; cid++)
+    B_file_to_cid[B.cid_to_filename_[cid]] = cid;
 
-  std::set<int> A_search, B_search;  // use sets to avoid duplicates
+  // Iterate through A's cid_fid_to_pid_ and find matches in B.
+  int num_shared_cid = 0;
+  for (size_t cid_a = 0; cid_a < A.cid_fid_to_pid_.size(); cid_a++) {
+    std::string filename = A.cid_to_filename_[cid_a];
+    auto it = B_file_to_cid.find(filename);
+    if (it == B_file_to_cid.end())
+      continue;
+
+    num_shared_cid++;
+
+    // The corresponding camera id in the second map
+    size_t cid_b = it->second;
+
+    if (A.cid_to_keypoint_map_[cid_a] != B.cid_to_keypoint_map_[cid_b])
+      LOG(FATAL) << "The input maps don't have the same features. "
+                 << "They need to be rebuilt.";
+
+    auto a_fid_to_pid = A.cid_fid_to_pid_[cid_a];
+    auto b_fid_to_pid = B.cid_fid_to_pid_[cid_b];
+
+    // Find tracks corresponding to same cid_fid
+    for (auto it_a = a_fid_to_pid.begin(); it_a != a_fid_to_pid.end(); it_a++) {
+      int pid_a = it_a->second;
+      int fid = it_a->first;  // shared fid
+      auto it_b = b_fid_to_pid.find(fid);
+      if (it_b == b_fid_to_pid.end()) {
+        // This fid is not in second image. This is fine. A feature in a current image
+        // may match to features in one image but not in another.
+        continue;
+      }
+
+      int pid_b = it_b->second;
+
+      A2B[pid_a] = pid_b;
+    }
+  }
+
+  // Now create B2A
+  for (auto it = A2B.begin(); it != A2B.end(); it++) {
+    B2A[it->second] = it->first;
+  }
+
+  // Just in case, recreate A2B, to avoid issues when the original
+  // A2B mapped multiple A pids to same B pid.
+  A2B.clear();
+  for (auto it = B2A.begin(); it != B2A.end(); it++) {
+    A2B[it->second] = it->first;
+  }
+
+
+  LOG(INFO) << "Number of shared images in the two maps: "
+            << num_shared_cid << std::endl;
+  LOG(INFO) << "Number of shared tracks: " << A2B.size() << std::endl;
+
+  // Sanity check
+  if (num_shared_cid <= 0 || A2B.size() <= 5)
+    LOG(FATAL) << "Not enough shared images or features among the two maps. "
+               << "Run without the --fast option.";
+}
+
+// Choose the images to match and load them. It is assumed that in image_files
+// we have the images from the first and then he second maps to merge.
+void setupLoadMatchingImages(std::vector<std::string> const& image_files,
+                             dense_map::RigSet const& R,
+                             int map1_len, int map2_len,
+                             int num_image_overlaps_at_endpoints,
+                             // Outputs
+                             std::vector<std::pair<int, int>> & image_pairs,
+                             std::vector<dense_map::cameraImage> & cams) {
+
+  // sanity check
+  if (map1_len + map2_len != image_files.size()) 
+    LOG(FATAL) << "Book-keeping error, total number of images is not right.\n";
+  
+  // Initialize the outputs
+  image_pairs.clear();
+  cams.resize(image_files.size());
+  
+  std::set<int> map1_search, map2_search;  // use sets to avoid duplicates
   int num = num_image_overlaps_at_endpoints;
 
-  // Images in A to search for matches in B
+  // Images in map1 to search for matches in map2
   for (int cid = 0; cid < num; cid++)
-    if (cid < num_acid) A_search.insert(cid);
-  for (int cid = num_acid-num; cid < num_acid; cid++)
-    if (cid >= 0) A_search.insert(cid);
+    if (cid < map1_len) map1_search.insert(cid);
+  for (int cid = map1_len-num; cid < map1_len; cid++)
+    if (cid >= 0) map1_search.insert(cid);
 
-  // Images in B to search for matches in A. Add num_acid since we will
-  // match A and B inside of C.
+  // Images in map2 to search for matches in map1. Add map1_len since we will
+  // match map1 and map2 inside of the merged map.
   for (int cid = 0; cid < num; cid++)
-    if (cid < num_bcid) B_search.insert(num_acid + cid);
-  for (int cid = num_bcid-num; cid < num_bcid; cid++)
-    if (cid >= 0) B_search.insert(num_acid + cid);
+    if (cid < map2_len) map2_search.insert(map1_len + cid);
+  for (int cid = map2_len-num; cid < map2_len; cid++)
+    if (cid >= 0) map2_search.insert(map1_len + cid);
 
-  // The indices in C between which we need matches. Do not match
+  // The indices in the merged map between which we need matches. Do not match
   // an image with itself. That can happen if the maps to merge
   // have shared images.
-  std::vector<std::pair<int, int>> image_pairs;
-  for (auto it1 = A_search.begin(); it1 != A_search.end() ; it1++) {
-    for (auto it2 = B_search.begin(); it2 != B_search.end(); it2++) {
+  for (auto it1 = map1_search.begin(); it1 != map1_search.end() ; it1++) {
+    for (auto it2 = map2_search.begin(); it2 != map2_search.end(); it2++) {
       if (*it1 == *it2)
         LOG(FATAL) << "Book-keeping failure in map merging.";
-      if (C.cid_to_filename[*it1] == C.cid_to_filename[*it2])
+      if (image_files[*it1] == image_files[*it2])
         continue;
       image_pairs.push_back(std::make_pair(*it1, *it2));
     }
@@ -1709,32 +1782,73 @@ void findMatchingTracks(dense_map::nvmData const& A,
   // Allocate a structure having an entry for all images, but load
   // only those for which we need to find matches.
   std::cout << "Loading images to match." << std::endl;
-  std::vector<dense_map::cameraImage> cams(C.cid_to_filename.size());
-  for (size_t cid = 0; cid < C.cid_to_filename.size(); cid++) {
+  for (size_t cid = 0; cid < image_files.size(); cid++) {
     auto & c = cams[cid]; // alias
     // Populate most fields. All we need is the image data and camera type.
-    c.image_name = C.cid_to_filename[cid];
+    c.image_name = image_files[cid];
     dense_map::findCamTypeAndTimestamp(c.image_name,  
                                        R.cam_names,  
                                        // Outputs 
                                        c.camera_type, c.timestamp);
-    if (A_search.find(cid) != A_search.end() || B_search.find(cid) != B_search.end()) {
+    if (map1_search.find(cid) != map1_search.end() ||
+        map2_search.find(cid) != map2_search.end()) {
       std::cout << "Loading image: " << c.image_name << std::endl;
       c.image = cv::imread(c.image_name, cv::IMREAD_GRAYSCALE);
     }
   }
+}
   
-  // Set up cameras. This will not be used but is part of the API.
-  bool filter_matches_using_cams = false;
-  C.cid_to_cam_t_global.resize(C.cid_to_filename.size());
+// Merge two maps. See sfm_merge.cc. Approach: Find matches among
+// several images in map A and several in map B, based on
+// num_image_overlaps_at_endpoints. Then build tracks (so merging the
+// pairwise matches into tracks). If a track is partially in A and
+// partially in B, (with at least two features in each), that makes it
+// possible to find a triangulated point in A and one in B for that
+// track. Doing RANSAC between them will find the transform from B to
+// A.  Then merge the transformed poses, remove the repeated images,
+// and concatenate and remove repetitions from tracks.
+void MergeMaps(dense_map::nvmData const& A,
+               dense_map::nvmData const& B,
+               dense_map::RigSet const& R,
+               int num_image_overlaps_at_endpoints,
+               double close_dist,
+               dense_map::nvmData & C) { // output merged map
   
-  // Find features
+  // Wipe the output
+  C = dense_map::nvmData();
+  
+  // Merge things that make sense to merge and are easy to do. Later
+  // some of these will be shrunk if the input maps have shared data.
+  int num_acid = A.cid_to_filename.size();
+  int num_bcid = B.cid_to_filename.size();
+  int num_ccid = num_acid + num_bcid;
+
+  // Concatenate the images from A and B into C.
+  C.cid_to_filename.clear();
+  C.cid_to_filename.insert(C.cid_to_filename.end(),
+                           A.cid_to_filename.begin(), A.cid_to_filename.end());
+  C.cid_to_filename.insert(C.cid_to_filename.end(),
+                           B.cid_to_filename.begin(), B.cid_to_filename.end());
+
+  if (FLAGS_fast_merge)
+    LOG(FATAL) << "--fast-merge is not implemented yet.\n";
+    
+  std::vector<dense_map::cameraImage> cams;
+  std::vector<std::pair<int, int>> image_pairs;
+  setupLoadMatchingImages(C.cid_to_filename, R,  
+                          num_acid, num_bcid,  
+                          num_image_overlaps_at_endpoints,  
+                          image_pairs, cams); // Outputs
+  
+  // Find features among matching images
   std::string out_dir = "";
   bool save_matches = false;
   int num_overlaps = 0; // will use image_pairs
   std::vector<std::vector<std::pair<float, float>>> C_keypoint_vec;
   int initial_max_reprojection_error = -1; // won't be used
   bool verbose = false;
+  bool filter_matches_using_cams = false; // do not have a single camera set yet
+  C.cid_to_cam_t_global.resize(C.cid_to_filename.size()); // won't be used
   std::cout << "Number of image pairs to match: " << image_pairs.size() << std::endl;
   dense_map::detectMatchFeatures(// Inputs
                                  cams, R.cam_params,  out_dir, save_matches,  
@@ -1833,7 +1947,9 @@ void findMatchingTracks(dense_map::nvmData const& A,
   A_xyz_vec.resize(count);
   B_xyz_vec.resize(count);
 #endif
-  
+
+#if 1
+  // TODO(oalexan1): Make this into a function named findMap2ToMap1Transform().
   double inlier_threshold = estimateCloseDistance(A_xyz_vec);
   if (close_dist > 0.0) 
     inlier_threshold = close_dist;
@@ -1872,7 +1988,8 @@ void findMatchingTracks(dense_map::nvmData const& A,
   std::cout << "Translation:\n" << B2A_trans.translation()  << "\n";
   std::cout << "Number of inliers: " << inlier_indices.size() << " ("
             << (100.0 * inlier_indices.size()) / A_xyz_vec.size() << " %)\n";
-
+#endif
+  
   // Bring the B map cameras in the A map coordinate system
   std::vector<Eigen::Affine3d> B_trans_world_to_cam = B.cid_to_cam_t_global;
   dense_map::TransformCameras(B2A_trans, B_trans_world_to_cam);
@@ -1938,7 +2055,8 @@ void findMatchingTracks(dense_map::nvmData const& A,
   // tracks. Each of these has its own images and indices, and C
   // has repeated indices too, and need to merge them all into
   // a single set of tracks.
-
+#if 1
+  // Call this: mergeTracks().
   // First, collect all keypoints
   std::vector<std::map<std::pair<float, float>, int>> merged_keypoint_map(num_out_cams);
   std::vector<int> keypoint_count(num_out_cams, 0); // how many keypoints so far
@@ -1995,7 +2113,7 @@ void findMatchingTracks(dense_map::nvmData const& A,
       C.cid_to_keypoint_map.at(cid).col(fid) = Eigen::Vector2d(K.first, K.second);
     }
   }
-
+#endif
   // Merge the camera vector
   {
     std::vector<dense_map::cameraImage> merged_cams(num_out_cams);
@@ -2028,369 +2146,6 @@ void findMatchingTracks(dense_map::nvmData const& A,
 
   // TODO(oalexan1): Should one remove outliers from tri points
   // and C.pid_to_cid_fid?
-}
-  
-// Determine which tracks from map A to merge with
-// which tracks from map B. For that, find which images in map A have
-// matches in map B.  We will look only at images close to the
-// endpoints of both maps, per num_image_overlaps_at_endpoints.
-// This is old code.
-void findMatchingTracks(sparse_mapping::SparseMap * A_in,
-                        sparse_mapping::SparseMap * B_in,
-                        sparse_mapping::SparseMap * C_out,
-                        std::string const& output_map,
-                        int num_image_overlaps_at_endpoints,
-                        // Outputs
-                        std::map<int, int> & A2B,
-                        std::map<int, int> & B2A) {
-  // Wipe the outputs
-  A2B.clear();
-  B2A.clear();
-
-  // Create aliases to not use pointers all the time.
-  sparse_mapping::SparseMap & A = *A_in;
-  sparse_mapping::SparseMap & B = *B_in;
-  sparse_mapping::SparseMap & C = *C_out;
-
-  int num_acid = A.cid_to_filename_.size();
-  int num_bcid = B.cid_to_filename_.size();
-
-  std::set<int> A_search, B_search;  // use sets to avoid duplicates
-  int num = num_image_overlaps_at_endpoints;
-
-  // Images in A to search for matches in B
-  for (int cid = 0; cid < num; cid++)
-    if (cid < num_acid) A_search.insert(cid);
-  for (int cid = num_acid-num; cid < num_acid; cid++)
-    if (cid >= 0) A_search.insert(cid);
-
-  // Images in B to search for matches in A. Add num_acid since we will
-  // match A and B inside of C.
-  for (int cid = 0; cid < num; cid++)
-    if (cid < num_bcid) B_search.insert(num_acid + cid);
-  for (int cid = num_bcid-num; cid < num_bcid; cid++)
-    if (cid >= 0) B_search.insert(num_acid + cid);
-
-  // Combine these into cid_to_cid_ and run the matching process.
-  C.cid_to_cid_.clear();
-  for (auto it1 = A_search.begin(); it1 != A_search.end() ; it1++) {
-    for (auto it2 = B_search.begin(); it2 != B_search.end(); it2++) {
-      if (*it1 == *it2)
-        LOG(FATAL) << "Book-keeping failure in map merging.";
-      C.cid_to_cid_[*it1].insert(*it2);
-    }
-  }
-
-  // Match features. Must set num_subsequent_images to not try to
-  // match images in same map, that was done when each map was built.
-  google::SetCommandLineOption("num_subsequent_images", "0");
-  sparse_mapping::MatchFeatures(sparse_mapping::EssentialFile(output_map),
-                                sparse_mapping::MatchesFile(output_map), &C);
-
-  // Assemble the matches into tracks, this will populate C.pid_to_cid_fid_.
-  bool rm_invalid_xyz = false;  // nothing is valid yet
-  sparse_mapping::BuildTracks(rm_invalid_xyz,
-                              sparse_mapping::MatchesFile(output_map), &C);
-
-  // This is not needed any longer
-  C.cid_to_cid_.clear();
-
-  // Wipe file that is no longer needed
-  try {
-    std::remove(sparse_mapping::EssentialFile(output_map).c_str());
-  }catch(...) {}
-
-  // For each track in A, find the map to its corresponding track in B
-  // using the information in C.pid_to_cid_fid_.
-  FindPidCorrespondences(A.cid_fid_to_pid_, B.cid_fid_to_pid_,  C.pid_to_cid_fid_,
-                         num_acid, &A2B, &B2A);
-}
-
-// If two maps share images, can match tracks between the maps
-// just based on that, which is fast.
-void findTracksForSharedImages(sparse_mapping::SparseMap * A_in,
-                               sparse_mapping::SparseMap * B_in,
-                               // Outputs
-                               std::map<int, int> & A2B,
-                               std::map<int, int> & B2A) {
-  // Wipe the outputs
-  A2B.clear();
-  B2A.clear();
-
-  // Create aliases to not use pointers all the time.
-  sparse_mapping::SparseMap & A = *A_in;
-  sparse_mapping::SparseMap & B = *B_in;
-
-  size_t num_acid = A.cid_to_filename_.size();
-  size_t num_bcid = B.cid_to_filename_.size();
-
-  // Map from file name to cid
-  std::map<std::string, int> A_file_to_cid, B_file_to_cid;
-  for (size_t cid = 0; cid < num_acid; cid++)
-    A_file_to_cid[A.cid_to_filename_[cid]] = cid;
-  for (size_t cid = 0; cid < num_bcid; cid++)
-    B_file_to_cid[B.cid_to_filename_[cid]] = cid;
-
-  // Iterate through A's cid_fid_to_pid_ and find matches in B.
-  int num_shared_cid = 0;
-  for (size_t cid_a = 0; cid_a < A.cid_fid_to_pid_.size(); cid_a++) {
-    std::string filename = A.cid_to_filename_[cid_a];
-    auto it = B_file_to_cid.find(filename);
-    if (it == B_file_to_cid.end())
-      continue;
-
-    num_shared_cid++;
-
-    // The corresponding camera id in the second map
-    size_t cid_b = it->second;
-
-    if (A.cid_to_keypoint_map_[cid_a] != B.cid_to_keypoint_map_[cid_b])
-      LOG(FATAL) << "The input maps don't have the same features. "
-                 << "They need to be rebuilt.";
-
-    auto a_fid_to_pid = A.cid_fid_to_pid_[cid_a];
-    auto b_fid_to_pid = B.cid_fid_to_pid_[cid_b];
-
-    // Find tracks corresponding to same cid_fid
-    for (auto it_a = a_fid_to_pid.begin(); it_a != a_fid_to_pid.end(); it_a++) {
-      int pid_a = it_a->second;
-      int fid = it_a->first;  // shared fid
-      auto it_b = b_fid_to_pid.find(fid);
-      if (it_b == b_fid_to_pid.end()) {
-        // This fid is not in second image. This is fine. A feature in a current image
-        // may match to features in one image but not in another.
-        continue;
-      }
-
-      int pid_b = it_b->second;
-
-      A2B[pid_a] = pid_b;
-    }
-  }
-
-  // Now create B2A
-  for (auto it = A2B.begin(); it != A2B.end(); it++) {
-    B2A[it->second] = it->first;
-  }
-
-  // Just in case, recreate A2B, to avoid issues when the original
-  // A2B mapped multiple A pids to same B pid.
-  A2B.clear();
-  for (auto it = B2A.begin(); it != B2A.end(); it++) {
-    A2B[it->second] = it->first;
-  }
-
-
-  LOG(INFO) << "Number of shared images in the two maps: "
-            << num_shared_cid << std::endl;
-  LOG(INFO) << "Number of shared tracks: " << A2B.size() << std::endl;
-
-  // Sanity check
-  if (num_shared_cid <= 0 || A2B.size() <= 5)
-    LOG(FATAL) << "Not enough shared images or features among the two maps. "
-               << "Run without the --fast option.";
-}
-
-// Merge two maps. See sfm_merge.cc
-// TODO(oalexan1): Modularize this code (some was done already).
-void MergeMaps(dense_map::nvmData const& A,
-               dense_map::nvmData const& B,
-               dense_map::RigSet const& R,
-               int num_image_overlaps_at_endpoints,
-               double close_dist,
-               dense_map::nvmData & C) {
-  
-  // Wipe the output
-  C = dense_map::nvmData();
-  
-  // Merge things that make sense to merge and are easy to do. Later
-  // some of these will be shrunk if the input maps have shared data.
-  int num_acid = A.cid_to_filename.size();
-  int num_bcid = B.cid_to_filename.size();
-
-  // Concatenate the images from A and B into C.
-  C.cid_to_filename.clear();
-  C.cid_to_filename.insert(C.cid_to_filename.end(),
-                           A.cid_to_filename.begin(), A.cid_to_filename.end());
-  C.cid_to_filename.insert(C.cid_to_filename.end(),
-                           B.cid_to_filename.begin(), B.cid_to_filename.end());
-
-  int num_ccid = num_acid + num_bcid;
-  C.cid_to_keypoint_map.resize(num_ccid);
-  C.cid_to_cam_t_global.resize(num_ccid);
-
-  // TODO(oalexan1): Must reconcile cid_to_keypoint_map for shared images
-  // before continuing!
-  
-  if (FLAGS_fast_merge)
-    LOG(FATAL) << "--fast-merge is not implemented yet.\n";
-    
-  findMatchingTracks(A, B, R, num_image_overlaps_at_endpoints, close_dist, C);
-
-#if 0
-
-  // Bring the B map into the coordinate system of the A map
-  B.ApplyTransform(B2A_trans);
-
-  // We will use this to add new tracks taking advantage
-  // of all the matching between the two image sets.
-  std::vector<std::map<int, int>> merged_pid_to_cid_fid;
-  if (!FLAGS_skip_adding_new_matches_on_merging)
-    merged_pid_to_cid_fid = C.pid_to_cid_fid_;  // save it before wiping it below
-
-  // Start creating the merged tracks
-  C.pid_to_cid_fid_.clear();
-  C.pid_to_xyz_ = A.pid_to_xyz_;  // Will later modify it by averaging/appending from B
-
-  int num_tracks_in_A_only = 0, num_tracks_in_A_and_B = 0, num_tracks_in_B_only = 0;
-
-  // Add to C.pid_to_cid_fid_ the tracks in A.pid_to_cid_fid_, and
-  // merge the corresponding track from B.pid_to_cid_fid_ if available.
-  for (size_t pid_a = 0; pid_a < A.pid_to_cid_fid_.size(); pid_a++) {
-    auto cid_fid_c = A.pid_to_cid_fid_[pid_a];  // make a copy
-
-    if (A2B.find(pid_a) != A2B.end()) {  // Can merge from B
-      int pid_b = A2B[pid_a];
-
-      if (pid_b >= static_cast<int>(B.pid_to_cid_fid_.size()) )
-        LOG(FATAL) << "Book-keeping error in track merging.";
-
-      // Append the B track to the C track. Add num_acid as we want
-      // a track in C.
-      auto & cid_fid_b = B.pid_to_cid_fid_[pid_b];  // alias
-      for (auto it = cid_fid_b.begin(); it != cid_fid_b.end(); it++)
-        cid_fid_c[it->first + num_acid] = it->second;
-
-      // Merged map xyz will be the average of xyz's from both maps
-      C.pid_to_xyz_[pid_a] = (A.pid_to_xyz_[pid_a] + B.pid_to_xyz_[pid_b])/2.0;
-
-      num_tracks_in_A_and_B++;
-    } else {
-      num_tracks_in_A_only++;
-    }
-
-    // Add the current track, whether it is wholly in A or also paritially in B
-    C.pid_to_cid_fid_.push_back(cid_fid_c);
-  }
-
-  // Now add the tracks that are purely in B.
-  for (size_t pid_b = 0; pid_b < B.pid_to_cid_fid_.size(); pid_b++) {
-    if (B2A.find(pid_b) != B2A.end()) {
-      continue;  // Track partially in A, done already
-    }
-
-    num_tracks_in_B_only++;
-
-    // Add this track, and add num_acid to be in C's indexing scheme
-    std::map<int, int> cid_fid_c;
-    auto & cid_fid_b = B.pid_to_cid_fid_[pid_b];  // alias
-    for (auto it = cid_fid_b.begin(); it != cid_fid_b.end(); it++)
-      cid_fid_c[it->first + num_acid] = it->second;
-
-    C.pid_to_cid_fid_.push_back(cid_fid_c);
-    C.pid_to_xyz_.push_back(B.pid_to_xyz_[pid_b]);
-  }
-
-  // Append the cameras from B. By now A and B are in same coordinate system.
-  C.cid_to_cam_t_global_ = A.cid_to_cam_t_global_;
-  for (int cid = 0; cid < num_bcid; cid++)
-    C.cid_to_cam_t_global_.push_back(B.cid_to_cam_t_global_[cid]);
-
-  // C.Save(output_map + ".merged.map");
-
-  LOG(INFO) << "Number of tracks merged from both maps:    " << num_tracks_in_A_and_B;
-  LOG(INFO) << "Number of tracks from the first map only:  " << num_tracks_in_A_only;
-  LOG(INFO) << "Number of tracks from the second map only: " << num_tracks_in_B_only;
-
-  // If a few images show up in both and in B, so far they show up in C twice,
-  // with different cid value. Fix that.
-  // Also keep the images sorted.
-  std::vector<std::string> sorted = C.cid_to_filename;
-  std::sort(sorted.begin(), sorted.end());
-  int num_out_cams = 0;
-  
-  // the new index of each image after rm repetitions
-  std::map<std::string, int> image2cid;  
-  for (size_t cid = 0; cid < sorted.size(); cid++) {
-    std::string img = sorted[cid];
-    if (image2cid.find(img) == image2cid.end()) {
-      image2cid[img] = num_out_cams;
-      num_out_cams++;
-    }
-  }
-
-  // The index of the cid after removing the repetitions
-  std::map<int, int> cid2cid;
-  for (size_t cid = 0; cid < C.cid_to_filename.size(); cid++) {
-    cid2cid[cid] = image2cid[C.cid_to_filename[cid]];
-  }
-
-  // Remove repetitions.
-  TransformMap(cid2cid, &C);
-
-  if (!FLAGS_skip_adding_new_matches_on_merging) {
-    // Modify merged_pid_to_cid_fid as well after identifying identical images
-    bool rm_tracks_of_len_one = true;
-    TransformTracks(cid2cid, rm_tracks_of_len_one, &merged_pid_to_cid_fid);
-  }
-
-  // Add the new tracks that were identified during matching of images of A to B.
-  if (!FLAGS_skip_adding_new_matches_on_merging) {
-    // Form merged_cid_fid_to_pid
-    int num_cid = C.cid_to_filename.size();
-    std::vector<std::map<int, int>> merged_cid_fid_to_pid;
-    InitializeCidFidToPid(num_cid, merged_pid_to_cid_fid, &merged_cid_fid_to_pid);
-
-    LOG(INFO) << "Number of tracks found as result of matching images between the maps: "
-              << merged_pid_to_cid_fid.size();
-
-    std::vector<std::map<int, int>> new_pid_to_cid_fid;
-    std::set<int> new_pid_set;
-    // See which tracks obtained during merging are new
-    for (size_t cid = 0; cid < merged_cid_fid_to_pid.size(); cid++) {
-      for (auto it = merged_cid_fid_to_pid[cid].begin();
-           it != merged_cid_fid_to_pid[cid].end(); it++) {
-        if (cid >= C.cid_fid_to_pid_.size()) continue;  // out of range
-        int fid = it->first;
-        if (C.cid_fid_to_pid_[cid].find(fid) != C.cid_fid_to_pid_[cid].end())
-          continue;  // not new
-        int new_pid = it->second;
-        if (new_pid_set.find(new_pid) != new_pid_set.end()) continue;  // inserted already
-
-        // Add this new track
-        new_pid_to_cid_fid.push_back(merged_pid_to_cid_fid[new_pid]);
-        new_pid_set.insert(new_pid);  // mark it as inserted
-      }
-    }
-
-    // Triangulate to find the xyz coordinates of the new tracks
-    std::vector<Eigen::Vector3d> new_pid_to_xyz;
-    std::vector<std::map<int, int>> new_cid_fid_to_pid;
-    bool rm_invalid_xyz = true;  // don't remove anything, as cameras are pretty unreliable now
-    sparse_mapping::Triangulate(rm_invalid_xyz,
-                                C.camera_params_.GetFocalLength(),
-                                C.cid_to_cam_t_global_,
-                                C.cid_to_keypoint_map_,
-                                &new_pid_to_cid_fid,
-                                &new_pid_to_xyz,
-                                &new_cid_fid_to_pid);
-
-    LOG(INFO) << "Of those, number of tracks that are new and will be added to the merged map: "
-              << new_pid_to_cid_fid.size();
-
-    // Append the new tracks to the merged map
-    for (size_t pid = 0; pid < new_pid_to_cid_fid.size(); pid++) {
-      C.pid_to_cid_fid_.push_back(new_pid_to_cid_fid[pid]);
-      C.pid_to_xyz_.push_back(new_pid_to_xyz[pid]);
-    }
-
-    // Recreate cid_fid_to_pid_ from pid_to_cid_fid_.
-    C.InitializeCidFidToPid();
-  }
-
-  LOG(INFO) << "Total number of tracks in the merged map: " << C.pid_to_xyz_.size();
-#endif
-  return;
 }
 
 }  // namespace sparse_mapping
