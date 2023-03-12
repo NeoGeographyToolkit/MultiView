@@ -37,6 +37,12 @@ namespace camera {
   class CameraParameters;
 }
 
+namespace openMVG {
+  namespace matching {
+    struct PairWiseMatches;
+  }
+}
+
 namespace dense_map {
 
 // Forward declarations
@@ -229,6 +235,9 @@ std::string registrationCamName(std::string const& hugin_file);
   
 struct cameraImage;
 
+void buildTracks(openMVG::matching::PairWiseMatches const& match_map,
+                 std::vector<std::map<int, int>>& pid_to_cid_fid);
+  
 void detectMatchFeatures(// Inputs
                          std::vector<dense_map::cameraImage> const& cams,
                          std::vector<camera::CameraParameters> const& cam_params,

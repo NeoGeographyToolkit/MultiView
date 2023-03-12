@@ -1310,6 +1310,7 @@ bool isGoodTri(Eigen::Vector3d const& P) {
   return true;
 }
 
+// TODO(oalexan1): Move this to basic_algs.h.
 // Convert keypoints to Eigen format
 void vec2eigen(std::vector<std::pair<float, float>> const& vec,
                Eigen::Matrix2Xd & mat) {
@@ -1318,6 +1319,16 @@ void vec2eigen(std::vector<std::pair<float, float>> const& vec,
   for (size_t it = 0; it < vec.size(); it++) {
     mat.col(it) = Eigen::Vector2d(vec[it].first, vec[it].second);
   }
+}
+
+// Convert keypoints from Eigen format
+void eigen2vec(Eigen::Matrix2Xd const& mat,
+               std::vector<std::pair<float, float>> & vec) {
+
+  vec.clear();
+  vec.resize(mat.cols());
+  for (size_t it = 0; it < vec.size(); it++)
+    vec.at(it) = std::make_pair<float, float>(mat(0, it), mat(1, it));
 }
 
 // Merge the camera poses from both maps using the cid2cid map of
@@ -1590,8 +1601,6 @@ void addMatchPairs(// Append from these
   for (size_t pid = 0; pid < pid_to_cid_fid.size(); pid++) {
     
     auto const& cid_fid = pid_to_cid_fid[pid]; // alias
-    std::cout << "--track size " << cid_fid.size() << std::endl;
-    
     for (auto map_it1 = cid_fid.begin(); map_it1 != cid_fid.end(); map_it1++) {
       
       // First element in the pair
@@ -1917,19 +1926,18 @@ void findMatchingTracks(dense_map::nvmData const& A,
   MergePoses(cid2cid, C.cid_to_cam_t_global);
 
   // Merge camera names
-  std::vector<std::string> cid_to_filename2(num_out_cams);
-  for (size_t cid = 0; cid < C.cid_to_filename.size(); cid++) {
-    int cid2 = cid2cid[cid];
-    cid_to_filename2[cid2] = C.cid_to_filename[cid];
+  {
+    std::vector<std::string> cid_to_filename2(num_out_cams);
+    for (size_t cid = 0; cid < C.cid_to_filename.size(); cid++)
+      cid_to_filename2[cid2cid[cid]] = C.cid_to_filename[cid];
+
+    C.cid_to_filename = cid_to_filename2;
   }
-  C.cid_to_filename = cid_to_filename2;
   
   // By now we have 3 maps: A, B, and the new one in C having shared
   // tracks. Each of these has its own images and indices, and C
   // has repeated indices too, and need to merge them all into
   // a single set of tracks.
-
-  // TODO(oalexan1): Read all this!
 
   // First, collect all keypoints
   std::vector<std::map<std::pair<float, float>, int>> merged_keypoint_map(num_out_cams);
@@ -1969,22 +1977,57 @@ void findMatchingTracks(dense_map::nvmData const& A,
   addMatchPairs(C.pid_to_cid_fid, C.cid_to_keypoint_map,  
                 cid2cid, merged_keypoint_map, cid_shift, num_out_cams,  
                 match_map); // append and update
-  
-  C.pid_to_xyz.resize(C.pid_to_cid_fid.size()); // will be filled in
-  
-#if 0
 
-  // The new lists for the unique images
-  C.cid_to_filename_       = cid_to_filename2;
-  C.cid_to_keypoint_map_   = cid_to_keypoint_map2;
-  C.cid_to_cam_t_global_   = cid_to_cam_t_global2;
+  // Build tracks, overwriting C.pid_to_cid_fid
+  dense_map::buildTracks(match_map, C.pid_to_cid_fid);
 
-  // Note: after this step, it is possible some tracks are now
-  // duplicate.  We don't bother removing them, it would be a pain,
-  // since sometimes two tracks may differ in one or more values and
-  // those are tricky to reconcile.
-#endif
-  // C.Save(output_map + ".reduced.map");
+  // Update C.cid_to_keypoint_map. This has the same data as
+  // merged_keypoint_map but need to reverse key and value and use
+  // an Eigen::Matrix.
+  C.cid_to_keypoint_map.clear();
+  C.cid_to_keypoint_map.resize(num_out_cams);
+  for (int cid = 0; cid < num_out_cams; cid++) {
+    auto const& map = merged_keypoint_map[cid]; // alias
+    C.cid_to_keypoint_map[cid] = Eigen::MatrixXd(2, map.size());
+    for (auto map_it = map.begin(); map_it != map.end(); map_it++) {
+      std::pair<float, float> const& K = map_it->first; 
+      int fid = map_it->second;
+      C.cid_to_keypoint_map.at(cid).col(fid) = Eigen::Vector2d(K.first, K.second);
+    }
+  }
+
+  // Merge the camera vector
+  {
+    std::vector<dense_map::cameraImage> merged_cams(num_out_cams);
+    for (size_t cid = 0; cid < cams.size(); cid++) 
+      merged_cams[cid2cid[cid]] = cams[cid];
+
+    cams = merged_cams;
+  }
+  
+  // Update C_keypoint_vec. Same info as C.cid_to_keypoint_map but different structure
+  C_keypoint_vec.resize(num_out_cams);
+  for (int cid = 0; cid < num_out_cams; cid++)
+    eigen2vec(C.cid_to_keypoint_map[cid], C_keypoint_vec[cid]);
+
+  // Flag outliers
+  std::vector<std::map<int, std::map<int, int>>> C_pid_cid_fid_inlier;
+  dense_map::flagOutlierByExclusionDist(// Inputs
+                                        R.cam_params, cams, C.pid_to_cid_fid,
+                                        C_keypoint_vec,
+                                        // Outputs
+                                        C_pid_cid_fid_inlier);
+
+  // Triangulate the merged tracks with merged cameras
+  dense_map::multiViewTriangulation(// Inputs
+                                    R.cam_params, cams, C.cid_to_cam_t_global,
+                                    C.pid_to_cid_fid,
+                                    C_keypoint_vec,
+                                    // Outputs
+                                    C_pid_cid_fid_inlier, C.pid_to_xyz);
+
+  // TODO(oalexan1): Should one remove outliers from tri points
+  // and C.pid_to_cid_fid?
 }
   
 // Determine which tracks from map A to merge with
@@ -2179,11 +2222,10 @@ void MergeMaps(dense_map::nvmData const& A,
   // TODO(oalexan1): Must reconcile cid_to_keypoint_map for shared images
   // before continuing!
   
-  if (!FLAGS_fast_merge)
-    findMatchingTracks(A, B, R, num_image_overlaps_at_endpoints, close_dist, C);
-  else
+  if (FLAGS_fast_merge)
     LOG(FATAL) << "--fast-merge is not implemented yet.\n";
-  //  findTracksForSharedImages(&A, &B,A2B, B2A);  // outputs
+    
+  findMatchingTracks(A, B, R, num_image_overlaps_at_endpoints, close_dist, C);
 
 #if 0
 

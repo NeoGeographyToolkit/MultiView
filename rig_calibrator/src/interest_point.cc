@@ -494,6 +494,41 @@ std::string matchFileName(std::string const& match_dir,
   return match_file;
 }
 
+// Build tracks from pairs  
+void buildTracks(openMVG::matching::PairWiseMatches const& match_map,
+                 std::vector<std::map<int, int>>& pid_to_cid_fid) { // output
+
+  pid_to_cid_fid.clear(); // wipe the output
+  
+  openMVG::tracks::TracksBuilder trackBuilder;
+  trackBuilder.Build(match_map);  // Build:  Efficient fusion of correspondences
+  trackBuilder.Filter();          // Filter: Remove tracks that have conflict
+  // trackBuilder.ExportToStream(std::cout);
+  // Export tracks as a map (each entry is a sequence of imageId and featureIndex):
+  //  {TrackIndex => {(imageIndex, featureIndex), ... ,(imageIndex, featureIndex)}
+  openMVG::tracks::STLMAPTracks map_tracks;
+  trackBuilder.ExportToSTL(map_tracks);
+  trackBuilder = openMVG::tracks::TracksBuilder();   // wipe it
+  
+  if (map_tracks.empty())
+    LOG(FATAL)
+      << "No tracks left after filtering. Perhaps images are too dis-similar?\n";
+  
+  // Populate the filtered tracks
+  size_t num_elems = map_tracks.size();
+  pid_to_cid_fid.clear();
+  pid_to_cid_fid.resize(num_elems);
+  size_t curr_id = 0;
+  for (auto itr = map_tracks.begin(); itr != map_tracks.end(); itr++) {
+    for (auto itr2 = (itr->second).begin(); itr2 != (itr->second).end(); itr2++) {
+      pid_to_cid_fid[curr_id][itr2->first] = itr2->second;
+    }
+    curr_id++;
+  }
+
+  return;
+}
+  
 void detectMatchFeatures(// Inputs
                          std::vector<dense_map::cameraImage> const& cams,
                          std::vector<camera::CameraParameters> const& cam_params,
@@ -578,9 +613,6 @@ void detectMatchFeatures(// Inputs
     thread_pool.Join();
   }
   cid_to_descriptor_map = std::vector<cv::Mat>();  // Wipe, takes memory
-
-  // TODO(oalexan1): Make this into a function called buildTracksFromMatches().
-  // Then call it from the function that will merge tracks.
   
   // Give all interest points in a given image a unique id, and put
   // them in a vector with the id corresponding to the interest point
@@ -676,37 +708,8 @@ void detectMatchFeatures(// Inputs
   keypoint_map.clear(); keypoint_map.shrink_to_fit();
   cid_to_keypoint_map.clear(); cid_to_keypoint_map.shrink_to_fit();
 
-  std::cout << "--now build tracks!" << std::endl;
-  {
-    // Build tracks
-    // De-allocate these as soon as not needed to save memory
-    openMVG::tracks::TracksBuilder trackBuilder;
-    trackBuilder.Build(match_map);  // Build:  Efficient fusion of correspondences
-    trackBuilder.Filter();          // Filter: Remove tracks that have conflict
-    // trackBuilder.ExportToStream(std::cout);
-    // Export tracks as a map (each entry is a sequence of imageId and featureIndex):
-    //  {TrackIndex => {(imageIndex, featureIndex), ... ,(imageIndex, featureIndex)}
-    openMVG::tracks::STLMAPTracks map_tracks;
-    trackBuilder.ExportToSTL(map_tracks);
-    match_map = openMVG::matching::PairWiseMatches();  // wipe this, no longer needed
-    trackBuilder = openMVG::tracks::TracksBuilder();   // wipe it
-
-    if (map_tracks.empty())
-      LOG(FATAL)
-        << "No tracks left after filtering. Perhaps images are too dis-similar?\n";
-
-    // Populate the filtered tracks
-    size_t num_elems = map_tracks.size();
-    pid_to_cid_fid.clear();
-    pid_to_cid_fid.resize(num_elems);
-    size_t curr_id = 0;
-    for (auto itr = map_tracks.begin(); itr != map_tracks.end(); itr++) {
-      for (auto itr2 = (itr->second).begin(); itr2 != (itr->second).end(); itr2++) {
-        pid_to_cid_fid[curr_id][itr2->first] = itr2->second;
-      }
-      curr_id++;
-    }
-  }
+  buildTracks(match_map, pid_to_cid_fid);
+  match_map = openMVG::matching::PairWiseMatches();  // wipe this, no longer needed
 
   return;
 }
