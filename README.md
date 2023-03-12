@@ -28,9 +28,8 @@ Pipeline](https://github.com/NeoGeographyToolkit/StereoPipeline/releases)
  * [voxblox mesh creation](https://stereopipeline.readthedocs.io/en/latest/tools/voxblox_mesh.html)
  * [mesh texturing](https://stereopipeline.readthedocs.io/en/latest/tools/texrecon.html)
  * [stereo fusion](https://stereopipeline.readthedocs.io/en/latest/tools/multi_stereo.html)
-# Fetching the code
 
-# Build
+# Fetching the code and dependencies
 
 It is suggested to fetch the binary versions of this package, per
 above.
@@ -52,6 +51,8 @@ Fetch the dependencies for this package with conda. For Linux, use:
 while for OSX:
 
     conda env create -f MultiView/conda/osx_deps_env_asp_3.2.0.yaml
+
+# Build
 
 Then the software can be built as follows. Set the compilers. This is
 different on Linux and OSX:
