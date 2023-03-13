@@ -3,7 +3,7 @@
 include_directories("${CMAKE_CURRENT_SOURCE_DIR}/include")
 
 # Build rig_calibrator lib
-file(GLOB SOURCES "src/*.cc")
+file(GLOB SOURCES "*.cc")
 add_library(rig_calibrator_lib SHARED ${SOURCES})
 target_link_libraries(rig_calibrator_lib 
     rig_calibrator_openMVG rig_calibrator_camera_model
