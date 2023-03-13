@@ -5,7 +5,7 @@ Given a list of ref cam timestamps, one per line, grouped in pairs,
 with each pair very close in time, forming a bracket, and a second
 list of timestamps for another camera, for each ref cam bracket pick a
 timestamp from the second camera list. A timestamp is a float number
-in the form xxx.xxxxx. Other data on each line having a timestamp
+in the form <digits>.<digits>. Other data on each line having a timestamp
 will be read as well. The output list will have a subset
 of lines from the other list.
 Can handle correctly the case when both input lists are identical,
