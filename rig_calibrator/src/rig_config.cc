@@ -102,7 +102,8 @@ std::string RigSet::refSensor(int cam_id) const {
 int RigSet::sensorIndex(std::string const& sensor_name) const {
   auto it = std::find(cam_names.begin(), cam_names.end(), sensor_name);
   if (it == cam_names.end()) 
-    LOG(FATAL) << "Could not find sensor in rig. That is unexpected.\n";
+    LOG(FATAL) << "Could not find sensor in rig. That is unexpected. Offending sensor: "
+               << sensor_name << ".\n";
   return it - cam_names.begin();
 }
   

@@ -27,6 +27,16 @@
 
 namespace dense_map {
 
+const int NUM_SCALAR_PARAMS  = 1;  // Used to float single-value params // NOLINT
+const int NUM_OPT_CTR_PARAMS = 2;  // optical center in x and y         // NOLINT
+const int NUM_PIX_PARAMS     = 2;                                       // NOLINT
+const int NUM_XYZ_PARAMS     = 3;                                       // NOLINT
+const int NUM_RIGID_PARAMS   = 7;  // quaternion (4) + translation (3)  // NOLINT
+const int NUM_AFFINE_PARAMS  = 12; // 3x3 matrix (9) + translation (3)  // NOLINT
+  
+class cameraImage;
+class RigSet;
+  
 // Save an affine transform represented as a matrix to a string.
 std::string affineToStr(Eigen::Affine3d const& M);
 
@@ -58,6 +68,17 @@ Eigen::Affine3d calc_world_to_cam_trans(const double* beg_world_to_ref_t,
                                         double ref_to_cam_offset,
                                         double cam_stamp);
 
+// Given the transforms from each camera to the world and their timestamps,
+// find an initial guess for the relationship among the sensors on the rig.
+// Note that strictly speaking the transforms in world_to_ref_vec are among
+// those in world_to_cam, but we don't have a way of looking them up in that
+// vector.
+void calc_rig_trans(std::vector<dense_map::cameraImage> const& cams,
+                    std::vector<Eigen::Affine3d>        const& world_to_ref,
+                    std::vector<Eigen::Affine3d>        const& world_to_cam,
+                    std::vector<double>                 const& ref_timestamps,
+                    dense_map::RigSet                        & R); // update this
+  
 void affine_transform_to_array(Eigen::Affine3d const& aff, double* arr);
 void array_to_affine_transform(Eigen::Affine3d& aff, const double* arr);
   

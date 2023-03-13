@@ -983,89 +983,6 @@ void evalResiduals(  // Inputs
   return;
 }
 
-// TODO(oalexan1): Move to transforms
-// Given the transforms from each camera to the world and their timestamps,
-// find an initial guess for the relationship among the sensors on the rig.
-// Note that strictly speaking the transforms in world_to_ref_vec are among
-// those in world_to_cam, but we don't have a way of looking them up in that
-// vector.
-// TODO(oalexan1): Test this with multiple rigs. It should work.
-void calc_rig_trans(std::vector<dense_map::cameraImage> const& cams,
-                    std::vector<Eigen::Affine3d>        const& world_to_ref,
-                    std::vector<Eigen::Affine3d>        const& world_to_cam,
-                    std::vector<double>                 const& ref_timestamps,
-                    dense_map::RigSet                        & R) { // update this
-
-  // Sanity check
-  if (cams.size() != world_to_cam.size()) 
-    LOG(FATAL) << "There must be as many world to cam transforms as metadata sets for them.\n";
-
-  int num_ref_cams = world_to_ref.size();
-  if (world_to_ref.size() != ref_timestamps.size())
-    LOG(FATAL) << "Must have as many ref cam timestamps as ref cameras.\n";
-  std::vector<double> world_to_ref_vec(num_ref_cams * dense_map::NUM_RIGID_PARAMS);
-  for (int cid = 0; cid < num_ref_cams; cid++)
-    dense_map::rigid_transform_to_array(world_to_ref[cid],
-                                        &world_to_ref_vec[dense_map::NUM_RIGID_PARAMS * cid]);
-  
-  // Resize the output
-  int num_cam_types = R.cam_names.size();
-  R.ref_to_cam_trans.resize(num_cam_types);
-
-  // Calc all transforms
-  std::map<int, std::vector<Eigen::MatrixXd>> transforms;
-  for (size_t cam_it = 0; cam_it < cams.size(); cam_it++) {
-    int beg_index = cams[cam_it].beg_ref_index;
-    int end_index = cams[cam_it].end_ref_index;
-    int cam_type = cams[cam_it].camera_type;
-    
-    if (R.isRefSensor(R.cam_names[cam_type])) {
-      // The identity transform, from the ref sensor to itself
-      transforms[cam_type].push_back(Eigen::MatrixXd::Identity(4, 4));
-    } else {
-      // We have world_to_ref transform at times bracketing current time,
-      // and world_to_cam at current time. Interp world_to_ref
-      // at current time, then find ref_to_cam.
-      Eigen::Affine3d interp_world_to_ref_aff
-        = dense_map::calc_interp_world_to_ref
-        (&world_to_ref_vec[dense_map::NUM_RIGID_PARAMS * beg_index],
-         &world_to_ref_vec[dense_map::NUM_RIGID_PARAMS * end_index],
-         ref_timestamps[beg_index], ref_timestamps[end_index],
-         R.ref_to_cam_timestamp_offsets[cam_type],
-         cams[cam_it].timestamp);
-      
-      Eigen::Affine3d ref_to_cam_aff
-        = world_to_cam[cam_it] * (interp_world_to_ref_aff.inverse());
-      transforms[cam_type].push_back(ref_to_cam_aff.matrix());
-    }
-  }
-  
-  // Find median, for robustness
-  for (auto it = transforms.begin(); it != transforms.end(); it++) {
-    int cam_type = it->first;
-    auto & transforms = it->second;
-    // TODO(oalexan1): Split this into a medianMatrix() function.
-    Eigen::MatrixXd median_trans = Eigen::MatrixXd::Zero(4, 4);
-    for (int col = 0; col < 4; col++) {
-      for (int row = 0; row < 4; row++) {
-        std::vector<double> vals;
-        for (size_t cam_it = 0; cam_it < transforms.size(); cam_it++)
-          vals.push_back(transforms[cam_it](col, row));
-
-        if (vals.empty()) 
-          LOG(FATAL) << "No poses were found for rig sensor with id: " << cam_type << "\n";
-
-        median_trans(col, row) = vals[vals.size()/2];
-      }
-    }
-    R.ref_to_cam_trans[cam_type].matrix() = median_trans;
-    R.ref_to_cam_trans[cam_type].linear() /= 
-      pow(R.ref_to_cam_trans[cam_type].linear().determinant(), 1.0 / 3.0);
-  }
-  
-  return;
-}
-
 // TODO(oalexan1): Move to residual_utils.cc
 // Write the inlier residuals. Create one output file for each camera type.
 // The format of each file is:
@@ -1268,7 +1185,8 @@ int main(int argc, char** argv) {
     // world to each camera. This regardless if use continue
     // using a rig later on.
      dense_map::calc_world_to_cam_using_rig(// Inputs
-                                            cams, world_to_ref, ref_timestamps, R.ref_to_cam_trans,
+                                            cams, world_to_ref, ref_timestamps,
+                                            R.ref_to_cam_trans,
                                             R.ref_to_cam_timestamp_offsets,
                                             // Output
                                             world_to_cam);
@@ -1492,7 +1410,9 @@ int main(int argc, char** argv) {
     if (FLAGS_mesh != "")
       dense_map::meshTriangulations(// Inputs
                                     R.cam_params, cams, world_to_cam, pid_to_cid_fid,
-        pid_cid_fid_inlier, keypoint_vec, bad_xyz, FLAGS_min_ray_dist, FLAGS_max_ray_dist, mesh,
+                                    pid_cid_fid_inlier, keypoint_vec, bad_xyz,
+                                    FLAGS_min_ray_dist,
+                                    FLAGS_max_ray_dist, mesh,
         bvh_tree,
         // Outputs
         pid_cid_fid_mesh_xyz, pid_mesh_xyz);
@@ -1639,25 +1559,29 @@ int main(int argc, char** argv) {
         // down.
         if (!FLAGS_no_rig) {
           // See if to float the ref cameras
-          if (camera_poses_to_float.find(R.refSensor(cam_type)) == camera_poses_to_float.end())
+          if (camera_poses_to_float.find(R.refSensor(cam_type))
+              == camera_poses_to_float.end())
             problem.SetParameterBlockConstant(beg_cam_ptr);
         } else {
           // There is no rig. Then beg_cam_ptr refers to camera
           // for cams[cid], and not to its ref bracketing cam.
           // See if the user wants it floated.
-          if (camera_poses_to_float.find(R.cam_names[cam_type]) == camera_poses_to_float.end()) 
+          if (camera_poses_to_float.find(R.cam_names[cam_type])
+              == camera_poses_to_float.end()) 
             problem.SetParameterBlockConstant(beg_cam_ptr);
         }
 
         // The end cam floats only if the ref cam can float and end cam brackets
         // a non-ref cam and we have a rig.
-        if (camera_poses_to_float.find(R.refSensor(cam_type)) == camera_poses_to_float.end() ||
+        if (camera_poses_to_float.find(R.refSensor(cam_type))
+            == camera_poses_to_float.end() ||
             R.isRefSensor(R.cam_names[cam_type]) || FLAGS_no_rig) 
           problem.SetParameterBlockConstant(end_cam_ptr);
         
         // ref_to_cam is kept fixed at the identity if the cam is the ref type or
         // no rig
-        if (camera_poses_to_float.find(R.cam_names[cam_type]) == camera_poses_to_float.end() ||
+        if (camera_poses_to_float.find(R.cam_names[cam_type])
+            == camera_poses_to_float.end() ||
             R.isRefSensor(R.cam_names[cam_type]) || FLAGS_no_rig) 
           problem.SetParameterBlockConstant(ref_to_cam_ptr);
 
@@ -1691,7 +1615,8 @@ int main(int argc, char** argv) {
           ceres::CostFunction* bracketed_depth_cost_function
             = dense_map::BracketedDepthError::Create(FLAGS_depth_tri_weight, depth_xyz,
                                                      beg_ref_timestamp, end_ref_timestamp,
-                                                     cam_timestamp, bracketed_depth_block_sizes);
+                                                     cam_timestamp,
+                                                     bracketed_depth_block_sizes);
 
           ceres::LossFunction* bracketed_depth_loss_function
             = dense_map::GetLossFunction("cauchy", FLAGS_robust_threshold);
@@ -1846,7 +1771,7 @@ int main(int argc, char** argv) {
     ceres::Solver::Options options;
     ceres::Solver::Summary summary;
     options.linear_solver_type = ceres::ITERATIVE_SCHUR;
-    options.num_threads = FLAGS_num_opt_threads;  // The result is more predictable with one thread
+    options.num_threads = FLAGS_num_opt_threads; 
     options.max_num_iterations = FLAGS_num_iterations;
     options.minimizer_progress_to_stdout = true;
     options.gradient_tolerance = 1e-16;
@@ -1863,7 +1788,8 @@ int main(int argc, char** argv) {
         dense_map::array_to_rigid_transform
           (world_to_ref[cid], &world_to_ref_vec[dense_map::NUM_RIGID_PARAMS * cid]);
     } else {
-      // Each camera floats individually. Update world_to_cam from optimized world_to_cam_vec.
+      // Each camera floats individually. Update world_to_cam from
+      // optimized world_to_cam_vec.
       for (size_t cid = 0; cid < cams.size(); cid++) {
         dense_map::array_to_rigid_transform
           (world_to_cam[cid], &world_to_cam_vec[dense_map::NUM_RIGID_PARAMS * cid]);
@@ -1903,25 +1829,29 @@ int main(int argc, char** argv) {
     }
 
     // Evaluate the residuals after optimization
-    dense_map::evalResiduals("after opt", residual_names, residual_scales, problem, residuals);
+    dense_map::evalResiduals("after opt", residual_names, residual_scales, problem,
+                             residuals);
 
     // Must have up-to-date world_to_cam and residuals to flag the outliers
-    dense_map::calc_world_to_cam_rig_or_not(  // Inputs
-      FLAGS_no_rig, cams, world_to_ref_vec, ref_timestamps, ref_to_cam_vec, world_to_cam_vec,
-      R.ref_to_cam_timestamp_offsets,
+    dense_map::calc_world_to_cam_rig_or_not
+      (// Inputs
+       FLAGS_no_rig, cams, world_to_ref_vec, ref_timestamps, ref_to_cam_vec,
+       world_to_cam_vec, R.ref_to_cam_timestamp_offsets,
       // Output
       world_to_cam);
 
     // Flag outliers after this pass
-    dense_map::flagOutliersByTriAngleAndReprojErr(  // Inputs
-        FLAGS_min_triangulation_angle, FLAGS_max_reprojection_error, pid_to_cid_fid, keypoint_vec,
-        world_to_cam, xyz_vec, pid_cid_fid_to_residual_index, residuals,
-        // Outputs
-        pid_cid_fid_inlier);
-
+    dense_map::flagOutliersByTriAngleAndReprojErr
+      (// Inputs
+       FLAGS_min_triangulation_angle, FLAGS_max_reprojection_error,
+       pid_to_cid_fid, keypoint_vec,
+       world_to_cam, xyz_vec, pid_cid_fid_to_residual_index, residuals,
+       // Outputs
+       pid_cid_fid_inlier);
+    
     dense_map::writeResiduals(FLAGS_out_dir, "final", R.cam_names, cams, keypoint_vec,  
-                              pid_to_cid_fid, pid_cid_fid_inlier, pid_cid_fid_to_residual_index,  
-                              residuals);
+                              pid_to_cid_fid, pid_cid_fid_inlier,
+                              pid_cid_fid_to_residual_index, residuals);
     
   }  // End optimization passes
 

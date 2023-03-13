@@ -48,13 +48,6 @@ class cameraImage;
 class ImageMessage;
 class RigSet;
 
-const int NUM_SCALAR_PARAMS  = 1;  // Used to float single-value params // NOLINT
-const int NUM_OPT_CTR_PARAMS = 2;  // optical center in x and y         // NOLINT
-const int NUM_PIX_PARAMS     = 2;                                       // NOLINT
-const int NUM_XYZ_PARAMS     = 3;                                       // NOLINT
-const int NUM_RIGID_PARAMS   = 7;  // quaternion (4) + translation (3)  // NOLINT
-const int NUM_AFFINE_PARAMS  = 12; // 3x3 matrix (9) + translation (3)  // NOLINT
-
 const std::string NO_DEPTH_FILE      = "no_depth_file";
 
 // A function to parse a string like

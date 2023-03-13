@@ -19,6 +19,8 @@
 
 #include <rig_calibrator/transform_utils.h>
 #include <rig_calibrator/interpolation_utils.h>
+#include <rig_calibrator/rig_config.h>
+#include <rig_calibrator/camera_image.h>
 
 #include <glog/logging.h>
 
@@ -177,7 +179,86 @@ void array_to_affine_transform(Eigen::Affine3d& aff, const double* arr) {
   aff.matrix() = M;
 }
 
+// Given the transforms from each camera to the world and their timestamps,
+// find an initial guess for the relationship among the sensors on the rig.
+// Note that strictly speaking the transforms in world_to_ref_vec are among
+// those in world_to_cam, but we don't have a way of looking them up in that
+// vector.
+void calc_rig_trans(std::vector<dense_map::cameraImage> const& cams,
+                    std::vector<Eigen::Affine3d>        const& world_to_ref,
+                    std::vector<Eigen::Affine3d>        const& world_to_cam,
+                    std::vector<double>                 const& ref_timestamps,
+                    dense_map::RigSet                        & R) { // update this
+  // Sanity check
+  if (cams.size() != world_to_cam.size()) 
+    LOG(FATAL) << "There must be as many world to cam transforms as metadata sets for them.\n";
 
+  int num_ref_cams = world_to_ref.size();
+  if (world_to_ref.size() != ref_timestamps.size())
+    LOG(FATAL) << "Must have as many ref cam timestamps as ref cameras.\n";
+  std::vector<double> world_to_ref_vec(num_ref_cams * dense_map::NUM_RIGID_PARAMS);
+  for (int cid = 0; cid < num_ref_cams; cid++)
+    dense_map::rigid_transform_to_array(world_to_ref[cid],
+                                        &world_to_ref_vec[dense_map::NUM_RIGID_PARAMS * cid]);
+  
+  // Resize the output
+  int num_cam_types = R.cam_names.size();
+  R.ref_to_cam_trans.resize(num_cam_types);
+
+  // Calc all transforms
+  std::map<int, std::vector<Eigen::MatrixXd>> transforms;
+  for (size_t cam_it = 0; cam_it < cams.size(); cam_it++) {
+    int beg_index = cams[cam_it].beg_ref_index;
+    int end_index = cams[cam_it].end_ref_index;
+    int cam_type = cams[cam_it].camera_type;
+    
+    if (R.isRefSensor(R.cam_names[cam_type])) {
+      // The identity transform, from the ref sensor to itself
+      transforms[cam_type].push_back(Eigen::MatrixXd::Identity(4, 4));
+    } else {
+      // We have world_to_ref transform at times bracketing current time,
+      // and world_to_cam at current time. Interp world_to_ref
+      // at current time, then find ref_to_cam.
+      Eigen::Affine3d interp_world_to_ref_aff
+        = dense_map::calc_interp_world_to_ref
+        (&world_to_ref_vec[dense_map::NUM_RIGID_PARAMS * beg_index],
+         &world_to_ref_vec[dense_map::NUM_RIGID_PARAMS * end_index],
+         ref_timestamps[beg_index], ref_timestamps[end_index],
+         R.ref_to_cam_timestamp_offsets[cam_type],
+         cams[cam_it].timestamp);
+      
+      Eigen::Affine3d ref_to_cam_aff
+        = world_to_cam[cam_it] * (interp_world_to_ref_aff.inverse());
+      transforms[cam_type].push_back(ref_to_cam_aff.matrix());
+    }
+  }
+  
+  // Find median, for robustness
+  for (auto it = transforms.begin(); it != transforms.end(); it++) {
+    int cam_type = it->first;
+    auto & transforms = it->second;
+    // TODO(oalexan1): Split this into a medianMatrix() function.
+    Eigen::MatrixXd median_trans = Eigen::MatrixXd::Zero(4, 4);
+    for (int col = 0; col < 4; col++) {
+      for (int row = 0; row < 4; row++) {
+        std::vector<double> vals;
+        for (size_t cam_it = 0; cam_it < transforms.size(); cam_it++)
+          vals.push_back(transforms[cam_it](col, row));
+
+        if (vals.empty()) 
+          LOG(FATAL) << "No poses were found for rig sensor with id: " << cam_type << "\n";
+
+        median_trans(col, row) = vals[vals.size()/2];
+      }
+    }
+    R.ref_to_cam_trans[cam_type].matrix() = median_trans;
+    R.ref_to_cam_trans[cam_type].linear() /= 
+      pow(R.ref_to_cam_trans[cam_type].linear().determinant(), 1.0 / 3.0);
+  }
+  
+  return;
+}
+  
 // Extract a rigid transform to an array of length NUM_RIGID_PARAMS
 void rigid_transform_to_array(Eigen::Affine3d const& aff, double* arr) {
   for (size_t it = 0; it < 3; it++) arr[it] = aff.translation()[it];
