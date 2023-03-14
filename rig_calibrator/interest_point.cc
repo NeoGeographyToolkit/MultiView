@@ -1254,7 +1254,7 @@ void readImageEntry(// Inputs
   
   // Read the image as grayscale, in order for feature matching to work
   // For texturing, texrecon should use the original color images.
-  std::cout << "Reading: " << image_file << std::endl;
+  //std::cout << "Reading: " << image_file << std::endl;
   image_map[timestamp].image        = cv::imread(image_file, cv::IMREAD_GRAYSCALE);
   image_map[timestamp].name         = image_file;
   image_map[timestamp].timestamp    = timestamp;
@@ -1268,8 +1268,8 @@ void readImageEntry(// Inputs
   // Read the depth data, if present
   std::string depth_file = fs::path(image_file).replace_extension(".pc").string();
   if (fs::exists(depth_file)) {
-    std::cout << "Reading: " << depth_file << std::endl;
-    dense_map::readXyzImage(depth_file, depth_map[timestamp].image);
+    //std::cout << "Reading: " << depth_file << std::endl;
+    //dense_map::readXyzImage(depth_file, depth_map[timestamp].image);
     depth_map[timestamp].name      = depth_file;
     depth_map[timestamp].timestamp = timestamp;
   }
@@ -1470,9 +1470,11 @@ void readListOrNvm(// Inputs
   // entries do not mess up the bookkeeping of pid_to_cid_fid, etc,
   // if their cid is larger than the ones read from NVM.
   if (extra_list != "")
-    calcExtraPoses(extra_list, use_initial_rig_transforms, bracket_len, nearest_neighbor_interp,
+    calcExtraPoses(extra_list, use_initial_rig_transforms, bracket_len,
+                   nearest_neighbor_interp,
                    R, nvm.cid_to_filename, nvm.cid_to_cam_t_global); // append here
-  
+
+  std::cout << "Reading the images.\n";
   for (size_t it = 0; it < nvm.cid_to_filename.size(); it++) {
     // Aliases
     auto const& image_file = nvm.cid_to_filename[it];

@@ -314,7 +314,7 @@ DEFINE_string(fixed_image_list, "",
               "fixed during optimization.");
 
 DEFINE_bool(nearest_neighbor_interp, false,
-              "Use nearest neighbor interpolation (in time) when inserting extra camera poses.");
+            "Use nearest neighbor interpolation (in time) when inserting extra camera poses.");
 
 DEFINE_bool(read_nvm_no_shift, false,
             "Read an nvm file assuming that interest point matches were not shifted "

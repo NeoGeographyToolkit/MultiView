@@ -104,8 +104,9 @@ Eigen::Affine3d calc_interp_world_to_ref(const double* beg_world_to_ref_t,
     if (alpha < 0.0 || alpha > 1.0) LOG(FATAL) << "Out of bounds in interpolation.\n";
 
     // Interpolate at desired time
-    Eigen::Affine3d interp_world_to_ref_aff = dense_map::linearInterp(alpha, beg_world_to_ref_aff,
-                                                                      end_world_to_ref_aff);
+    Eigen::Affine3d interp_world_to_ref_aff
+      = dense_map::linearInterp(alpha, beg_world_to_ref_aff,
+                                end_world_to_ref_aff);
 
     return interp_world_to_ref_aff;
 }
@@ -179,6 +180,33 @@ void array_to_affine_transform(Eigen::Affine3d& aff, const double* arr) {
   aff.matrix() = M;
 }
 
+// Find the median of some matrices, by finding the median for each entry
+Eigen::MatrixXd median_matrix(std::vector<Eigen::MatrixXd> const& transforms) {
+
+  // Sanity checks
+  if (transforms.empty()) 
+    LOG(FATAL) << "Cannot find the median of an empty set of matrices.\n";
+
+  for (size_t cam_it = 0; cam_it < transforms.size(); cam_it++) {
+    if (transforms[cam_it].rows() != 4 || transforms[cam_it].cols() != 4) 
+      LOG(FATAL) << "Expecting square matrices of size 4 in the median computation.\n";
+  }
+  
+  Eigen::MatrixXd median_trans = Eigen::MatrixXd::Zero(4, 4);
+  for (int col = 0; col < 4; col++) {
+    for (int row = 0; row < 4; row++) {
+      
+      std::vector<double> vals;
+      for (size_t cam_it = 0; cam_it < transforms.size(); cam_it++)
+        vals.push_back(transforms[cam_it](col, row));
+      
+      median_trans(col, row) = vals[vals.size()/2];
+    }
+  }
+
+  return median_trans;
+}
+  
 // Given the transforms from each camera to the world and their timestamps,
 // find an initial guess for the relationship among the sensors on the rig.
 // Note that strictly speaking the transforms in world_to_ref_vec are among
@@ -206,7 +234,7 @@ void calc_rig_trans(std::vector<dense_map::cameraImage> const& cams,
   R.ref_to_cam_trans.resize(num_cam_types);
 
   // Calc all transforms
-  std::map<int, std::vector<Eigen::MatrixXd>> transforms;
+  std::map<int, std::vector<Eigen::MatrixXd>> transforms_map;
   for (size_t cam_it = 0; cam_it < cams.size(); cam_it++) {
     int beg_index = cams[cam_it].beg_ref_index;
     int end_index = cams[cam_it].end_ref_index;
@@ -214,7 +242,7 @@ void calc_rig_trans(std::vector<dense_map::cameraImage> const& cams,
     
     if (R.isRefSensor(R.cam_names[cam_type])) {
       // The identity transform, from the ref sensor to itself
-      transforms[cam_type].push_back(Eigen::MatrixXd::Identity(4, 4));
+      transforms_map[cam_type].push_back(Eigen::MatrixXd::Identity(4, 4));
     } else {
       // We have world_to_ref transform at times bracketing current time,
       // and world_to_cam at current time. Interp world_to_ref
@@ -229,28 +257,19 @@ void calc_rig_trans(std::vector<dense_map::cameraImage> const& cams,
       
       Eigen::Affine3d ref_to_cam_aff
         = world_to_cam[cam_it] * (interp_world_to_ref_aff.inverse());
-      transforms[cam_type].push_back(ref_to_cam_aff.matrix());
+      transforms_map[cam_type].push_back(ref_to_cam_aff.matrix());
     }
   }
   
   // Find median, for robustness
-  for (auto it = transforms.begin(); it != transforms.end(); it++) {
+  for (auto it = transforms_map.begin(); it != transforms_map.end(); it++) {
     int cam_type = it->first;
     auto & transforms = it->second;
-    // TODO(oalexan1): Split this into a medianMatrix() function.
-    Eigen::MatrixXd median_trans = Eigen::MatrixXd::Zero(4, 4);
-    for (int col = 0; col < 4; col++) {
-      for (int row = 0; row < 4; row++) {
-        std::vector<double> vals;
-        for (size_t cam_it = 0; cam_it < transforms.size(); cam_it++)
-          vals.push_back(transforms[cam_it](col, row));
+    
+    if (transforms.empty()) 
+        LOG(FATAL) << "No poses were found for rig sensor with id: " << cam_type << "\n";
 
-        if (vals.empty()) 
-          LOG(FATAL) << "No poses were found for rig sensor with id: " << cam_type << "\n";
-
-        median_trans(col, row) = vals[vals.size()/2];
-      }
-    }
+    Eigen::MatrixXd median_trans = median_matrix(transforms);
     R.ref_to_cam_trans[cam_type].matrix() = median_trans;
     R.ref_to_cam_trans[cam_type].linear() /= 
       pow(R.ref_to_cam_trans[cam_type].linear().determinant(), 1.0 / 3.0);

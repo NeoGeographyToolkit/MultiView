@@ -68,6 +68,9 @@ Eigen::Affine3d calc_world_to_cam_trans(const double* beg_world_to_ref_t,
                                         double ref_to_cam_offset,
                                         double cam_stamp);
 
+// Find the median of some matrices, by finding the median for each entry
+Eigen::MatrixXd median_matrix(std::vector<Eigen::MatrixXd> const& transforms);
+  
 // Given the transforms from each camera to the world and their timestamps,
 // find an initial guess for the relationship among the sensors on the rig.
 // Note that strictly speaking the transforms in world_to_ref_vec are among

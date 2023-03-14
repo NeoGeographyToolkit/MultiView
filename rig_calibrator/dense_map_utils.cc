@@ -757,7 +757,8 @@ void exportToVoxblox(std::vector<std::string> const& cam_names,
 
   std::string voxblox_dir = out_dir + "/voxblox";
   dense_map::createDir(voxblox_dir);
-
+  std::cout << "Saving voxblox data to: " << voxblox_dir << "\n";
+  
   char timestamp_buffer[1000];
 
   // Must take a pass for each camera type, and then visit
@@ -790,7 +791,8 @@ void exportToVoxblox(std::vector<std::string> const& cam_names,
       // Sanity check
       if (depth_cols != cam_images[cid].image.cols || 
           depth_rows != cam_images[cid].image.rows)
-        LOG(FATAL) << "Found a depth cloud and corresponding image with mismatching dimensions.\n";
+        LOG(FATAL) << "Found a depth cloud and corresponding image with "
+                   << "mismatching dimensions.\n";
         
       // Must use the 10.7f format for the timestamp as everywhere else in the code,
       // as it is in double precision.
@@ -839,7 +841,7 @@ void exportToVoxblox(std::vector<std::string> const& cam_names,
 
       // Save the pcd file
       std::string cloud_file = voxblox_subdir + "/" + timestamp_buffer + ".pcd";
-      std::cout << "Writing: " << cloud_file << std::endl;
+      //std::cout << "Writing: " << cloud_file << std::endl;
       ofs << cloud_file << "\n"; // save its name in the index
       pcl::io::savePCDFileBinary(cloud_file, pc); // writing binary is much faster than ascii
 

@@ -77,7 +77,8 @@ DEFINE_bool(skip_filtering, false,
 DEFINE_bool(skip_adding_new_matches_on_merging, false,
             "When merging maps, do not take advantage of performed matching to add new tracks.");
 DEFINE_bool(fast_merge, false,
-            "When merging maps that have shared images, use those and skip doing "
+            "When merging maps that have shared images, use their camera poses to "
+            "find the transform from second to first map, and skip finding "
             "additional matches among the images.");
 DEFINE_double(reproj_thresh, 5.0,
               "Filter points with re-projection error higher than this.");
@@ -1805,8 +1806,10 @@ void setupLoadMatchingImages(std::vector<std::string> const& image_files,
 // partially in B, (with at least two features in each), that makes it
 // possible to find a triangulated point in A and one in B for that
 // track. Doing RANSAC between them will find the transform from B to
-// A.  Then merge the transformed poses, remove the repeated images,
+// A. Then merge the transformed poses, remove the repeated images,
 // and concatenate and remove repetitions from tracks.
+// If the -fast_merge flag is used, find the transform between the
+// maps using shared poses.
 void MergeMaps(dense_map::nvmData const& A,
                dense_map::nvmData const& B,
                dense_map::RigSet const& R,
@@ -1816,6 +1819,10 @@ void MergeMaps(dense_map::nvmData const& A,
   
   // Wipe the output
   C = dense_map::nvmData();
+
+  if (FLAGS_fast_merge && num_image_overlaps_at_endpoints > 0)
+    std::cout << "Setting number of image overlaps at end points to zero, "
+              << "as fast merging is used.\n";
   
   // Merge things that make sense to merge and are easy to do. Later
   // some of these will be shrunk if the input maps have shared data.
@@ -1830,9 +1837,6 @@ void MergeMaps(dense_map::nvmData const& A,
   C.cid_to_filename.insert(C.cid_to_filename.end(),
                            B.cid_to_filename.begin(), B.cid_to_filename.end());
 
-  if (FLAGS_fast_merge)
-    LOG(FATAL) << "--fast-merge is not implemented yet.\n";
-    
   std::vector<dense_map::cameraImage> cams;
   std::vector<std::pair<int, int>> image_pairs;
   setupLoadMatchingImages(C.cid_to_filename, R,  
@@ -1840,157 +1844,201 @@ void MergeMaps(dense_map::nvmData const& A,
                           num_image_overlaps_at_endpoints,  
                           image_pairs, cams); // Outputs
   
-  // Find features among matching images
-  std::string out_dir = "";
-  bool save_matches = false;
-  int num_overlaps = 0; // will use image_pairs
-  std::vector<std::vector<std::pair<float, float>>> C_keypoint_vec;
-  int initial_max_reprojection_error = -1; // won't be used
-  bool verbose = false;
-  bool filter_matches_using_cams = false; // do not have a single camera set yet
-  C.cid_to_cam_t_global.resize(C.cid_to_filename.size()); // won't be used
-  std::cout << "Number of image pairs to match: " << image_pairs.size() << std::endl;
-  dense_map::detectMatchFeatures(// Inputs
-                                 cams, R.cam_params,  out_dir, save_matches,  
-                                 filter_matches_using_cams,  
-                                 C.cid_to_cam_t_global,
-                                 num_overlaps, image_pairs,
-                                 initial_max_reprojection_error, FLAGS_num_threads,  
-                                 verbose,  
-                                 // Outputs
-                                 C_keypoint_vec, C.pid_to_cid_fid);
-
-#if 1
-  // TODO(oalexan1): Make this a function called splitMap().
-  // Inputs: C.pid_to_cid_fid, C_keypoint_vec, cams, numa_cid, num_total_cid.
-  // Find the tracks in both images
-  std::vector<std::map<int, int>> A_pid_to_cid_fid, B_pid_to_cid_fid;
-  std::vector<std::vector<std::pair<float, float>>> A_keypoint_vec, B_keypoint_vec;
-  std::vector<dense_map::cameraImage> A_cams, B_cams;
-  for (size_t pid = 0; pid < C.pid_to_cid_fid.size(); pid++) {
-
-    auto & cid_fid = C.pid_to_cid_fid[pid];
-    std::map<int, int> A_cid_fid, B_cid_fid;
-    
-    for (auto map_it = cid_fid.begin(); map_it != cid_fid.end(); map_it++) {
-      int cid = map_it->first;
-      int fid = map_it->second;
-      if (cid < num_acid) 
-        A_cid_fid[cid] = fid; // belongs to A
-      else
-        B_cid_fid[cid - num_acid] = fid; // belongs to B
-    }
-    
-    if (A_cid_fid.size() > 1 && B_cid_fid.size() > 1) {
-      // This is a shared track, that we break in two. Each obtained track
-      // must have at least two images.
-      A_pid_to_cid_fid.push_back(A_cid_fid);
-      B_pid_to_cid_fid.push_back(B_cid_fid);
-    }
-  }
-
-  // Break up the keypoint vec and the images
-  if (C.cid_to_filename.size() != C_keypoint_vec.size()) 
-    LOG(FATAL) << "There must be one keypoint set for each image.\n";
-  for (size_t cid = 0; cid < C_keypoint_vec.size(); cid++) {
-    if (cid < num_acid) {
-      A_keypoint_vec.push_back(C_keypoint_vec[cid]);
-      A_cams.push_back(cams[cid]);
-    } else {
-      B_keypoint_vec.push_back(C_keypoint_vec[cid]);
-      B_cams.push_back(cams[cid]);
-    }
-  }
-#endif
-
-#if 1
-  // TODO(oalexan1): This should be a function called findMatchingTriPoints().
-  // Flag as outliers features outside of the distorted crop box
-  std::vector<std::map<int, std::map<int, int>>> A_pid_cid_fid_inlier,
-    B_pid_cid_fid_inlier;
-  dense_map::flagOutlierByExclusionDist(// Inputs
-                                        R.cam_params, A_cams, A_pid_to_cid_fid,
-                                        A_keypoint_vec,
-                                        // Outputs
-                                        A_pid_cid_fid_inlier);
-  dense_map::flagOutlierByExclusionDist(// Inputs
-                                        R.cam_params, B_cams, B_pid_to_cid_fid,
-                                        B_keypoint_vec,
-                                        // Outputs
-                                        B_pid_cid_fid_inlier);
-
-  // Find triangulated points
-  std::vector<Eigen::Vector3d> A_xyz_vec, B_xyz_vec; // triangulated points go here
-  dense_map::multiViewTriangulation(// Inputs
-                                    R.cam_params, A_cams, A.cid_to_cam_t_global,
-                                    A_pid_to_cid_fid,
-                                    A_keypoint_vec,
-                                    // Outputs
-                                    A_pid_cid_fid_inlier, A_xyz_vec);
-  dense_map::multiViewTriangulation(// Inputs
-                                    R.cam_params, B_cams,
-                                    B.cid_to_cam_t_global,
-                                    B_pid_to_cid_fid,
-                                    B_keypoint_vec,
-                                    // Outputs
-                                    B_pid_cid_fid_inlier, B_xyz_vec);
-  
-  // Keep only the good points
-  int count = 0;
-  for (size_t pid = 0; pid < A_xyz_vec.size(); pid++) {
-    if (!isGoodTri(A_xyz_vec[pid]) || !isGoodTri(B_xyz_vec[pid]))
-      continue;
-    A_xyz_vec[count] = A_xyz_vec[pid];
-    B_xyz_vec[count] = B_xyz_vec[pid];
-    count++;
-  }
-  A_xyz_vec.resize(count);
-  B_xyz_vec.resize(count);
-#endif
-
-#if 1
-  // TODO(oalexan1): Make this into a function named findMap2ToMap1Transform().
-  double inlier_threshold = estimateCloseDistance(A_xyz_vec);
-  if (close_dist > 0.0) 
-    inlier_threshold = close_dist;
-  
-  std::cout << "3D points are declared to be rather close if their distance is " 
-            << inlier_threshold << " meters (option --close_dist). "
-            << "Using this as inlier threshold.\n";
-  
-  // Estimate the transform from B_xyz_vec to A_xyz_vec using RANSAC.
-  // A lot of outliers are possible.
-  int  num_iterations = 1000;
-  int  min_num_output_inliers = A_xyz_vec.size()/2;
-  bool reduce_min_num_output_inliers_if_no_fit = true;  // If too many outliers
-  bool increase_threshold_if_no_fit = false;  // better fail than give bad results
   Eigen::Affine3d B2A_trans;
-  std::vector<size_t> inlier_indices;
-  try {
-    RandomSampleConsensus<TranslationRotationScaleFittingFunctor, TransformError>
-      ransac(TranslationRotationScaleFittingFunctor(),
-             TransformError(), num_iterations,
-             inlier_threshold, min_num_output_inliers,
-             reduce_min_num_output_inliers_if_no_fit, increase_threshold_if_no_fit);
-    B2A_trans = ransac(B_xyz_vec, A_xyz_vec);
-    inlier_indices
-      = ransac.inlier_indices(B2A_trans, B_xyz_vec, A_xyz_vec);
-  } catch(std::exception const& e) {
-    LOG(FATAL) << e.what() << "\n" << "Consider adjusting --close_dist or "
-               << "taking a closer look at your maps. They should have "
-               << "mostly images with non-small baseline.";
-  }
+  if (FLAGS_fast_merge) {
 
-  std::cout << "transform " << B2A_trans.matrix() << std::endl;
+    // Calc all transforms from B poses to A poses
+    std::vector<Eigen::MatrixXd> B2A_vec;
+
+    // This will be empty, as we add no new features, during merging,
+    // but ensure it has the right size.
+    C.cid_to_keypoint_map.clear();
+    C.cid_to_keypoint_map.resize(C.cid_to_filename.size());
+
+    // Put the B poses in a map
+    std::map<std::string, Eigen::Affine3d> B_world_to_cam;
+    for (size_t cid = 0; cid < B.cid_to_cam_t_global.size(); cid++)
+      B_world_to_cam[B.cid_to_filename[cid]] = B.cid_to_cam_t_global[cid];
+
+    // Find the transform from B to A based on shared poses
+    for (size_t cid = 0; cid < A.cid_to_filename.size(); cid++) {
+      auto b_it = B_world_to_cam.find(A.cid_to_filename[cid]);
+      if (b_it == B_world_to_cam.end()) 
+        continue;
+
+      auto const& A_world_to_cam = A.cid_to_cam_t_global[cid];
+      auto const& B_world_to_cam = b_it->second;
+
+      // Go from world of B to world of A
+      B2A_vec.push_back( ((A_world_to_cam.inverse()) * B_world_to_cam).matrix() );
+      std::cout << "--intermediate transform\n" << B2A_vec.back().matrix() << std::endl;
+    }
+
+    // Find the median transform, for robustness
+    B2A_trans.matrix() = dense_map::median_matrix(B2A_vec);
+    
+  } else {
+    // TODO(oalexan1): Modularize all this block
+  
+    // Find features among matching images
+    std::string out_dir = "";
+    bool save_matches = false;
+    int num_overlaps = 0; // will use image_pairs
+    std::vector<std::vector<std::pair<float, float>>> C_keypoint_vec;
+    int initial_max_reprojection_error = -1; // won't be used
+    bool verbose = false;
+    bool filter_matches_using_cams = false; // do not have a single camera set yet
+    C.cid_to_cam_t_global.resize(C.cid_to_filename.size()); // won't be used
+    std::cout << "Number of image pairs to match: " << image_pairs.size() << std::endl;
+    dense_map::detectMatchFeatures(// Inputs
+                                   cams, R.cam_params,  out_dir, save_matches,  
+                                   filter_matches_using_cams,  
+                                   C.cid_to_cam_t_global,
+                                   num_overlaps, image_pairs,
+                                   initial_max_reprojection_error, FLAGS_num_threads,  
+                                   verbose,  
+                                   // Outputs
+                                   C_keypoint_vec, C.pid_to_cid_fid);
+
+#if 1
+    // TODO(oalexan1): Make this a function called splitMap().
+    // Inputs: C.pid_to_cid_fid, C_keypoint_vec, cams, numa_cid, num_total_cid.
+    // Find the tracks in both images
+    std::vector<std::map<int, int>> A_pid_to_cid_fid, B_pid_to_cid_fid;
+    std::vector<std::vector<std::pair<float, float>>> A_keypoint_vec, B_keypoint_vec;
+    std::vector<dense_map::cameraImage> A_cams, B_cams;
+    for (size_t pid = 0; pid < C.pid_to_cid_fid.size(); pid++) {
+
+      auto & cid_fid = C.pid_to_cid_fid[pid];
+      std::map<int, int> A_cid_fid, B_cid_fid;
+    
+      for (auto map_it = cid_fid.begin(); map_it != cid_fid.end(); map_it++) {
+        int cid = map_it->first;
+        int fid = map_it->second;
+        if (cid < num_acid) 
+          A_cid_fid[cid] = fid; // belongs to A
+        else
+          B_cid_fid[cid - num_acid] = fid; // belongs to B
+      }
+    
+      if (A_cid_fid.size() > 1 && B_cid_fid.size() > 1) {
+        // This is a shared track, that we break in two. Each obtained track
+        // must have at least two images.
+        A_pid_to_cid_fid.push_back(A_cid_fid);
+        B_pid_to_cid_fid.push_back(B_cid_fid);
+      }
+    }
+
+    // Break up the keypoint vec and the images
+    if (C.cid_to_filename.size() != C_keypoint_vec.size()) 
+      LOG(FATAL) << "There must be one keypoint set for each image.\n";
+    for (size_t cid = 0; cid < C_keypoint_vec.size(); cid++) {
+      if (cid < num_acid) {
+        A_keypoint_vec.push_back(C_keypoint_vec[cid]);
+        A_cams.push_back(cams[cid]);
+      } else {
+        B_keypoint_vec.push_back(C_keypoint_vec[cid]);
+        B_cams.push_back(cams[cid]);
+      }
+    }
+#endif
+
+#if 1
+    // TODO(oalexan1): This should be a function called findMatchingTriPoints().
+    // Flag as outliers features outside of the distorted crop box
+    std::vector<std::map<int, std::map<int, int>>> A_pid_cid_fid_inlier,
+      B_pid_cid_fid_inlier;
+    dense_map::flagOutlierByExclusionDist(// Inputs
+                                          R.cam_params, A_cams, A_pid_to_cid_fid,
+                                          A_keypoint_vec,
+                                          // Outputs
+                                          A_pid_cid_fid_inlier);
+    dense_map::flagOutlierByExclusionDist(// Inputs
+                                          R.cam_params, B_cams, B_pid_to_cid_fid,
+                                          B_keypoint_vec,
+                                          // Outputs
+                                          B_pid_cid_fid_inlier);
+
+    // Find triangulated points
+    std::vector<Eigen::Vector3d> A_xyz_vec, B_xyz_vec; // triangulated points go here
+    dense_map::multiViewTriangulation(// Inputs
+                                      R.cam_params, A_cams, A.cid_to_cam_t_global,
+                                      A_pid_to_cid_fid,
+                                      A_keypoint_vec,
+                                      // Outputs
+                                      A_pid_cid_fid_inlier, A_xyz_vec);
+    dense_map::multiViewTriangulation(// Inputs
+                                      R.cam_params, B_cams,
+                                      B.cid_to_cam_t_global,
+                                      B_pid_to_cid_fid,
+                                      B_keypoint_vec,
+                                      // Outputs
+                                      B_pid_cid_fid_inlier, B_xyz_vec);
+  
+    // Keep only the good points
+    int count = 0;
+    for (size_t pid = 0; pid < A_xyz_vec.size(); pid++) {
+      if (!isGoodTri(A_xyz_vec[pid]) || !isGoodTri(B_xyz_vec[pid]))
+        continue;
+      A_xyz_vec[count] = A_xyz_vec[pid];
+      B_xyz_vec[count] = B_xyz_vec[pid];
+      count++;
+    }
+    A_xyz_vec.resize(count);
+    B_xyz_vec.resize(count);
+#endif
+
+#if 1
+    // TODO(oalexan1): Make this into a function named findMap2ToMap1Transform().
+    double inlier_threshold = estimateCloseDistance(A_xyz_vec);
+    if (close_dist > 0.0) 
+      inlier_threshold = close_dist;
+  
+    std::cout << "3D points are declared to be rather close if their distance is " 
+              << inlier_threshold << " meters (option --close_dist). "
+              << "Using this as inlier threshold.\n";
+  
+    // Estimate the transform from B_xyz_vec to A_xyz_vec using RANSAC.
+    // A lot of outliers are possible.
+    int  num_iterations = 1000;
+    int  min_num_output_inliers = A_xyz_vec.size()/2;
+    bool reduce_min_num_output_inliers_if_no_fit = true;  // If too many outliers
+    bool increase_threshold_if_no_fit = false;  // better fail than give bad results
+    std::vector<size_t> inlier_indices;
+    try {
+      RandomSampleConsensus<TranslationRotationScaleFittingFunctor, TransformError>
+        ransac(TranslationRotationScaleFittingFunctor(),
+               TransformError(), num_iterations,
+               inlier_threshold, min_num_output_inliers,
+               reduce_min_num_output_inliers_if_no_fit, increase_threshold_if_no_fit);
+      B2A_trans = ransac(B_xyz_vec, A_xyz_vec);
+      inlier_indices
+        = ransac.inlier_indices(B2A_trans, B_xyz_vec, A_xyz_vec);
+    } catch(std::exception const& e) {
+      LOG(FATAL) << e.what() << "\n" << "Consider adjusting --close_dist or "
+                 << "taking a closer look at your maps. They should have "
+                 << "mostly images with non-small baseline.";
+    }
+
+    std::cout << "Number of RANSAC inliers: " << inlier_indices.size() << " ("
+              << (100.0 * inlier_indices.size()) / A_xyz_vec.size() << " %)\n";
+#endif
+
+    // Convert keypoints to nvm format, updating C.cid_to_keypoint_map.
+    C.cid_to_keypoint_map.resize(C.cid_to_filename.size());
+    for (size_t cid = 0; cid < C.cid_to_filename.size(); cid++)
+      vec2eigen(C_keypoint_vec[cid], C.cid_to_keypoint_map[cid]);
+    C_keypoint_vec = std::vector<std::vector<std::pair<float, float>>> (); // wipe this
+    
+  } // end finding the transform using matches
+
   // LOG(INFO) does not do well with Eigen.
   std::cout << "Affine transform from second map to first map:\n";
-  std::cout << "Matrix:\n"      << B2A_trans.linear()       << "\n";
+  std::cout << "Rotation + scale:\n" << B2A_trans.linear()  << "\n";
   std::cout << "Translation:\n" << B2A_trans.translation()  << "\n";
-  std::cout << "Number of inliers: " << inlier_indices.size() << " ("
-            << (100.0 * inlier_indices.size()) / A_xyz_vec.size() << " %)\n";
-#endif
   
-  // Bring the B map cameras in the A map coordinate system
+  // Bring the B map cameras in the A map coordinate system. Do not modify
+  // B.cid_to_cam_t_global, but make a copy of it in B_trans_world_to_cam.
   std::vector<Eigen::Affine3d> B_trans_world_to_cam = B.cid_to_cam_t_global;
   dense_map::TransformCameras(B2A_trans, B_trans_world_to_cam);
 
@@ -2000,12 +2048,6 @@ void MergeMaps(dense_map::nvmData const& A,
                            A.cid_to_cam_t_global.begin(), A.cid_to_cam_t_global.end());
   C.cid_to_cam_t_global.insert(C.cid_to_cam_t_global.end(),
                                B_trans_world_to_cam.begin(), B_trans_world_to_cam.end());
-
-  // Convert keypoints to nvm format
-  C.cid_to_keypoint_map.resize(C.cid_to_filename.size());
-  for (size_t cid = 0; cid < C.cid_to_filename.size(); cid++)
-    vec2eigen(C_keypoint_vec[cid], C.cid_to_keypoint_map[cid]);
-  C_keypoint_vec = std::vector<std::vector<std::pair<float, float>>> (); // wipe this
 
 #if 1
   // TODO(oalexan1): Make this into a function called findCidMap.
@@ -2026,14 +2068,10 @@ void MergeMaps(dense_map::nvmData const& A,
     }
   }
 
-  std::cout << "--num out_cams 0 " << num_out_cams << std::endl;
-  
   // The index of the cid after removing the repetitions
   std::map<int, int> cid2cid;
-  for (size_t cid = 0; cid < C.cid_to_filename.size(); cid++) {
+  for (size_t cid = 0; cid < C.cid_to_filename.size(); cid++)
     cid2cid[cid] = image2cid[C.cid_to_filename[cid]];
-    std::cout << "--mapping " << cid << ' ' << cid2cid[cid] << ' ' << C.cid_to_filename[cid] << std::endl;
-  }
   if (num_out_cams != dense_map::maxMapVal(cid2cid) + 1) // sanity check
     LOG(FATAL) << "Book-keeping error in merging maps.\n";
   
@@ -2114,6 +2152,7 @@ void MergeMaps(dense_map::nvmData const& A,
     }
   }
 #endif
+  
   // Merge the camera vector
   {
     std::vector<dense_map::cameraImage> merged_cams(num_out_cams);
@@ -2123,7 +2162,8 @@ void MergeMaps(dense_map::nvmData const& A,
     cams = merged_cams;
   }
   
-  // Update C_keypoint_vec. Same info as C.cid_to_keypoint_map but different structure
+  // Create C_keypoint_vec. Same info as C.cid_to_keypoint_map but different structure.
+  std::vector<std::vector<std::pair<float, float>>> C_keypoint_vec;
   C_keypoint_vec.resize(num_out_cams);
   for (int cid = 0; cid < num_out_cams; cid++)
     eigen2vec(C.cid_to_keypoint_map[cid], C_keypoint_vec[cid]);

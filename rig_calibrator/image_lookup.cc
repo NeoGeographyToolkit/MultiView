@@ -612,7 +612,7 @@ void lookupImagesOneRig(// Inputs
       is_good = false;
   }
   if (!is_good)
-    LOG(FATAL) << "Could not find images for all sensors. Cannot continue.\n";
+    std::cout << "WARNING: Could not find images for all sensors.\n";
 
   // The images may need to be resized to be the same
   // size as in the calibration file. Sometimes the full-res images
