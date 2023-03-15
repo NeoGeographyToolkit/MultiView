@@ -529,6 +529,125 @@ void buildTracks(openMVG::matching::PairWiseMatches const& match_map,
 
   return;
 }
+
+// The nvm file produced by Theia can have files in arbitrary order. Find the map
+// which will help bring the cid in the correct order.
+void findCidReorderMap(nvmData const& nvm,
+                       std::vector<dense_map::cameraImage> const& cams,
+                       // output
+                       std::map<int, int> & nvm_cid_to_cams_cid) {
+  
+  // Wipe the output
+  nvm_cid_to_cams_cid.clear();
+                         
+  // First find how to map each cid from nvm to cid in 'cams'.
+  std::map<std::string, int> nvm_image_name_to_cid;
+  for (size_t nvm_cid = 0; nvm_cid < nvm.cid_to_filename.size(); nvm_cid++)
+    nvm_image_name_to_cid[nvm.cid_to_filename[nvm_cid]] = nvm_cid;
+  
+  for (size_t cid = 0; cid < cams.size(); cid++) {
+    std::string const& image_name = cams[cid].image_name;
+    auto nvm_it = nvm_image_name_to_cid.find(image_name);
+    if (nvm_it == nvm_image_name_to_cid.end()) 
+      LOG(FATAL) << "Could not look up image: " << image_name
+                 << " in the input nvm file. Likely the input reconstruction "
+                 << "is incomplete.\n";
+    int nvm_cid = nvm_it->second;
+    nvm_cid_to_cams_cid[nvm_cid] = cid;
+  }
+
+  return;
+}
+  
+// Append to existing keypoints and pid_to_cid_fid the entries from the nvm file.  
+// Need to account for the fact that the nvm file will likely have the images
+// in different order than in the 'cams' vector, and may have more such images,
+// as later we may have used bracketing to thin them out. So, some book-keeping is
+// necessary.
+void appendNvmMatches(// Inputs
+                      std::vector<camera::CameraParameters> const& cam_params,
+                      std::vector<dense_map::cameraImage>   const& cams,
+                      bool read_nvm_no_shift,
+                      nvmData const& nvm,
+                      // Outputs (these get appended to)
+                      std::vector<std::map<int, int>> & pid_to_cid_fid,
+                      std::vector<std::vector<std::pair<float, float>>> & keypoint_vec) {
+  
+  if (!keypoint_vec.empty() && keypoint_vec.size() != cams.size()) 
+    LOG(FATAL) << "There must be as many sets of keypoints as images, or none at all.\n";
+
+  if (keypoint_vec.empty()) 
+    keypoint_vec.resize(cams.size());
+
+  if (nvm.pid_to_cid_fid.size() != nvm.pid_to_xyz.size()) 
+    LOG(FATAL) << "There must be as many tracks as triangulated points for them.\n";
+  
+  // Find how to map each cid from nvm to cid in 'cams'.
+  std::map<int, int> nvm_cid_to_cams_cid;
+  dense_map::findCidReorderMap(nvm, cams,
+                               nvm_cid_to_cams_cid); // output
+  
+  // Get new pid_to_cid_fid and keypoint_vec. Note that we ignore the triangulated
+  // points in nvm.pid_to_xyz. Triangulation will be redone later.
+  for (size_t pid = 0; pid < nvm.pid_to_cid_fid.size(); pid++) {
+
+    // Ignore triangulated points that are NaN, Inf, or (0, 0, 0).
+    if (!dense_map::isGoodTri(nvm.pid_to_xyz[pid])) 
+      continue;
+      
+    std::map<int, int> out_cid_fid;
+    for (auto cid_fid = nvm.pid_to_cid_fid[pid].begin();
+         cid_fid != nvm.pid_to_cid_fid[pid].end(); cid_fid++) {
+
+      int nvm_cid = cid_fid->first;
+      int nvm_fid = cid_fid->second;
+      Eigen::Vector2d keypoint = nvm.cid_to_keypoint_map.at(nvm_cid).col(nvm_fid);
+
+      // Find cid value in 'cams' based on cid value in the nvm
+      auto it = nvm_cid_to_cams_cid.find(nvm_cid);
+      if (it == nvm_cid_to_cams_cid.end()) 
+        continue; // this image went missing during bracketing
+      int cid = it->second;
+      
+      // Add the optical center shift, if needed
+      if (!read_nvm_no_shift)
+        keypoint += cam_params[cams[cid].camera_type].GetOpticalOffset();
+
+      int fid = keypoint_vec[cid].size(); // this is before we add the keypoint
+      out_cid_fid[cid] = fid;
+      // After the push back, size is fid + 1
+      keypoint_vec[cid].push_back(std::make_pair(keypoint[0], keypoint[1])); 
+    }
+
+    // Keep only the tracks with at least two matches
+    if (out_cid_fid.size() > 1) 
+      pid_to_cid_fid.push_back(out_cid_fid);
+      
+  } // end iterating over nvm pid
+}
+
+// Helper function to add an ip to the keypoint map if not there.
+// In either case find its fid, which is the keypoint map value.
+void findFid(std::pair<float, float> const & ip,
+             int cid,
+             // Outputs
+             std::vector<std::map<std::pair<float, float>, int>> & keypoint_map,
+             std::vector<int> & fid_count,
+             int & fid) {
+  
+  fid = -1; // initialize the output
+  
+  auto it = keypoint_map[cid].find(ip);
+  if (it != keypoint_map[cid].end()) {
+    fid = it->second;
+  } else {
+    keypoint_map[cid][ip] = fid_count[cid];
+    fid = fid_count[cid];
+    fid_count[cid]++;
+  }
+  return;
+}
+
   
 void detectMatchFeatures(// Inputs
                          std::vector<dense_map::cameraImage> const& cams,
@@ -548,15 +667,14 @@ void detectMatchFeatures(// Inputs
   keypoint_vec.clear();
   pid_to_cid_fid.clear();
 
-  // Append the interest point matches from the nvm file
   if (num_overlaps == 0 && !no_nvm_matches) {
     // If we do not need to create new matches, just append existing ones
-    dense_map::appendMatchesFromNvm(// Inputs
-                                     cam_params, cams,
-                                     read_nvm_no_shift, nvm,  
-                                     // Outputs (these get appended to)
-                                     pid_to_cid_fid, keypoint_vec);
-     nvm = dense_map::nvmData(); // no longer neded
+    dense_map::appendNvmMatches(// Inputs
+                                cam_params, cams,
+                                read_nvm_no_shift, nvm,  
+                                // Outputs (these get appended to)
+                                pid_to_cid_fid, keypoint_vec);
+     nvm = dense_map::nvmData(); // no longer needed
      return;
   }
   
@@ -604,7 +722,7 @@ void detectMatchFeatures(// Inputs
   }
   
   MATCH_MAP matches;
-  {
+  { // Deallocate local variables as soon as they are not needed
     std::cout << "Matching features." << std::endl;
     dense_map::ThreadPool thread_pool;
     std::mutex match_mutex;
@@ -627,76 +745,7 @@ void detectMatchFeatures(// Inputs
     thread_pool.Join();
   }
   cid_to_descriptor_map = std::vector<cv::Mat>();  // Wipe, takes memory
-  
-  // Give all interest points in a given image a unique id, and put
-  // them in a vector with the id corresponding to the interest point
-  std::vector<std::map<std::pair<float, float>, int>> keypoint_map(num_images);
-  for (auto it = matches.begin(); it != matches.end(); it++) {
-    std::pair<int, int> const& cid_pair = it->first;     // alias
 
-    int left_cid = cid_pair.first;
-    int right_cid = cid_pair.second;
-
-    // Since we use a map, an interest point which shows up as part of
-    // several pairs of interest point matches will be counted just once.
-    dense_map::MATCH_PAIR const& match_pair = it->second;  // alias
-    std::vector<dense_map::InterestPoint> const& left_ip_vec = match_pair.first;
-    std::vector<dense_map::InterestPoint> const& right_ip_vec = match_pair.second;
-    for (size_t ip_it = 0; ip_it < left_ip_vec.size(); ip_it++) {
-      auto dist_left_ip  = std::make_pair(left_ip_vec[ip_it].x,  left_ip_vec[ip_it].y);
-      auto dist_right_ip = std::make_pair(right_ip_vec[ip_it].x, right_ip_vec[ip_it].y);
-      // Initialize to zero for the moment
-      keypoint_map[left_cid][dist_left_ip] = 0;
-      keypoint_map[right_cid][dist_right_ip] = 0;
-    }
-  }
-  // TODO(oalexan1): This should not be necessary. Increment right
-  // above the keypoint map using a per-cid counter. Test before and
-  // after this.
-  for (size_t cid = 0; cid < num_images; cid++) {
-    int fid = 0;
-    for (auto ip_it = keypoint_map[cid].begin(); ip_it != keypoint_map[cid].end();
-         ip_it++) {
-      auto const& dist_ip = ip_it->first;  // alias
-      keypoint_map[cid][dist_ip] = fid;
-      fid++;
-    }
-  }
-
-  // If feature A in image I matches feather B in image J, which
-  // matches feature C in image K, then (A, B, C) belong together in
-  // a track, and will have a single triangulated xyz. Build such a track.
-
-  openMVG::matching::PairWiseMatches match_map;
-  for (auto it = matches.begin(); it != matches.end(); it++) {
-    std::pair<int, int> const& cid_pair = it->first;     // alias
-
-    int left_cid = cid_pair.first;
-    int right_cid = cid_pair.second;
-
-    dense_map::MATCH_PAIR const& match_pair = it->second;  // alias
-    std::vector<dense_map::InterestPoint> const& left_ip_vec = match_pair.first;
-    std::vector<dense_map::InterestPoint> const& right_ip_vec = match_pair.second;
-
-    std::vector<openMVG::matching::IndMatch> mvg_matches;
-
-    for (size_t ip_it = 0; ip_it < left_ip_vec.size(); ip_it++) {
-      auto dist_left_ip  = std::make_pair(left_ip_vec[ip_it].x,  left_ip_vec[ip_it].y);
-      auto dist_right_ip = std::make_pair(right_ip_vec[ip_it].x, right_ip_vec[ip_it].y);
-
-      // TODO(oalexan1): id can be computed on the fly! All code above is redundant! 
-      int left_id = keypoint_map[left_cid][dist_left_ip];
-      int right_id = keypoint_map[right_cid][dist_right_ip];
-      // TODO(oalexan1): Make mvg_matches an alias of match_map[cid_pair]
-      mvg_matches.push_back(openMVG::matching::IndMatch(left_id, right_id));
-    }
-    match_map[cid_pair] = mvg_matches;
-  }
-
-  // TODO(oalexan1): Append here pairs from input nvm! Use the tensor.cc logic!
-  // Do here addKeypoints(), addMatchPairs(). Modify those to take in
-  // a keypoint_shift function.
-  
   if (save_matches) {
     if (out_dir.empty())
       LOG(FATAL) << "Cannot save matches if no output directory was provided.\n";
@@ -722,6 +771,40 @@ void detectMatchFeatures(// Inputs
       dense_map::writeMatchFile(match_file, match_pair.first, match_pair.second);
     }
   }
+  
+  // Collect all keypoints in keypoint_map, and put the fid (indices of keypoints) in
+  // match_map. It will be used to find the tracks.
+  std::vector<std::map<std::pair<float, float>, int>> keypoint_map(num_images);
+  std::vector<int> fid_count(num_images, 0); // track the fid of keypoints when adding them
+  openMVG::matching::PairWiseMatches match_map;
+  for (auto it = matches.begin(); it != matches.end(); it++) {
+    std::pair<int, int> const& cid_pair = it->first;     // alias
+
+    int left_cid = cid_pair.first;
+    int right_cid = cid_pair.second;
+
+    dense_map::MATCH_PAIR const& match_pair = it->second;  // alias
+    std::vector<dense_map::InterestPoint> const& left_ip_vec = match_pair.first;
+    std::vector<dense_map::InterestPoint> const& right_ip_vec = match_pair.second;
+
+    for (size_t ip_it = 0; ip_it < left_ip_vec.size(); ip_it++) {
+      auto left_ip  = std::make_pair(left_ip_vec[ip_it].x,  left_ip_vec[ip_it].y);
+      auto right_ip = std::make_pair(right_ip_vec[ip_it].x, right_ip_vec[ip_it].y);
+
+      // Add an ip to the keypoint map if not there. In either case find its fid.
+      int left_fid = -1, right_fid = -1;
+      findFid(left_ip, left_cid,
+              keypoint_map, fid_count, left_fid); // may change
+      findFid(right_ip, right_cid,
+              keypoint_map, fid_count, right_fid); // may change
+
+      match_map[cid_pair].push_back(openMVG::matching::IndMatch(left_fid, right_fid));
+    }
+  }
+
+  // TODO(oalexan1): Append here pairs from input nvm! Use the tensor.cc logic!
+  // Do here addKeypoints(), addMatchPairs(). Modify those to take in
+  // a keypoint_shift function.
 
   // Create keypoint_vec from keypoint_map. That just reorganizes the data
   // to the format expected later.
@@ -731,9 +814,9 @@ void detectMatchFeatures(// Inputs
     auto const& map = keypoint_map[cid]; // alias
     keypoint_vec[cid].resize(map.size());
     for (auto ip_it = map.begin(); ip_it != map.end(); ip_it++) {
-      auto const& dist_ip = ip_it->first;  // alias
+      auto const& ip = ip_it->first;  // alias
       int fid = ip_it->second;
-      keypoint_vec[cid][fid] = dist_ip;
+      keypoint_vec[cid][fid] = ip;
     }
   }
   
@@ -742,16 +825,19 @@ void detectMatchFeatures(// Inputs
   keypoint_map.clear(); keypoint_map.shrink_to_fit();
   cid_to_keypoint_map.clear(); cid_to_keypoint_map.shrink_to_fit();
 
+  // If feature A in image I matches feather B in image J, which
+  // matches feature C in image K, then (A, B, C) belong together in
+  // a track, and will have a single triangulated xyz. Build such a track.
   buildTracks(match_map, pid_to_cid_fid);
   match_map = openMVG::matching::PairWiseMatches();  // wipe this, no longer needed
   
   // Append the interest point matches from the nvm file
   if (!no_nvm_matches)
-    dense_map::appendMatchesFromNvm(// Inputs
-                                    cam_params, cams,
-                                    read_nvm_no_shift, nvm,  
-                                    // Outputs (these get appended to)
-                                    pid_to_cid_fid, keypoint_vec);
+    dense_map::appendNvmMatches(// Inputs
+                                cam_params, cams,
+                                read_nvm_no_shift, nvm,  
+                                // Outputs (these get appended to)
+                                pid_to_cid_fid, keypoint_vec);
   
   nvm = dense_map::nvmData(); // no longer needed
 
@@ -1528,83 +1614,6 @@ void readListOrNvm(// Inputs
                    image_maps, depth_maps); // out 
   }
 
-}
-
-// Append to existing keypoints and pid_to_cid_fid the entries from the nvm file.  
-// Need to account for the fact that the nvm file will likely have the images
-// in different order than in the 'cams' vector, and may have more such images,
-// as later we may have used bracketing to thin them out. So, some book-keeping is
-// necessary.
-void appendMatchesFromNvm(// Inputs
-                          std::vector<camera::CameraParameters> const& cam_params,
-                          std::vector<dense_map::cameraImage>   const& cams,
-                          bool read_nvm_no_shift,
-                          nvmData const& nvm,
-                          // Outputs (these get appended to)
-                          std::vector<std::map<int, int>> & pid_to_cid_fid,
-                          std::vector<std::vector<std::pair<float, float>>> & keypoint_vec) {
-    
-  if (!keypoint_vec.empty() && keypoint_vec.size() != cams.size()) 
-    LOG(FATAL) << "There must be as many sets of keypoints as images, or none at all.\n";
-
-  if (keypoint_vec.empty()) 
-    keypoint_vec.resize(cams.size());
-
-  if (nvm.pid_to_cid_fid.size() != nvm.pid_to_xyz.size()) 
-    LOG(FATAL) << "There must be as many tracks as triangulated points for them.\n";
-  
-  // First find how to map each cid from nvm to cid in 'cams'.
-  std::map<std::string, int> nvm_image_name_to_cid;
-  for (size_t nvm_cid = 0; nvm_cid < nvm.cid_to_filename.size(); nvm_cid++)
-    nvm_image_name_to_cid[nvm.cid_to_filename[nvm_cid]] = nvm_cid;
-  std::map<int, int> nvm_cid_to_cams_cid;
-  for (size_t cid = 0; cid < cams.size(); cid++) {
-    std::string const& image_name = cams[cid].image_name;
-    auto nvm_it = nvm_image_name_to_cid.find(image_name);
-    if (nvm_it == nvm_image_name_to_cid.end()) 
-      LOG(FATAL) << "Could not look up image: " << image_name
-                 << " in the input nvm file.\n";
-    int nvm_cid = nvm_it->second;
-    nvm_cid_to_cams_cid[nvm_cid] = cid;
-  }
-  
-  // Get new pid_to_cid_fid and keypoint_vec. Note that we ignore the triangulated
-  // points in nvm.pid_to_xyz. Triangulation will be redone later.
-  for (size_t pid = 0; pid < nvm.pid_to_cid_fid.size(); pid++) {
-
-    // Ignore triangulated points that are NaN, Inf, or (0, 0, 0).
-    if (!dense_map::isGoodTri(nvm.pid_to_xyz[pid])) 
-      continue;
-      
-    std::map<int, int> out_cid_fid;
-    for (auto cid_fid = nvm.pid_to_cid_fid[pid].begin();
-         cid_fid != nvm.pid_to_cid_fid[pid].end(); cid_fid++) {
-
-      int nvm_cid = cid_fid->first;
-      int nvm_fid = cid_fid->second;
-      Eigen::Vector2d keypoint = nvm.cid_to_keypoint_map.at(nvm_cid).col(nvm_fid);
-
-      // Find cid value in 'cams' based on cid value in the nvm
-      auto it = nvm_cid_to_cams_cid.find(nvm_cid);
-      if (it == nvm_cid_to_cams_cid.end()) 
-        continue; // this image went missing during bracketing
-      int cid = it->second;
-      
-      // Add the optical center shift, if needed
-      if (!read_nvm_no_shift)
-        keypoint += cam_params[cams[cid].camera_type].GetOpticalOffset();
-
-      int fid = keypoint_vec[cid].size(); // this is before we add the keypoint
-      out_cid_fid[cid] = fid;
-      // After the push back, size is fid + 1
-      keypoint_vec[cid].push_back(std::make_pair(keypoint[0], keypoint[1])); 
-    }
-
-    // Keep only the tracks with at least two matches
-    if (out_cid_fid.size() > 1) 
-      pid_to_cid_fid.push_back(out_cid_fid);
-      
-  } // end iterating over nvm pid
 }
 
 void flagOutlierByExclusionDist(// Inputs

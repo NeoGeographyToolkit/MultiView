@@ -305,14 +305,14 @@ void readListOrNvm(// Inputs
 // in different order than in the 'cams' vector, and may have more such images,
 // as later we may have used bracketing to thin them out. So, some book-keeping is
 // necessary.
-void appendMatchesFromNvm(// Inputs
-                          std::vector<camera::CameraParameters> const& cam_params,
-                          std::vector<dense_map::cameraImage>   const& cams,
-                          bool read_nvm_no_shift,
-                          nvmData const& nvm,
-                          // Outputs (these get appended to)
-                          std::vector<std::map<int, int>> & pid_to_cid_fid,
-                          std::vector<std::vector<std::pair<float, float>>> & keypoint_vec);
+void appendNvmMatches(// Inputs
+                      std::vector<camera::CameraParameters> const& cam_params,
+                      std::vector<dense_map::cameraImage>   const& cams,
+                      bool read_nvm_no_shift,
+                      nvmData const& nvm,
+                      // Outputs (these get appended to)
+                      std::vector<std::map<int, int>> & pid_to_cid_fid,
+                      std::vector<std::vector<std::pair<float, float>>> & keypoint_vec);
 
 void flagOutlierByExclusionDist(// Inputs
                                 std::vector<camera::CameraParameters> const& cam_params,

@@ -1327,15 +1327,12 @@ void MergePoses(std::map<int, int> & cid2cid,
     
   // The total number of output cameras (last new cid value + 1)
   int num_out_cams = dense_map::maxMapVal(cid2cid) + 1;
-  std::cout << "---last outcams " << num_out_cams << std::endl;
   
   // Each blob will be original cids that end up being a single cid
   // after identifying repeat images.
   std::vector<std::set<int>> blobs(num_out_cams);
-  for (size_t cid = 0; cid < cid_to_cam_t_global.size(); cid++) {
+  for (size_t cid = 0; cid < cid_to_cam_t_global.size(); cid++)
     blobs[cid2cid[cid]].insert(cid);
-    std::cout << "--blob " << cid2cid[cid] << ' ' << cid << std::endl;
-  }
 
   // To merge cid_to_cam_t_global, find the average rotation and translation
   // from the two maps.
