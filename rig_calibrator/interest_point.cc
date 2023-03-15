@@ -456,7 +456,8 @@ Eigen::Vector3d Triangulate(std::vector<double>          const& focal_length_vec
     k << focal_length_vec[it], 0, 0, 0, focal_length_vec[it], 0, 0, 0, 1;
 
     openMVG::Mat34 cid_to_p;
-    openMVG::P_From_KRt(k, world_to_cam_vec[it].linear(), world_to_cam_vec[it].translation(),
+    openMVG::P_From_KRt(k, world_to_cam_vec[it].linear(),
+                        world_to_cam_vec[it].translation(),
                         &cid_to_p);
 
     tri.add(cid_to_p, pix_vec[it]);
@@ -1269,7 +1270,7 @@ void readImageEntry(// Inputs
   std::string depth_file = fs::path(image_file).replace_extension(".pc").string();
   if (fs::exists(depth_file)) {
     //std::cout << "Reading: " << depth_file << std::endl;
-    //dense_map::readXyzImage(depth_file, depth_map[timestamp].image);
+    dense_map::readXyzImage(depth_file, depth_map[timestamp].image);
     depth_map[timestamp].name      = depth_file;
     depth_map[timestamp].timestamp = timestamp;
   }
@@ -1364,12 +1365,13 @@ void calcExtraPoses(std::string const& extra_list, bool use_initial_rig_transfor
     // Look up existing poses to be used for interpolation/extrapolation
     std::map<double, Eigen::Affine3d> & input_map = existing_world_to_cam[cam_type]; // alias
     if (input_map.empty()) {
-      std::string msg = std::string("Cannot find camera pose for the extra images")
-        + " as the data is insufficient.\n";
+      std::string msg = std::string("Cannot find camera poses for sensor: ")
+        + R.cam_names[cam_type] + " as the data is insufficient.\n";
       if (!use_initial_rig_transforms) 
         msg += std::string("If the rig configuration file has an initial rig, consider ")
           + "using the option --use_initial_rig_transforms.\n";
-      LOG(FATAL) << msg;
+      std::cout << msg;
+      continue;
     }
 
     std::vector<std::string> found_images;

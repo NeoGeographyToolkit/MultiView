@@ -288,16 +288,16 @@ DEFINE_string(camera_poses, "",
               "poses with the ``--nvm`` option, as then interest point matches will "
               "be read as well.");  
 
-DEFINE_int32(num_overlaps, 0, "Match an image with this many images (of all camera types) "
-             "following it in increasing order of timestamp value. Set to a positive value "
-             "only if desired to find more interest point matches than read from the input "
-             "nvm file. Not suggested by default. For advanced controls, "
-             "run: rig_calibrator --help | grep -i sift.");
+DEFINE_int32(num_overlaps, 0, "Match an image with this many images (of all camera "
+             "types) following it in increasing order of timestamp value. Set to "
+             "a positive value only if desired to find more interest point matches "
+             "than read from the input nvm file. Not suggested by default. For "
+             "advanced controls, run: rig_calibrator --help | grep -i sift.");
 
 DEFINE_bool(use_initial_rig_transforms, false,
             "Use the transforms among the sensors of the rig specified via --rig_config. "
-            "That regardless if we continue with using a rig (--no_rig is not set) or not. "
-            "If this option is not set, and a rig is desired, derive the "
+            "That regardless if we continue with using a rig (--no_rig is not set) or "
+            "not. If this option is not set, and a rig is desired, derive the "
             "rig transforms from the poses of individual cameras.");
 
 DEFINE_string(extra_list, "",
@@ -388,7 +388,8 @@ struct BracketedCamError {
     if (m_block_sizes.size() != 8 || m_block_sizes[0] != NUM_RIGID_PARAMS ||
         m_block_sizes[1] != NUM_RIGID_PARAMS || m_block_sizes[2] != NUM_RIGID_PARAMS ||
         m_block_sizes[3] != NUM_XYZ_PARAMS || m_block_sizes[4] != NUM_SCALAR_PARAMS ||
-        m_block_sizes[5] != m_num_focal_lengths || m_block_sizes[6] != NUM_OPT_CTR_PARAMS ||
+        m_block_sizes[5] != m_num_focal_lengths ||
+        m_block_sizes[6] != NUM_OPT_CTR_PARAMS ||
         m_block_sizes[7] != 1  // This will be overwritten shortly
     ) {
       LOG(FATAL) << "BracketedCamError: The block sizes were not set up properly.\n";
@@ -425,9 +426,11 @@ struct BracketedCamError {
     X = world_to_cam_trans * X;
 
     // Project into the image
-    Eigen::Vector2d undist_pix = cam_params.GetFocalVector().cwiseProduct(X.hnormalized());
+    Eigen::Vector2d undist_pix
+      = cam_params.GetFocalVector().cwiseProduct(X.hnormalized());
     Eigen::Vector2d curr_dist_pix;
-    cam_params.Convert<camera::UNDISTORTED_C, camera::DISTORTED>(undist_pix, &curr_dist_pix);
+    cam_params.Convert<camera::UNDISTORTED_C, camera::DISTORTED>
+      (undist_pix, &curr_dist_pix);
 
     // Compute the residuals
     residuals[0] = curr_dist_pix[0] - m_meas_dist_pix[0];
@@ -743,113 +746,6 @@ void calc_residuals_stats(std::vector<double> const& residuals,
     std::cout << " (" << len << " residuals)" << std::endl;
   }
 }
-
-// TODO(oalexan1): Move to transform_utils.
-// Compute the transforms from the world to every camera, based on the rig transforms
-void calc_world_to_cam_using_rig(// Inputs
-                                  std::vector<dense_map::cameraImage> const& cams,
-                                  std::vector<double> const& world_to_ref_vec,
-                                  std::vector<double> const& ref_timestamps,
-                                  std::vector<double> const& ref_to_cam_vec,
-                                  std::vector<double> const& ref_to_cam_timestamp_offsets,
-                                  // Output
-                                  std::vector<Eigen::Affine3d>& world_to_cam) {
-  if (ref_to_cam_vec.size() / dense_map::NUM_RIGID_PARAMS != ref_to_cam_timestamp_offsets.size())
-    LOG(FATAL) << "Must have as many transforms to reference as timestamp offsets.\n";
-  if (world_to_ref_vec.size() / dense_map::NUM_RIGID_PARAMS != ref_timestamps.size())
-    LOG(FATAL) << "Must have as many reference timestamps as reference cameras.\n";
-
-  world_to_cam.resize(cams.size());
-
-  for (size_t it = 0; it < cams.size(); it++) {
-    int beg_index = cams[it].beg_ref_index;
-    int end_index = cams[it].end_ref_index;
-    int cam_type = cams[it].camera_type;
-    world_to_cam[it] = dense_map::calc_world_to_cam_trans
-      (&world_to_ref_vec[dense_map::NUM_RIGID_PARAMS * beg_index],
-       &world_to_ref_vec[dense_map::NUM_RIGID_PARAMS * end_index],
-       &ref_to_cam_vec[dense_map::NUM_RIGID_PARAMS * cam_type],
-       ref_timestamps[beg_index], ref_timestamps[end_index],
-       ref_to_cam_timestamp_offsets[cam_type],
-       cams[it].timestamp);
-  }
-  return;
-}
-
-// TODO(oalexan1): Move to transform_utils.
-// A version of the above with the data stored differently
-void calc_world_to_cam_using_rig(// Inputs
-                                 std::vector<dense_map::cameraImage> const& cams,
-                                 std::vector<Eigen::Affine3d> const& world_to_ref,
-                                 std::vector<double> const& ref_timestamps,
-                                 std::vector<Eigen::Affine3d> const& ref_to_cam,
-                                 std::vector<double> const& ref_to_cam_timestamp_offsets,
-                                 // Output
-                                 std::vector<Eigen::Affine3d>& world_to_cam) {
-  
-  int num_cam_types = ref_to_cam.size();
-  std::vector<double> ref_to_cam_vec(num_cam_types * dense_map::NUM_RIGID_PARAMS);
-  for (int cam_type = 0; cam_type < num_cam_types; cam_type++)
-    dense_map::rigid_transform_to_array
-      (ref_to_cam[cam_type], &ref_to_cam_vec[dense_map::NUM_RIGID_PARAMS * cam_type]);
-
-  int num_ref_cams = world_to_ref.size();
-  if (world_to_ref.size() != ref_timestamps.size())
-    LOG(FATAL) << "Must have as many ref cam timestamps as ref cameras.\n";
-  std::vector<double> world_to_ref_vec(num_ref_cams * dense_map::NUM_RIGID_PARAMS);
-  for (int cid = 0; cid < num_ref_cams; cid++)
-    dense_map::rigid_transform_to_array(world_to_ref[cid],
-                                        &world_to_ref_vec[dense_map::NUM_RIGID_PARAMS * cid]);
-
-  calc_world_to_cam_using_rig(// Inputs
-                              cams, world_to_ref_vec, ref_timestamps, ref_to_cam_vec,  
-                              ref_to_cam_timestamp_offsets,  
-                              // Output
-                              world_to_cam);
-}
-  
-// TODO(oalexan1): Move to transform_utils.
-// Calculate world_to_cam transforms from their representation in a
-// vector, rather than using reference cameras, extrinsics and
-// timestamp interpolation. Only for use with --no_rig, when
-// each camera varies independently.
-void calc_world_to_cam_no_rig(// Inputs
-  std::vector<dense_map::cameraImage> const& cams, std::vector<double> const& world_to_cam_vec,
-  // Output
-  std::vector<Eigen::Affine3d>& world_to_cam) {
-  if (world_to_cam_vec.size() != cams.size() * dense_map::NUM_RIGID_PARAMS)
-    LOG(FATAL) << "Incorrect size for world_to_cam_vec.\n";
-
-  for (size_t cid = 0; cid < cams.size(); cid++)
-    dense_map::array_to_rigid_transform(world_to_cam[cid],  // output
-                                        &world_to_cam_vec[dense_map::NUM_RIGID_PARAMS * cid]);
-}
-
-// TODO(oalexan1): Move to transform_utils.
-// Use one of the two implementations above. Care is needed as when there are no extrinsics,
-// each camera is on its own, so the input is in world_to_cam_vec and not in world_to_ref_vec
-void calc_world_to_cam_rig_or_not(// Inputs
-  bool no_rig, std::vector<dense_map::cameraImage> const& cams,
-  std::vector<double> const& world_to_ref_vec, std::vector<double> const& ref_timestamps,
-  std::vector<double> const& ref_to_cam_vec, std::vector<double> const& world_to_cam_vec,
-  std::vector<double> const& ref_to_cam_timestamp_offsets,
-  // Output
-  std::vector<Eigen::Affine3d>& world_to_cam) {
-  if (!no_rig)
-    calc_world_to_cam_using_rig(// Inputs
-                                 cams, world_to_ref_vec, ref_timestamps, ref_to_cam_vec,
-                                 ref_to_cam_timestamp_offsets,
-                                 // Output
-                                 world_to_cam);
-  else
-    calc_world_to_cam_no_rig(// Inputs
-      cams, world_to_cam_vec,
-      // Output
-      world_to_cam);
-
-  return;
-}
-
 void parameterValidation() {
     
   if (FLAGS_robust_threshold <= 0.0)
@@ -859,7 +755,8 @@ void parameterValidation() {
 
   if (FLAGS_num_overlaps < 1 && (FLAGS_nvm == "" || FLAGS_no_nvm_matches))
     LOG(FATAL) << "No nvm file was specified or it is not desired to read its matches. "
-      "Then must set a positive --num_overlaps to be able to find new interest point matches.";
+               << "Then must set a positive --num_overlaps to be able to find new "
+               << "interest point matches.";
 
   if (FLAGS_timestamp_offsets_max_change < 0)
     LOG(FATAL) << "The timestamp offsets must be non-negative.";
@@ -1179,12 +1076,13 @@ int main(int argc, char** argv) {
   image_maps = std::vector<dense_map::MsgMap>();
   depth_maps = std::vector<dense_map::MsgMap>();
   
-  if (FLAGS_use_initial_rig_transforms) {
+  if (!FLAGS_no_rig && FLAGS_use_initial_rig_transforms) {
     // If we can use the initial rig transform, compute and
     // overwrite overwrite world_to_cam, the transforms from the
     // world to each camera. This regardless if use continue
     // using a rig later on.
      dense_map::calc_world_to_cam_using_rig(// Inputs
+                                            !FLAGS_no_rig,
                                             cams, world_to_ref, ref_timestamps,
                                             R.ref_to_cam_trans,
                                             R.ref_to_cam_timestamp_offsets,
@@ -1240,9 +1138,12 @@ int main(int argc, char** argv) {
   
   // Need the identity transform for when the cam is the ref cam, and
   // have to have a placeholder for the right bracketing cam which won't be used.
+  // These need to have different pointers because CERES wants it that way.
   Eigen::Affine3d identity = Eigen::Affine3d::Identity();
-  std::vector<double> identity_vec(dense_map::NUM_RIGID_PARAMS);
-  dense_map::rigid_transform_to_array(identity, &identity_vec[0]);
+  std::vector<double> ref_identity_vec(dense_map::NUM_RIGID_PARAMS),
+    right_identity_vec(dense_map::NUM_RIGID_PARAMS);
+  dense_map::rigid_transform_to_array(identity, &ref_identity_vec[0]);
+  dense_map::rigid_transform_to_array(identity, &right_identity_vec[0]);
 
   // Which intrinsics from which cameras to float. Indexed by cam_type.
   std::vector<std::set<std::string>> intrinsics_to_float;
@@ -1382,9 +1283,10 @@ int main(int argc, char** argv) {
     // given the current state of optimization
     // TODO(oalexan1): The call below is likely not necessary since this function
     // is already called earlier, and also whenever a pass finishes, see below.
-    dense_map::calc_world_to_cam_rig_or_not(  // Inputs
-      FLAGS_no_rig, cams, world_to_ref_vec, ref_timestamps, ref_to_cam_vec, world_to_cam_vec,
-      R.ref_to_cam_timestamp_offsets,
+    dense_map::calc_world_to_cam_rig_or_not
+      (  // Inputs
+       FLAGS_no_rig, cams, world_to_ref_vec, ref_timestamps, ref_to_cam_vec,
+       world_to_cam_vec, R.ref_to_cam_timestamp_offsets,
       // Output
       world_to_cam);
 
@@ -1417,10 +1319,11 @@ int main(int argc, char** argv) {
         // Outputs
         pid_cid_fid_mesh_xyz, pid_mesh_xyz);
 
-    // For a given fid = pid_to_cid_fid[pid][cid],
-    // the value pid_cid_fid_to_residual_index[pid][cid][fid] will be the index in the array
-    // of residuals (look only at pixel residuals). This structure is populated only for
-    // inliers, so its total number of elements changes at each pass.
+    // For a given fid = pid_to_cid_fid[pid][cid], the value
+    // pid_cid_fid_to_residual_index[pid][cid][fid] will be the index
+    // in the array of residuals (look only at pixel residuals). This
+    // structure is populated only for inliers, so its total number of
+    // elements changes at each pass.
     std::vector<std::map<int, std::map<int, int>>> pid_cid_fid_to_residual_index;
     pid_cid_fid_to_residual_index.resize(pid_to_cid_fid.size());
 
@@ -1434,7 +1337,8 @@ int main(int argc, char** argv) {
         R.cam_params[cam_type].m_rpc.set_can_undistort(false);
     }
     
-    // For when we don't have distortion but must get a pointer to distortion for the interface
+    // For when we don't have distortion but must get a pointer to
+    // distortion for the interface
     double distortion_placeholder = 0.0;
     
     // Form the problem
@@ -1468,57 +1372,51 @@ int main(int argc, char** argv) {
           beg_cam_ptr = &world_to_ref_vec[dense_map::NUM_RIGID_PARAMS * beg_ref_index];
 
           // Right bracketing camera. When the cam is the ref type,
-          // this is nominal and not used. Also when the current cam
-          // is the last one and has exactly same timestamp as the ref cam
+          // or when this cam is the last one and has exactly
+          // same timestamp as the ref cam, this is not used.
           if (R.isRefSensor(R.cam_names[cam_type]) || beg_ref_index == end_ref_index)
-            end_cam_ptr = &identity_vec[0];
+            end_cam_ptr = &right_identity_vec[0];
           else
             end_cam_ptr = &world_to_ref_vec[dense_map::NUM_RIGID_PARAMS * end_ref_index];
 
           // The beg and end timestamps will be the same only for the
           // ref cam or for last non-ref cam whose timestamp is same
           // as ref cam timestamp which is also last.
-          // TODO(oalexan1): Looks like a bug. When beg_ref_timestamp equals
-          // end_ref_timestamp, the rig constraint will be ignored? This
-          // is a valid use case.
-          // TODO(oalexan1): Must set ref_to_cam_ptr to identity and fix it!
           beg_ref_timestamp = ref_timestamps[beg_ref_index];
           end_ref_timestamp = ref_timestamps[end_ref_index];
           cam_timestamp = cams[cid].timestamp;  // uses current camera's clock
 
         } else {
           // No rig. Then, beg_cam_ptr is just current camera, not the
-          // ref bracket, end_cam_ptr is the identity. The beg and end
-          // timestamps are declared to be same, which will be used in
-          // calc_world_to_cam_trans() to ignore the rig transform and
-          // end_cam_ptr.
+          // ref bracketing cam, end_cam_ptr is the identity. The timestamps
+          // will be the same, so the camera brackets itself.
           cam_timestamp     = cams[cid].timestamp;
           beg_ref_timestamp = cam_timestamp;
           end_ref_timestamp = cam_timestamp;
 
-          // Note how we use world_to_cam_vec and not world_to_ref_vec
+          // Note how we use world_to_cam_vec and not world_to_ref_vec for 
+          // the beg cam. The end cam is unused.
           beg_cam_ptr = &world_to_cam_vec[dense_map::NUM_RIGID_PARAMS * cid];
-          end_cam_ptr = &identity_vec[0];
-          // TODO(oalexan1): Must set ref_to_cam_ptr to identity!
-          // TODO(oalexan1): Must ensure the identity is fixed! But only if used!
-          // Also, introduce a is_ref_cam flag to pass to calc_world_to_cam_trans, for 
-          // robustness.
+          end_cam_ptr = &right_identity_vec[0];
         }
 
         // Transform from reference camera to given camera. Won't be used when
         // FLAGS_no_rig is true or when the cam is of ref type.
-        // TODO(oalexan1): This is buggy, per above. Needs to be set to identity
-        // and fixed when not used.
-        ref_to_cam_ptr = &ref_to_cam_vec[dense_map::NUM_RIGID_PARAMS * cam_type];
-
-        Eigen::Vector2d dist_ip(keypoint_vec[cid][fid].first, keypoint_vec[cid][fid].second);
+        if (FLAGS_no_rig || R.isRefSensor(R.cam_names[cam_type]))
+          ref_to_cam_ptr = &ref_identity_vec[0];
+        else
+          ref_to_cam_ptr = &ref_to_cam_vec[dense_map::NUM_RIGID_PARAMS * cam_type];
+        
+        Eigen::Vector2d dist_ip(keypoint_vec[cid][fid].first,
+                                keypoint_vec[cid][fid].second);
 
         // Remember the index of the pixel residuals about to create
         pid_cid_fid_to_residual_index[pid][cid][fid] = residual_names.size();
 
         // TODO(oalexan1): Add this block to CostFunctions.cc.
         ceres::CostFunction* bracketed_cost_function =
-          dense_map::BracketedCamError::Create(dist_ip, beg_ref_timestamp, end_ref_timestamp,
+          dense_map::BracketedCamError::Create(dist_ip, beg_ref_timestamp,
+                                               end_ref_timestamp,
                                                cam_timestamp, bracketed_cam_block_sizes,
                                                R.cam_params[cam_type]);
         ceres::LossFunction* bracketed_loss_function
@@ -1552,13 +1450,8 @@ int main(int argc, char** argv) {
             == intrinsics_to_float[cam_type].end() || distortions[cam_type].size() == 0)
           problem.SetParameterBlockConstant(distortion_ptr);
 
-        // When the camera is the ref type, the right bracketing
-        // camera is just a placeholder which is not used, hence
-        // should not be optimized. Same for the ref_to_cam_vec and
-        // R.ref_to_cam_timestamp_offsets, etc., as can be seen further
-        // down.
         if (!FLAGS_no_rig) {
-          // See if to float the ref cameras
+          // See if to float the beg camera, which here will point to the ref cam
           if (camera_poses_to_float.find(R.refSensor(cam_type))
               == camera_poses_to_float.end())
             problem.SetParameterBlockConstant(beg_cam_ptr);

@@ -45,7 +45,8 @@ Eigen::Affine3d vecToAffine(Eigen::VectorXd const& vals);
 
 // Calculate interpolated world to reference sensor transform. Take into account
 // that the timestamp is for a sensor which may not be the reference one, so
-// an offset needs to be applied.
+// an offset needs to be applied. If beg_ref_stamp equals end_ref_stamp,
+// end_world_to_ref_t is ignored.
 Eigen::Affine3d calc_interp_world_to_ref(const double* beg_world_to_ref_t,
                                          const double* end_world_to_ref_t,
                                          double beg_ref_stamp,
@@ -54,12 +55,11 @@ Eigen::Affine3d calc_interp_world_to_ref(const double* beg_world_to_ref_t,
                                          double cam_stamp);
 
 // Calculate interpolated world to camera transform. Use the
-// convention that if beg_ref_stamp == end_ref_stamp, then this is the
-// reference camera, and then only beg_world_to_ref_t is used, while
-// end_world_to_ref_t is undefined. For the reference camera it is
-// also expected that ref_to_cam_aff is the identity. This saves some
-// code duplication later as the ref cam need not be treated
-// separately.
+// convention that if beg_ref_stamp == end_ref_stamp only
+// beg_world_to_ref_t is used, while end_world_to_ref_t is
+// ignored. For the reference camera it is also expected that
+// ref_to_cam_aff is the identity. This saves some code duplication
+// later as the ref cam need not be treated separately.
 Eigen::Affine3d calc_world_to_cam_trans(const double* beg_world_to_ref_t,
                                         const double* end_world_to_ref_t,
                                         const double* ref_to_cam_trans,
@@ -81,8 +81,45 @@ void calc_rig_trans(std::vector<dense_map::cameraImage> const& cams,
                     std::vector<Eigen::Affine3d>        const& world_to_cam,
                     std::vector<double>                 const& ref_timestamps,
                     dense_map::RigSet                        & R); // update this
+
+// Compute the transforms from the world to every camera, based on the rig transforms.
+void calc_world_to_cam_using_rig(// Inputs
+                                 bool have_rig,
+                                 std::vector<dense_map::cameraImage> const& cams,
+                                 std::vector<double> const& world_to_ref_vec,
+                                 std::vector<double> const& ref_timestamps,
+                                 std::vector<double> const& ref_to_cam_vec,
+                                 std::vector<double> const& ref_to_cam_timestamp_offsets,
+                                 // Output
+                                 std::vector<Eigen::Affine3d>& world_to_cam);
   
-void affine_transform_to_array(Eigen::Affine3d const& aff, double* arr);
+// A version of the above with the data stored differently
+void calc_world_to_cam_using_rig(// Inputs
+                                 bool have_rig,
+                                 std::vector<dense_map::cameraImage> const& cams,
+                                 std::vector<Eigen::Affine3d> const& world_to_ref,
+                                 std::vector<double> const& ref_timestamps,
+                                 std::vector<Eigen::Affine3d> const& ref_to_cam,
+                                 std::vector<double> const& ref_to_cam_timestamp_offsets,
+                                 // Output
+                                 std::vector<Eigen::Affine3d>& world_to_cam);
+
+void calc_world_to_cam_no_rig(// Inputs
+                              std::vector<dense_map::cameraImage> const& cams,
+                              std::vector<double> const& world_to_cam_vec,
+                              // Output
+                              std::vector<Eigen::Affine3d>& world_to_cam);
+  
+  void calc_world_to_cam_rig_or_not
+  (// Inputs
+   bool no_rig, std::vector<dense_map::cameraImage> const& cams,
+   std::vector<double> const& world_to_ref_vec, std::vector<double> const& ref_timestamps,
+   std::vector<double> const& ref_to_cam_vec, std::vector<double> const& world_to_cam_vec,
+   std::vector<double> const& ref_to_cam_timestamp_offsets,
+   // Output
+   std::vector<Eigen::Affine3d>& world_to_cam);
+
+  void affine_transform_to_array(Eigen::Affine3d const& aff, double* arr);
 void array_to_affine_transform(Eigen::Affine3d& aff, const double* arr);
   
 // Extract a rigid transform to an array of length NUM_RIGID_PARAMS

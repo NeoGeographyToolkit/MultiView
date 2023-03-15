@@ -76,7 +76,8 @@ Eigen::Affine3d vecToAffine(Eigen::VectorXd const& vals) {
 
 // Calculate interpolated world to reference sensor transform. Take into account
 // that the timestamp is for a sensor which may not be the reference one, so
-// an offset needs to be applied.
+// an offset needs to be applied. If beg_ref_stamp equals end_ref_stamp,
+// end_world_to_ref_t is ignored.
 Eigen::Affine3d calc_interp_world_to_ref(const double* beg_world_to_ref_t,
                                          const double* end_world_to_ref_t,
                                          double beg_ref_stamp,
@@ -112,14 +113,11 @@ Eigen::Affine3d calc_interp_world_to_ref(const double* beg_world_to_ref_t,
 }
   
 // Calculate interpolated world to camera transform. Use the
-// convention that if beg_ref_stamp == end_ref_stamp, then this is the
-// reference camera, and then only beg_world_to_ref_t is used, while
-// end_world_to_ref_t is undefined. For the reference camera it is
-// also expected that ref_to_cam_aff is the identity. This saves some
-// code duplication later as the ref cam need not be treated
-// separately.
-// TODO(oalexan1): There is a bug! Just because beg_ref_stamp and end_ref_stamp
-// are equal, it should not mean that ref_to_cam_aff is the identity!
+// convention that if beg_ref_stamp == end_ref_stamp, then only
+// beg_world_to_ref_t is used, while end_world_to_ref_t is
+// ignored. For the reference camera it is also expected that
+// ref_to_cam_aff is the identity. This saves some code duplication
+// later as the ref cam need not be treated separately.
 Eigen::Affine3d calc_world_to_cam_trans(const double* beg_world_to_ref_t,
                                         const double* end_world_to_ref_t,
                                         const double* ref_to_cam_trans,
@@ -127,27 +125,133 @@ Eigen::Affine3d calc_world_to_cam_trans(const double* beg_world_to_ref_t,
                                         double end_ref_stamp,
                                         double ref_to_cam_offset,
                                         double cam_stamp) {
-
-  Eigen::Affine3d interp_world_to_cam_aff;
-  if (beg_ref_stamp == end_ref_stamp) {
-    Eigen::Affine3d beg_world_to_ref_aff;
-    array_to_rigid_transform(beg_world_to_ref_aff, beg_world_to_ref_t);
-    interp_world_to_cam_aff = beg_world_to_ref_aff;
-  } else {
-
-    Eigen::Affine3d ref_to_cam_aff;
-    array_to_rigid_transform(ref_to_cam_aff, ref_to_cam_trans);
-
-    Eigen::Affine3d interp_world_to_ref_aff =
-      calc_interp_world_to_ref(beg_world_to_ref_t, end_world_to_ref_t,  
-                               beg_ref_stamp,  
-                               end_ref_stamp,  ref_to_cam_offset,  
+  
+  Eigen::Affine3d ref_to_cam_aff;
+  array_to_rigid_transform(ref_to_cam_aff, // output
+                           ref_to_cam_trans);
+  
+  Eigen::Affine3d interp_world_to_ref_aff
+    = calc_interp_world_to_ref(beg_world_to_ref_t, end_world_to_ref_t,  
+                               beg_ref_stamp, end_ref_stamp,  ref_to_cam_offset,  
                                cam_stamp);
-    
-    interp_world_to_cam_aff = ref_to_cam_aff * interp_world_to_ref_aff;
-  }
+  
+  return ref_to_cam_aff * interp_world_to_ref_aff;
+}
 
-  return interp_world_to_cam_aff;
+
+// Compute the transforms from the world to every camera, based on the rig transforms.
+void calc_world_to_cam_using_rig(// Inputs
+                                 bool have_rig,
+                                 std::vector<dense_map::cameraImage> const& cams,
+                                 std::vector<double> const& world_to_ref_vec,
+                                 std::vector<double> const& ref_timestamps,
+                                 std::vector<double> const& ref_to_cam_vec,
+                                 std::vector<double> const& ref_to_cam_timestamp_offsets,
+                                 // Output
+                                 std::vector<Eigen::Affine3d>& world_to_cam) {
+  
+  if (ref_to_cam_vec.size() / dense_map::NUM_RIGID_PARAMS != ref_to_cam_timestamp_offsets.size())
+    LOG(FATAL) << "Must have as many transforms to reference as timestamp offsets.\n";
+  if (world_to_ref_vec.size() / dense_map::NUM_RIGID_PARAMS != ref_timestamps.size())
+    LOG(FATAL) << "Must have as many reference timestamps as reference cameras.\n";
+
+  // What is stored in "cams" is completely different when a rig is not used,
+  // even one is available and is good, so then this code will give wrong results.
+  if (!have_rig) 
+    LOG(FATAL) << "calc_world_to_cam_using_rig: Must have a rig.\n";
+  
+  world_to_cam.resize(cams.size());
+
+  for (size_t it = 0; it < cams.size(); it++) {
+    int beg_index = cams[it].beg_ref_index;
+    int end_index = cams[it].end_ref_index;
+    int cam_type = cams[it].camera_type;
+    world_to_cam[it] = dense_map::calc_world_to_cam_trans
+      (&world_to_ref_vec[dense_map::NUM_RIGID_PARAMS * beg_index],
+       &world_to_ref_vec[dense_map::NUM_RIGID_PARAMS * end_index],
+       &ref_to_cam_vec[dense_map::NUM_RIGID_PARAMS * cam_type],
+       ref_timestamps[beg_index], ref_timestamps[end_index],
+       ref_to_cam_timestamp_offsets[cam_type],
+       cams[it].timestamp);
+  }
+  return;
+}
+
+// A version of the above with the data stored differently
+void calc_world_to_cam_using_rig(// Inputs
+                                 bool have_rig,
+                                 std::vector<dense_map::cameraImage> const& cams,
+                                 std::vector<Eigen::Affine3d> const& world_to_ref,
+                                 std::vector<double> const& ref_timestamps,
+                                 std::vector<Eigen::Affine3d> const& ref_to_cam,
+                                 std::vector<double> const& ref_to_cam_timestamp_offsets,
+                                 // Output
+                                 std::vector<Eigen::Affine3d>& world_to_cam) {
+  
+  int num_cam_types = ref_to_cam.size();
+  std::vector<double> ref_to_cam_vec(num_cam_types * dense_map::NUM_RIGID_PARAMS);
+  for (int cam_type = 0; cam_type < num_cam_types; cam_type++)
+    dense_map::rigid_transform_to_array
+      (ref_to_cam[cam_type], &ref_to_cam_vec[dense_map::NUM_RIGID_PARAMS * cam_type]);
+
+  int num_ref_cams = world_to_ref.size();
+  if (world_to_ref.size() != ref_timestamps.size())
+    LOG(FATAL) << "Must have as many ref cam timestamps as ref cameras.\n";
+  std::vector<double> world_to_ref_vec(num_ref_cams * dense_map::NUM_RIGID_PARAMS);
+  for (int cid = 0; cid < num_ref_cams; cid++)
+    dense_map::rigid_transform_to_array(world_to_ref[cid],
+                                        &world_to_ref_vec[dense_map::NUM_RIGID_PARAMS * cid]);
+
+  calc_world_to_cam_using_rig(// Inputs
+                              have_rig, cams, world_to_ref_vec,
+                              ref_timestamps, ref_to_cam_vec,  
+                              ref_to_cam_timestamp_offsets,  
+                              // Output
+                              world_to_cam);
+}
+  
+// Calculate world_to_cam transforms from their representation in a
+// vector, rather than using reference cameras, extrinsics and
+// timestamp interpolation. Only for use with --no_rig, when
+// each camera varies independently.
+void calc_world_to_cam_no_rig(// Inputs
+                              std::vector<dense_map::cameraImage> const& cams,
+                              std::vector<double> const& world_to_cam_vec,
+                              // Output
+                              std::vector<Eigen::Affine3d>& world_to_cam) {
+  
+  if (world_to_cam_vec.size() != cams.size() * dense_map::NUM_RIGID_PARAMS)
+    LOG(FATAL) << "Incorrect size for world_to_cam_vec.\n";
+
+  for (size_t cid = 0; cid < cams.size(); cid++)
+    dense_map::array_to_rigid_transform(world_to_cam[cid],  // output
+                                        &world_to_cam_vec[dense_map::NUM_RIGID_PARAMS * cid]);
+}
+
+// Use one of the two implementations above. Care is needed as when
+// there are no extrinsics, each camera is on its own, so the input is
+// in world_to_cam_vec and not in world_to_ref_vec
+void calc_world_to_cam_rig_or_not(// Inputs
+  bool no_rig, std::vector<dense_map::cameraImage> const& cams,
+  std::vector<double> const& world_to_ref_vec, std::vector<double> const& ref_timestamps,
+  std::vector<double> const& ref_to_cam_vec, std::vector<double> const& world_to_cam_vec,
+  std::vector<double> const& ref_to_cam_timestamp_offsets,
+  // Output
+  std::vector<Eigen::Affine3d>& world_to_cam) {
+  if (!no_rig)
+    calc_world_to_cam_using_rig(// Inputs
+                                !no_rig,
+                                cams, world_to_ref_vec, ref_timestamps, ref_to_cam_vec,
+                                ref_to_cam_timestamp_offsets,
+                                // Output
+                                world_to_cam);
+  else
+    calc_world_to_cam_no_rig(// Inputs
+      cams, world_to_cam_vec,
+      // Output
+      world_to_cam);
+
+  return;
 }
 
 // Extract a affine transform to an array of length NUM_AFFINE_PARAMS

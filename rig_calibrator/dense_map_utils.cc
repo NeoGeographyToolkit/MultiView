@@ -170,7 +170,7 @@ bool readAffine(Eigen::Affine3d& T, std::string const& filename) {
 
 // Write a matrix with double values
 void writeMatrix(Eigen::MatrixXd const& M, std::string const& filename) {
-  std::cout << "Writing: " << filename << std::endl;
+  // std::cout << "Writing: " << filename << std::endl;
   std::ofstream ofs(filename.c_str());
   ofs.precision(17);
   ofs << M << "\n";
@@ -183,7 +183,7 @@ void writeCloud(std::vector<float> const& points, size_t point_size, std::string
   size_t num_points = points.size() / point_size;
   if (point_size * num_points != points.size()) LOG(FATAL) << "Book-keeping failure.";
 
-  std::cout << "Writing: " << filename << "\n";
+  // std::cout << "Writing: " << filename << "\n";
   std::ofstream fh(filename.c_str());
   fh.precision(17);
   for (size_t it = 0; it < num_points; it++) {
