@@ -57,7 +57,12 @@ DEFINE_int32(num_image_overlaps_at_endpoints, 10,
              "second map.");
 
 DEFINE_double(close_dist, -1.0,
-              "Two triangulated points are considered to be close if no further than this distance, in meters. Used as inlier threshold when aligning maps. Auto-computed and printed on screen if not set.");
+              "Two triangulated points are considered to be close if no further "
+              "than this distance, in meters. Used as inlier threshold when "
+              "identifying triangulated points after the maps are "
+              "aligned. Auto-computed, taking into account the extent of "
+              "a tight subset of the triangulated points and printed on screen if "
+              "not set. This is an advanced option. ");
 
 DEFINE_bool(fix_first_map, false,
             "If true, after merging the maps and reconciling the camera poses in "

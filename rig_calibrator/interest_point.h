@@ -314,6 +314,36 @@ void appendNvmMatches(// Inputs
                       std::vector<std::map<int, int>> & pid_to_cid_fid,
                       std::vector<std::vector<std::pair<float, float>>> & keypoint_vec);
 
+// Break up each track of keypoints of length N into N pairs, (T0,
+// T1), (T1, T2), ,,. (T(N-1), T0). Find their indices in the merged
+// set of keypoints. Repeat this for each input map to merge and
+// accumulate the pairs. Later these will be combined into new tracks
+// and any repeated data will be fused. This is very tied to the
+// addKeypoints() function.
+void addMatchPairs(// Append from these
+                   std::vector<std::map<int, int>>  const& pid_to_cid_fid,
+                   std::vector<Eigen::Matrix2Xd>    const& cid_to_keypoint_map,
+                   std::map<int, int>               const& cid2cid,
+                   std::vector<Eigen::Vector2d>     const& keypoint_offsets,
+                   std::vector<std::map<std::pair<float, float>, int>>
+                   const& merged_keypoint_map, 
+                   int cid_shift, size_t num_out_cams,
+                   openMVG::matching::PairWiseMatches & match_map); // append here
+
+// Add keypoints from a map, appending to existing keypoints. Take into
+// account how this map's cid gets transformed to the new map cid.
+void addKeypoints(// Append from these
+                  std::vector<std::map<int, int>>  const& pid_to_cid_fid,
+                  std::vector<Eigen::Matrix2Xd>    const& cid_to_keypoint_map,
+                  std::map<int, int>               const& cid2cid,
+                  std::vector<Eigen::Vector2d>     const& keypoint_offsets,
+                  int cid_shift,
+                  size_t num_out_cams,
+                  // Outputs, append to these 
+                  std::vector<int> & keypoint_count,
+                  std::vector<std::map<std::pair<float, float>, int>>
+                  & merged_keypoint_map);
+  
 void flagOutlierByExclusionDist(// Inputs
                                 std::vector<camera::CameraParameters> const& cam_params,
                                 std::vector<dense_map::cameraImage> const& cams,

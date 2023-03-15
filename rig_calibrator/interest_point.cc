@@ -605,7 +605,7 @@ void appendNvmMatches(// Inputs
       // Find cid value in 'cams' based on cid value in the nvm
       auto it = nvm_cid_to_cams_cid.find(nvm_cid);
       if (it == nvm_cid_to_cams_cid.end()) 
-        continue; // this image went missing during bracketing
+        continue; // this image may not have been within brackets
       int cid = it->second;
       
       // Add the optical center shift, if needed
@@ -624,6 +624,163 @@ void appendNvmMatches(// Inputs
   } // end iterating over nvm pid
 }
 
+// Helper function to find a keypoint for given iterator and update cid in the merged
+// map with repetitions removed (via cid2cid).
+void updateCidFindKeypoint(std::map<int, int>::const_iterator map_it,
+                           std::vector<Eigen::Matrix2Xd> const& cid_to_keypoint_map,
+                           std::map<int, int>            const& cid2cid,
+                           std::vector<Eigen::Vector2d>  const& keypoint_offsets,
+                           int cid_shift,
+                           // outputs
+                           int                                & cid, 
+                           std::pair<float, float>            & K) {
+
+  // Start with the cid in the input map
+  cid = map_it->first;
+  int fid = map_it->second;
+  Eigen::Vector2d const& P = cid_to_keypoint_map.at(cid).col(fid); // alias
+  K = std::pair<float, float>(P[0], P[1]); // the keypoint
+  
+  // Let the cid value point to the merged map, before removing repetitions
+  cid += cid_shift; // only for map B that gets appended, which starts later
+
+  // Add the keypoint offset, using the updated cid
+  K.first  += keypoint_offsets[cid][0];
+  K.second += keypoint_offsets[cid][1];
+  
+  // cid gets replaced by cid2cid[cid], the value after removing repetitions
+  auto it = cid2cid.find(cid);
+  if (it == cid2cid.end()) 
+    LOG(FATAL) << "Bookkeeping error when merging tracks.\n";
+  cid = it->second;
+
+  return;
+}
+
+// Add keypoints from a map, appending to existing keypoints. Take into
+// account how this map's cid gets transformed to the new map cid.
+void addKeypoints(// Append from these
+                  std::vector<std::map<int, int>>  const& pid_to_cid_fid,
+                  std::vector<Eigen::Matrix2Xd>    const& cid_to_keypoint_map,
+                  std::map<int, int>               const& cid2cid,
+                  std::vector<Eigen::Vector2d>     const& keypoint_offsets,
+                  int cid_shift,
+                  size_t num_out_cams,
+                  // Outputs, append to these 
+                  std::vector<int> & keypoint_count,
+                  std::vector<std::map<std::pair<float, float>, int>>
+                  & merged_keypoint_map) {
+
+  // Sanity checks
+  if (num_out_cams != keypoint_count.size()) 
+    LOG(FATAL) << "Keypoint count was not initialized correctly.\n";
+  if (num_out_cams != merged_keypoint_map.size()) 
+    LOG(FATAL) << "Keypoint map was not initialized correctly.\n";
+  if (num_out_cams != dense_map::maxMapVal(cid2cid) + 1)
+    LOG(FATAL) << "Unexpected value for the size of the output map.\n";
+  if (num_out_cams != keypoint_offsets.size())
+    LOG(FATAL) << "There must exist as many images as optical offsets.\n";
+
+  for (size_t pid = 0; pid < pid_to_cid_fid.size(); pid++) {
+
+    auto const& cid_fid = pid_to_cid_fid[pid]; // alias
+    for (auto map_it = cid_fid.begin(); map_it != cid_fid.end(); map_it++) {
+
+      int cid = -1; // will change soon
+      std::pair<float, float> K;
+      updateCidFindKeypoint(map_it, cid_to_keypoint_map, cid2cid,
+                            keypoint_offsets, cid_shift,  
+                            cid, K);
+      
+      // Insert K in the keypoint map and increment the count,
+      // unless it already exists
+      auto & key_map = merged_keypoint_map.at(cid); // alias, will be changed
+      if (key_map.find(K) != key_map.end()) 
+        continue; // exists already
+      
+      key_map[K] = keypoint_count[cid];
+      keypoint_count[cid]++;
+    }
+  }
+
+  return;
+}
+
+// Break up each track of keypoints of length N into N pairs, (T0,
+// T1), (T1, T2), ,,. (T(N-1), T0). Find their indices in the merged
+// set of keypoints. Repeat this for each input map to merge and
+// accumulate the pairs. Later these will be combined into new tracks
+// and any repeated data will be fused. This is very tied to the
+// addKeypoints() function.
+void addMatchPairs(// Append from these
+                   std::vector<std::map<int, int>>  const& pid_to_cid_fid,
+                   std::vector<Eigen::Matrix2Xd>    const& cid_to_keypoint_map,
+                   std::map<int, int>               const& cid2cid,
+                   std::vector<Eigen::Vector2d>     const& keypoint_offsets,
+                   std::vector<std::map<std::pair<float, float>, int>>
+                   const& merged_keypoint_map, 
+                   int cid_shift, size_t num_out_cams,
+                   openMVG::matching::PairWiseMatches & match_map) { // append here
+
+  // Sanity checks
+  if (num_out_cams != merged_keypoint_map.size()) 
+    LOG(FATAL) << "Keypoint map was not initialized correctly.\n";
+  if (num_out_cams != dense_map::maxMapVal(cid2cid) + 1)
+    LOG(FATAL) << "Unexpected value for the size of the output map.\n";
+  if (num_out_cams != keypoint_offsets.size())
+    LOG(FATAL) << "There must exist as many images as optical offsets.\n";
+  
+  for (size_t pid = 0; pid < pid_to_cid_fid.size(); pid++) {
+    
+    auto const& cid_fid = pid_to_cid_fid[pid]; // alias
+    for (auto map_it1 = cid_fid.begin(); map_it1 != cid_fid.end(); map_it1++) {
+      
+      // First element in the pair
+      int cid1 = -1; // will change soon
+      std::pair<float, float> K1;
+      updateCidFindKeypoint(map_it1, cid_to_keypoint_map, cid2cid,
+                            keypoint_offsets, cid_shift,    
+                            cid1, K1); // output
+      
+      // Find the second element in the pair. If at the end of the track,
+      // and the track length is more than 2, use the earliest element.
+      auto map_it2 = map_it1;
+      map_it2++;
+      if (map_it2 == cid_fid.end()) {
+        
+        if (cid_fid.size() <= 2) 
+          continue; // Already added (T0, T1), no need to add (T1, T0).
+      
+        map_it2 = cid_fid.begin();
+      }
+      int cid2 = -1; // will change soon
+      std::pair<float, float> K2;
+      updateCidFindKeypoint(map_it2, cid_to_keypoint_map, cid2cid,
+                            keypoint_offsets, cid_shift,  
+                            cid2, K2); // output
+
+      // No point in adding a match from an image to itself
+      if (cid1 == cid2) 
+        continue;
+
+      // Find the fid indices
+      auto it1 = merged_keypoint_map.at(cid1).find(K1);
+      auto it2 = merged_keypoint_map.at(cid2).find(K2);
+      if (it1 == merged_keypoint_map.at(cid1).end() ||
+          it2 == merged_keypoint_map.at(cid2).end())
+        LOG(FATAL) << "Could not look up a keypoint. That is unexpected.\n";
+      int fid1 = it1->second;
+      int fid2 = it2->second;
+      
+      // Append the pair
+      std::vector<openMVG::matching::IndMatch> & mvg_matches
+        = match_map[std::make_pair(cid1, cid2)]; // alias
+      mvg_matches.push_back(openMVG::matching::IndMatch(fid1, fid2));
+    } // end iterating over the track
+  } 
+  return;
+}
+  
 // Helper function to add an ip to the keypoint map if not there.
 // In either case find its fid, which is the keypoint map value.
 void findFid(std::pair<float, float> const & ip,
@@ -664,9 +821,8 @@ void detectMatchFeatures(// Inputs
   keypoint_vec.clear();
   pid_to_cid_fid.clear();
 
-  size_t num_images = cams.size();
-
   // Add the optical center shift, if needed
+  size_t num_images = cams.size();
   std::vector<Eigen::Vector2d> keypoint_offsets(num_images);
   for (size_t cid = 0; cid < num_images; cid++) {
     if (read_nvm_no_shift)
@@ -676,7 +832,9 @@ void detectMatchFeatures(// Inputs
   }
   
   if (num_overlaps == 0 && !no_nvm_matches) {
-    // If we do not need to create new matches, just append existing ones
+    // If we do not need to create new matches, just append existing ones.
+    // We do not attempt merging the tracks in the nvm file among themselves,
+    // as done further down.
     dense_map::appendNvmMatches(// Inputs
                                 cams, keypoint_offsets, nvm,  
                                 // Outputs (these get appended to)
@@ -765,13 +923,11 @@ void detectMatchFeatures(// Inputs
 
       int left_cid = cid_pair.first;
       int right_cid = cid_pair.second;
-
       std::string const& left_image = cams[left_cid].image_name; // alias
       std::string const& right_image = cams[right_cid].image_name; // alias
 
       std::string suffix = "";
       std::string match_file = matchFileName(match_dir, left_image, right_image, suffix);
-
       std::cout << "Writing: " << left_image << " " << right_image << " "
                 << match_file << std::endl;
       dense_map::writeMatchFile(match_file, match_pair.first, match_pair.second);
@@ -808,6 +964,27 @@ void detectMatchFeatures(// Inputs
     }
   }
 
+  if (!no_nvm_matches) {
+    // Find how to map each cid from nvm to cid in 'cams'.
+    std::map<int, int> nvm_cid_to_cams_cid;
+    dense_map::findCidReorderMap(nvm, cams,
+                               nvm_cid_to_cams_cid); // output
+    // Add the nvm matches as pairs. The track building below may merge tracks
+    // that are duplicate in the nvm file and/or show up both in the nvm file
+    // and the interest points just found. We compensate for the ip in the
+    // nvm being in different order and needing an offset. Also note
+    // that we keep on appending to fid_count and keypoint_map.
+    int cid_shift = 0; // part of the API
+    dense_map::addKeypoints(nvm.pid_to_cid_fid, nvm.cid_to_keypoint_map,  
+                            nvm_cid_to_cams_cid,
+                            keypoint_offsets, cid_shift, num_images,  
+                            fid_count, keypoint_map); // append and update
+    dense_map::addMatchPairs(nvm.pid_to_cid_fid, nvm.cid_to_keypoint_map,  
+                             nvm_cid_to_cams_cid, keypoint_offsets, keypoint_map,
+                             cid_shift, num_images,  
+                             match_map); // append and update
+  }
+  
   // TODO(oalexan1): Append here pairs from input nvm! Use the tensor.cc logic!
   // Do here addKeypoints(), addMatchPairs(). Modify those to take in
   // a keypoint_shift function.
@@ -836,14 +1013,6 @@ void detectMatchFeatures(// Inputs
   // a track, and will have a single triangulated xyz. Build such a track.
   buildTracks(match_map, pid_to_cid_fid);
   match_map = openMVG::matching::PairWiseMatches();  // wipe this, no longer needed
-  
-  // Append the interest point matches from the nvm file
-  if (!no_nvm_matches)
-    dense_map::appendNvmMatches(// Inputs
-                                cams, keypoint_offsets, nvm,  
-                                // Outputs (these get appended to)
-                                pid_to_cid_fid, keypoint_vec);
-  
   nvm = dense_map::nvmData(); // no longer needed
 
   return;
