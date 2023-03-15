@@ -250,26 +250,28 @@ DEFINE_string(xyz_file, "", "The path to the xyz file used for registration.");
 
 DEFINE_bool(skip_post_registration, false,
             "If true and registration to world coordinates takes place, do not apply the "
-            "registration again after the cameras are optimized. This is usually not recommended, "
-            "unless one is quite confident that other constraints (such as using --tri_weight "
-            "or --mesh_tri_weight) are sufficient to keep the cameras from drifting.");
+            "registration again after the cameras are optimized. This is usually not "
+            "recommended, unless one is quite confident that other constraints "
+            "(such as using --tri_weight or --mesh_tri_weight) are sufficient to "
+            "keep the cameras from drifting.");
 
 DEFINE_double(parameter_tolerance, 1e-12, "Stop when the optimization variables change by "
               "less than this.");
 
-DEFINE_int32(num_opt_threads, 16, "How many threads to use in the optimization.");
+DECLARE_int32(num_threads); // declared externally
 
 DEFINE_int32(num_match_threads, 8, "How many threads to use in feature detection/matching. "
              "A large number can use a lot of memory.");
 
 DEFINE_bool(no_rig, false,
             "Do not assumes the cameras are on a rig. Hence the pose of any "
-            "camera of any sensor type may vary on its own and not being tied to other sensor "
-            "types. See also --camera_poses_to_float.");
+            "camera of any sensor type may vary on its own and not being tied to other "
+            "sensor types. See also --camera_poses_to_float.");
 
 DEFINE_string(out_dir, "",
               "Save in this directory the camera intrinsics and extrinsics. "
-              "See also --save-images_and_depth_clouds, --save-matches, --verbose, and --in_dir.");
+              "See also --save-images_and_depth_clouds, --save-matches, --verbose, "
+              "and --in_dir.");
 
 DEFINE_string(rig_config, "",
               "Read the rig configuration from this file.");
@@ -278,8 +280,9 @@ DEFINE_string(nvm, "",
               "Read images and camera poses from this nvm file, as exported by Theia.");
 
 DEFINE_bool(no_nvm_matches, false,
-            "Do not read interest point matches from the nvm file. So read only camera poses. "
-            "This implies --num_overlaps is positive, to be able to find new matches.");
+            "Do not read interest point matches from the nvm file. So read only "
+            "camera poses. This implies --num_overlaps is positive, to be able to "
+            "find new matches.");
 
 DEFINE_string(camera_poses, "",
               "Read the images and world-to-camera poses from this list. "
@@ -1210,36 +1213,27 @@ int main(int argc, char** argv) {
   if (FLAGS_no_rig) {
     world_to_cam_vec.resize(cams.size() * dense_map::NUM_RIGID_PARAMS);
     for (size_t cid = 0; cid < cams.size(); cid++)
-      dense_map::rigid_transform_to_array(world_to_cam[cid],
-                                          &world_to_cam_vec[dense_map::NUM_RIGID_PARAMS * cid]);
+      dense_map::rigid_transform_to_array
+        (world_to_cam[cid],
+         &world_to_cam_vec[dense_map::NUM_RIGID_PARAMS * cid]);
   }
 
-  // Detect and match features if the user chooses to, so if --num_overlaps > 0. Normally,
-  // these are read from the nvm file only, as below.
+  // Detect and match features if --num_overlaps > 0. Append the features
+  // read from the nvm.
   dense_map::KeypointVec keypoint_vec;
   std::vector<std::map<int, int>> pid_to_cid_fid;
   bool filter_matches_using_cams = true;
   std::vector<std::pair<int, int>> input_image_pairs; // will use num_overlaps instead
-
-  if (FLAGS_num_overlaps > 0)
-    dense_map::detectMatchFeatures(// Inputs
-                                   cams, R.cam_params, FLAGS_out_dir, FLAGS_save_matches,
-                                   filter_matches_using_cams, world_to_cam,
-                                   FLAGS_num_overlaps, input_image_pairs,
-                                   FLAGS_initial_max_reprojection_error,
-                                   FLAGS_num_match_threads,
-                                   FLAGS_verbose,
-                                   // Outputs
-                                   keypoint_vec, pid_to_cid_fid);
-
-  // Append the interest point matches from the nvm file
-  if (!FLAGS_no_nvm_matches && FLAGS_nvm != "")
-    dense_map::appendMatchesFromNvm(// Inputs
-                                    R.cam_params, cams,
-                                    FLAGS_read_nvm_no_shift, nvm,  
-                                    // Outputs (these get appended to)
-                                    pid_to_cid_fid, keypoint_vec);
-
+  dense_map::detectMatchFeatures(// Inputs
+                                 cams, R.cam_params, FLAGS_out_dir, FLAGS_save_matches,
+                                 filter_matches_using_cams, world_to_cam,
+                                 FLAGS_num_overlaps, input_image_pairs,
+                                 FLAGS_initial_max_reprojection_error,
+                                 FLAGS_num_match_threads,
+                                 FLAGS_read_nvm_no_shift, FLAGS_no_nvm_matches,
+                                 FLAGS_verbose,
+                                 // Outputs
+                                 keypoint_vec, pid_to_cid_fid, nvm);
   if (pid_to_cid_fid.empty())
     LOG(FATAL) << "No interest points were found. Must specify either "
                << "--nvm or positive --num_overlaps.\n";
@@ -1664,7 +1658,7 @@ int main(int argc, char** argv) {
     ceres::Solver::Options options;
     ceres::Solver::Summary summary;
     options.linear_solver_type = ceres::ITERATIVE_SCHUR;
-    options.num_threads = FLAGS_num_opt_threads; 
+    options.num_threads = FLAGS_num_threads; 
     options.max_num_iterations = FLAGS_num_iterations;
     options.minimizer_progress_to_stdout = true;
     options.gradient_tolerance = 1e-16;
@@ -1700,7 +1694,7 @@ int main(int argc, char** argv) {
       // which must be synced up with new distortion coeffs.
       if (intrinsics_to_float[cam_type].find("distortion")
           != intrinsics_to_float[cam_type].end() && distortions[cam_type].size() > 5)
-        R.cam_params[cam_type].updateRpcUndistortion(FLAGS_num_opt_threads);
+        R.cam_params[cam_type].updateRpcUndistortion(FLAGS_num_threads);
     }
 
     // Copy back the optimized extrinsics, whether they were optimized or fixed

@@ -1298,19 +1298,6 @@ void FindPidCorrespondences(std::vector<std::map<int, int>> const& A_cid_fid_to_
   }
 }
 
-// A triangulated point that is equal to (0, 0, 0), inf, or NaN, is not good.
-bool isGoodTri(Eigen::Vector3d const& P) {
-  for (int c = 0; c < P.size(); c++) {
-    if (std::isinf(P[c]) || std::isnan(P[c]))
-      return false;
-  }
-  
-  if (P[0] == 0 && P[1] == 0 && P[2] == 0) 
-    return false;
-  
-  return true;
-}
-
 // TODO(oalexan1): Move this to basic_algs.h.
 // Convert keypoints to Eigen format
 void vec2eigen(std::vector<std::pair<float, float>> const& vec,
@@ -1888,6 +1875,9 @@ void MergeMaps(dense_map::nvmData const& A,
     int initial_max_reprojection_error = -1; // won't be used
     bool verbose = false;
     bool filter_matches_using_cams = false; // do not have a single camera set yet
+    bool read_nvm_no_shift = false; // not used, part of the api
+    bool no_nvm_matches = true; // not used, part of the api
+    dense_map::nvmData empty_nvm; // not used, part of the api
     C.cid_to_cam_t_global.resize(C.cid_to_filename.size()); // won't be used
     std::cout << "Number of image pairs to match: " << image_pairs.size() << std::endl;
     dense_map::detectMatchFeatures(// Inputs
@@ -1896,9 +1886,9 @@ void MergeMaps(dense_map::nvmData const& A,
                                    C.cid_to_cam_t_global,
                                    num_overlaps, image_pairs,
                                    initial_max_reprojection_error, FLAGS_num_threads,  
-                                   verbose,  
+                                   read_nvm_no_shift, no_nvm_matches, verbose,  
                                    // Outputs
-                                   C_keypoint_vec, C.pid_to_cid_fid);
+                                   C_keypoint_vec, C.pid_to_cid_fid, empty_nvm);
 
 #if 1
     // TODO(oalexan1): Make this a function called splitMap().
@@ -1978,7 +1968,7 @@ void MergeMaps(dense_map::nvmData const& A,
     // Keep only the good points
     int count = 0;
     for (size_t pid = 0; pid < A_xyz_vec.size(); pid++) {
-      if (!isGoodTri(A_xyz_vec[pid]) || !isGoodTri(B_xyz_vec[pid]))
+      if (!dense_map::isGoodTri(A_xyz_vec[pid]) || !dense_map::isGoodTri(B_xyz_vec[pid]))
         continue;
       A_xyz_vec[count] = A_xyz_vec[pid];
       B_xyz_vec[count] = B_xyz_vec[pid];

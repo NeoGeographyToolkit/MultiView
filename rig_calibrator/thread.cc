@@ -26,7 +26,7 @@
 
 DEFINE_int32(num_threads, (std::thread::hardware_concurrency() == 0 ?
                            8 : std::thread::hardware_concurrency()),
-             "Number of threads to use for processing.");
+             "Number of threads to use.");
 
 void* dense_map::HolderFunction(void* ptr) {
   dense_map::ThreadPool::VarsTuple* vars = reinterpret_cast<dense_map::ThreadPool::VarsTuple*>(ptr);

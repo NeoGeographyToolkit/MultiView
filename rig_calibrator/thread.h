@@ -25,8 +25,6 @@
 #include <list>
 #include <functional>
 
-DECLARE_int32(num_threads);
-
 #define GOOGLE_ALLOW_RVALUE_REFERENCES_PUSH
 #define GOOGLE_ALLOW_RVALUE_REFERENCES_POP
 

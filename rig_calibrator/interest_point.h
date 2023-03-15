@@ -245,12 +245,13 @@ void detectMatchFeatures(// Inputs
                          bool filter_matches_using_cams,
                          std::vector<Eigen::Affine3d> const& world_to_cam,
                          int num_overlaps,
-                         std::vector<std::pair<int, int>> const& input_image_pairs, // may override num_overlaps
+                         std::vector<std::pair<int, int>> const& input_image_pairs, 
                          int initial_max_reprojection_error, int num_match_threads,
-                         bool verbose,
+                         bool read_nvm_no_shift, bool no_nvm_matches, bool verbose,
                          // Outputs
                          std::vector<std::vector<std::pair<float, float>>>& keypoint_vec,
-                         std::vector<std::map<int, int>>& pid_to_cid_fid);
+                         std::vector<std::map<int, int>>& pid_to_cid_fid,
+                         dense_map::nvmData & nvm);
 
 void multiViewTriangulation(// Inputs
                             std::vector<camera::CameraParameters>  const& cam_params,
@@ -348,6 +349,9 @@ void transformInlierTriPoints(// Inputs
   std::vector<std::map<int, int>> const& pid_to_cid_fid,
   std::vector<std::map<int, std::map<int, int>>> const& pid_cid_fid_inlier,
   std::vector<Eigen::Vector3d> & xyz_vec); // output
+
+  // A triangulated point that is equal to (0, 0, 0), inf, or NaN, is not good.
+  bool isGoodTri(Eigen::Vector3d const& P);
   
 }  // namespace dense_map
 

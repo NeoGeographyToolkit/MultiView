@@ -66,7 +66,7 @@ DEFINE_int32(num_samples, -1,
 
 DEFINE_int32(num_iterations, 20, "How many solver iterations to perform in calibration.");
 
-DEFINE_int32(num_opt_threads, 16, "How many threads to use in the optimization.");
+DECLARE_int32(num_threads); // declared externally
 
 DEFINE_double(parameter_tolerance, 1e-12, "Stop when the optimization variables change by "
               "less than this.");
@@ -106,7 +106,7 @@ int main(int argc, char** argv) {
   Eigen::VectorXd rpc_dist_coeffs;
   dense_map::fitRpcDist(FLAGS_rpc_degree, FLAGS_num_samples,
                         R.cam_params[0],
-                        FLAGS_num_opt_threads, FLAGS_num_iterations,
+                        FLAGS_num_threads, FLAGS_num_iterations,
                         FLAGS_parameter_tolerance,
                         FLAGS_verbose,
                         // Output
@@ -116,7 +116,7 @@ int main(int argc, char** argv) {
   dense_map::fitRpcUndist(rpc_dist_coeffs,
                           FLAGS_num_samples,
                           R.cam_params[0],
-                          FLAGS_num_opt_threads, FLAGS_num_iterations,
+                          FLAGS_num_threads, FLAGS_num_iterations,
                           FLAGS_parameter_tolerance,
                           FLAGS_verbose,
                           // Output
