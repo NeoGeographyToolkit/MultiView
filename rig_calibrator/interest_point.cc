@@ -565,10 +565,9 @@ void findCidReorderMap(nvmData const& nvm,
 // as later we may have used bracketing to thin them out. So, some book-keeping is
 // necessary.
 void appendNvmMatches(// Inputs
-                      std::vector<camera::CameraParameters> const& cam_params,
                       std::vector<dense_map::cameraImage>   const& cams,
-                      bool read_nvm_no_shift,
-                      nvmData const& nvm,
+                      std::vector<Eigen::Vector2d>          const& keypoint_offsets,
+                      nvmData                               const& nvm,
                       // Outputs (these get appended to)
                       std::vector<std::map<int, int>> & pid_to_cid_fid,
                       std::vector<std::vector<std::pair<float, float>>> & keypoint_vec) {
@@ -610,8 +609,7 @@ void appendNvmMatches(// Inputs
       int cid = it->second;
       
       // Add the optical center shift, if needed
-      if (!read_nvm_no_shift)
-        keypoint += cam_params[cams[cid].camera_type].GetOpticalOffset();
+      keypoint += keypoint_offsets[cid];
 
       int fid = keypoint_vec[cid].size(); // this is before we add the keypoint
       out_cid_fid[cid] = fid;
@@ -648,7 +646,6 @@ void findFid(std::pair<float, float> const & ip,
   return;
 }
 
-  
 void detectMatchFeatures(// Inputs
                          std::vector<dense_map::cameraImage> const& cams,
                          std::vector<camera::CameraParameters> const& cam_params,
@@ -667,11 +664,21 @@ void detectMatchFeatures(// Inputs
   keypoint_vec.clear();
   pid_to_cid_fid.clear();
 
+  size_t num_images = cams.size();
+
+  // Add the optical center shift, if needed
+  std::vector<Eigen::Vector2d> keypoint_offsets(num_images);
+  for (size_t cid = 0; cid < num_images; cid++) {
+    if (read_nvm_no_shift)
+      keypoint_offsets[cid] = Eigen::Vector2d(0, 0);
+    else
+      keypoint_offsets[cid] = cam_params[cams[cid].camera_type].GetOpticalOffset();
+  }
+  
   if (num_overlaps == 0 && !no_nvm_matches) {
     // If we do not need to create new matches, just append existing ones
     dense_map::appendNvmMatches(// Inputs
-                                cam_params, cams,
-                                read_nvm_no_shift, nvm,  
+                                cams, keypoint_offsets, nvm,  
                                 // Outputs (these get appended to)
                                 pid_to_cid_fid, keypoint_vec);
      nvm = dense_map::nvmData(); // no longer needed
@@ -692,7 +699,6 @@ void detectMatchFeatures(// Inputs
 
   std::vector<cv::Mat> cid_to_descriptor_map;
   std::vector<Eigen::Matrix2Xd> cid_to_keypoint_map;
-  size_t num_images = cams.size();
   cid_to_descriptor_map.resize(num_images);
   cid_to_keypoint_map.resize(num_images);
   {
@@ -834,8 +840,7 @@ void detectMatchFeatures(// Inputs
   // Append the interest point matches from the nvm file
   if (!no_nvm_matches)
     dense_map::appendNvmMatches(// Inputs
-                                cam_params, cams,
-                                read_nvm_no_shift, nvm,  
+                                cams, keypoint_offsets, nvm,  
                                 // Outputs (these get appended to)
                                 pid_to_cid_fid, keypoint_vec);
   
