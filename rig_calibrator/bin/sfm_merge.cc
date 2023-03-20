@@ -34,8 +34,6 @@
 #include <algorithm>
 #include <thread>
 
-// TODO(oalexan1): How about no-shift?
-
 // Merge n maps by merging second into the first, then the third into
 // the merged map, etc. It works by finding matches among the maps
 // using -num_image_overlaps_at_endpoints and then bringing the second

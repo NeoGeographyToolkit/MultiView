@@ -1502,7 +1502,9 @@ void setupLoadMatchingImages(std::vector<std::string> const& image_files,
 
   // Allocate a structure having an entry for all images, but load
   // only those for which we need to find matches.
-  std::cout << "Loading images to match." << std::endl;
+  if (!map1_search.empty() && !map2_search.empty()) 
+    std::cout << "Loading images to match." << std::endl;
+  
   for (size_t cid = 0; cid < image_files.size(); cid++) {
     auto & c = cams[cid]; // alias
     // Populate most fields. All we need is the image data and camera type.
@@ -1542,9 +1544,11 @@ void MergeMaps(dense_map::nvmData const& A,
   // Wipe the output
   C = dense_map::nvmData();
 
-  if (FLAGS_fast_merge && num_image_overlaps_at_endpoints > 0)
+  if (FLAGS_fast_merge && num_image_overlaps_at_endpoints > 0) {
     std::cout << "Setting number of image overlaps at end points to zero, "
               << "as fast merging is used.\n";
+    num_image_overlaps_at_endpoints = 0;
+  }
   
   // Merge things that make sense to merge and are easy to do. Later
   // some of these will be shrunk if the input maps have shared data.
@@ -1759,7 +1763,7 @@ void MergeMaps(dense_map::nvmData const& A,
   // LOG(INFO) does not do well with Eigen.
   std::cout << "Affine transform from second map to first map:\n";
   std::cout << "Rotation + scale:\n" << B2A_trans.linear()  << "\n";
-  std::cout << "Translation:\n" << B2A_trans.translation()  << "\n";
+  std::cout << "Translation: " << B2A_trans.translation().transpose() << "\n";
   
   // Bring the B map cameras in the A map coordinate system. Do not modify
   // B.cid_to_cam_t_global, but make a copy of it in B_trans_world_to_cam.
