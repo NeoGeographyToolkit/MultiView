@@ -91,12 +91,12 @@ bool findInterpPose(double desired_time, std::map<double, Eigen::Affine3d> const
 }
 
 // Given a set of poses indexed by time, interpolate or extrapolate
-// (within range of extrap_len) at a set of target timestamps. Go
+// (within range of bracket_len) at a set of target timestamps. Go
 // forward in time both in the input and the target, which makes the
 // complexity linear rather than quadratic.
 void interpOrExtrap(std::map<double, Eigen::Affine3d> const& input_poses,
                     std::map<double, std::string> const& target,
-                    double extrap_len,  bool nearest_neighbor_interp,
+                    double bracket_len,  bool nearest_neighbor_interp,
                     // Outputs
                     std::vector<std::string> & found_images,
                     std::vector<Eigen::Affine3d> & found_poses) {
@@ -119,10 +119,12 @@ void interpOrExtrap(std::map<double, Eigen::Affine3d> const& input_poses,
     double curr_timestamp = curr_it->first;
     std::string const& image_file = curr_it->second;
     
-    if (curr_timestamp < beg_timestamp - extrap_len ||
-        curr_timestamp > end_timestamp + extrap_len) {
-      std::cout << "Warning: Cannot find camera pose for image " << image_file
-               << " as it is too far in time from existing images. Ignoring it.\n";
+    if (curr_timestamp < beg_timestamp - bracket_len ||
+        curr_timestamp > end_timestamp + bracket_len) {
+      std::cout << "Warning: Image " << image_file
+                << " is either earlier or later by --bracket_len amount "
+                << bracket_len << " from the range of timestamps of existing "
+                << "images. Ignoring it.\n";
       continue;
     }
     
@@ -158,6 +160,17 @@ void interpOrExtrap(std::map<double, Eigen::Affine3d> const& input_poses,
         bool is_good = (curr_timestamp <= right_timestamp);
         if (!is_good) 
           continue; // too early
+
+        double min_dist = std::min(std::abs(left_timestamp - curr_timestamp),
+                                   std::abs(right_timestamp - curr_timestamp));
+
+        if (min_dist > bracket_len) {
+          std::cout << "Timestamp of image " << image_file
+                    << " differs by " << min_dist << " seconds from the one "
+                    << "of existing images, which is more than the "
+                    << "--bracket_len value of " << bracket_len << ". Ignoring it.\n";
+          continue;
+        }
 
         if (nearest_neighbor_interp) {
           // Use the nearest neighbor

@@ -43,12 +43,12 @@ bool findInterpPose(double desired_time, std::map<double, Eigen::Affine3d> const
                     Eigen::Affine3d& interp_pose);
 
 // Given a set of poses indexed by time, interpolate or extrapolate
-// (within range of extrap_len) at a set of target timestamps. Go
+// (within range of bracket_len) at a set of target timestamps. Go
 // forward in time both in the input and the target, which makes the
 // complexity linear rather than quadratic.
 void interpOrExtrap(std::map<double, Eigen::Affine3d> const& input_poses,
                     std::map<double, std::string> const& target,
-                    double extrap_len, bool nearest_neighbor,
+                    double bracket_len, bool nearest_neighbor,
                     // Outputs
                     std::vector<std::string> & found_images,
                     std::vector<Eigen::Affine3d> & found_poses);
