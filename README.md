@@ -23,16 +23,19 @@ Pipeline](https://github.com/NeoGeographyToolkit/StereoPipeline/releases)
 (for Linux and OSX).
 
 # Documentation
-
- * [rig calibrator](https://stereopipeline.readthedocs.io/en/latest/tools/rig_calibrator.html)
- * [voxblox mesh creation](https://stereopipeline.readthedocs.io/en/latest/tools/voxblox_mesh.html)
- * [mesh texturing](https://stereopipeline.readthedocs.io/en/latest/tools/texrecon.html)
- * [stereo fusion](https://stereopipeline.readthedocs.io/en/latest/tools/multi_stereo.html)
-
+ * [Example with 2 rigs / 6 sensors](https://stereopipeline.readthedocs.io/en/latest/examples/sfm_iss.html)
+ * [Rig calibration](https://stereopipeline.readthedocs.io/en/latest/tools/rig_calibrator.html)
+ * [Voxblox mesh creation](https://stereopipeline.readthedocs.io/en/latest/tools/voxblox_mesh.html)
+ * [Mesh texturing](https://stereopipeline.readthedocs.io/en/latest/tools/texrecon.html)
+ * [Stereo fusion](https://stereopipeline.readthedocs.io/en/latest/tools/multi_stereo.html)
+ * [Meging SfM solutions](https://stereopipeline.readthedocs.io/en/latest/tools/sfm_merge.html)
+ * [Extraction of SfM submap](https://stereopipeline.readthedocs.io/en/latest/tools/sfm_submap.html)
+ * [ROS bag tools](https://stereopipeline.readthedocs.io/en/latest/tools/ros.html)
+ 
 # Fetching the code and dependencies
 
-It is suggested to fetch the binary versions of this package, per
-above.
+It is suggested to use the shipped binaries, unless desired to modify
+the software.
 
 This package depends on other repositories, which are included as
 submodules, and those may have their own dependencies. Hence, this
@@ -54,8 +57,7 @@ while for OSX:
 
 # Build
 
-Then the software can be built as follows. Set the compilers. This is
-different on Linux and OSX:
+Set the compilers, depending on the system architecture.
 
     isMac=$(uname -s | grep Darwin)
     if [ "$isMac" != "" ]; then
@@ -89,6 +91,6 @@ which may tell ``cmake`` to look elsewhere. Then, run:
 
 The resulting tools will be installed in MultiView/install.
 
-The Theia ``view_reconstruction`` tool can fail to build because of
-its dependence on OpenGL. It can be excluded from building by editing
-the appropriate CMakeLists.txt file.
+The Theia ``view_reconstruction`` tool can fail to build if OpenGL is
+not found. It can be excluded from building by editing the appropriate
+CMakeLists.txt file.

@@ -58,7 +58,7 @@ DEFINE_int32(num_image_overlaps_at_endpoints, 10,
              "second map.");
 
 DEFINE_bool(fix_first_map, false,
-            "If true, after merging the maps and reconciling the camera poses in "
+            "If true, after merging the maps and reconciling the camera poses for the "
             "shared images, overwrite the shared poses with those from the first map.");
 
 DEFINE_bool(no_shift, false,
