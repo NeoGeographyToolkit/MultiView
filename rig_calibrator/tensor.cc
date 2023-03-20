@@ -1346,10 +1346,6 @@ void MergePoses(std::map<int, int> & cid2cid,
       // All cams to merge get equal weight
       std::vector<double> W(num, 1.0/num);
 
-      std::cout << std::endl;
-      std::cout << "--new blob" << std::endl;
-      std::cout << "--Keep this till two very different maps are merged!" << std::endl;
-      
       std::vector<Eigen::Quaternion<double>> Q(num);
       cid_to_cam_t_global2[c].translation() << 0.0, 0.0, 0.0;
       int pos = -1;
@@ -1358,14 +1354,11 @@ void MergePoses(std::map<int, int> & cid2cid,
         int cid = *it;
         Q[pos] = Eigen::Quaternion<double>(cid_to_cam_t_global[cid].linear());
 
-        std::cout << "---input " << cid_to_cam_t_global[cid].matrix() << std::endl;
         cid_to_cam_t_global2[c].translation()
           += W[pos]*cid_to_cam_t_global[cid].translation();
       }
       Eigen::Quaternion<double> S = sparse_mapping::slerp_n(W, Q);
       cid_to_cam_t_global2[c].linear() = S.toRotationMatrix();
-
-      std::cout << "--output " << cid_to_cam_t_global2[c].matrix() << std::endl;
     }
   }
 
@@ -1534,9 +1527,11 @@ void setupLoadMatchingImages(std::vector<std::string> const& image_files,
 // possible to find a triangulated point in A and one in B for that
 // track. Doing RANSAC between them will find the transform from B to
 // A. Then merge the transformed poses, remove the repeated images,
-// and concatenate and remove repetitions from tracks.
-// If the -fast_merge flag is used, find the transform between the
-// maps using shared poses.
+// and concatenate and remove repetitions from tracks.  If the
+// -fast_merge flag is used, find the transform between the maps using
+// shared poses.  It is assumed features in keypoint maps are not
+// shifted relative to the optical center. The caller is responsible
+// to ensure that.
 void MergeMaps(dense_map::nvmData const& A,
                dense_map::nvmData const& B,
                dense_map::RigSet const& R,
@@ -1598,7 +1593,6 @@ void MergeMaps(dense_map::nvmData const& A,
 
       // Go from world of B to world of A
       B2A_vec.push_back( ((A_world_to_cam.inverse()) * B_world_to_cam).matrix() );
-      std::cout << "--intermediate transform\n" << B2A_vec.back().matrix() << std::endl;
     }
 
     // Find the median transform, for robustness
@@ -1615,7 +1609,7 @@ void MergeMaps(dense_map::nvmData const& A,
     int initial_max_reprojection_error = -1; // won't be used
     bool verbose = false;
     bool filter_matches_using_cams = false; // do not have a single camera set yet
-    bool read_nvm_no_shift = false; // not used, part of the api
+    bool read_nvm_no_shift = true; // not used, part of the api
     bool no_nvm_matches = true; // not used, part of the api
     dense_map::nvmData empty_nvm; // not used, part of the api
     C.cid_to_cam_t_global.resize(C.cid_to_filename.size()); // won't be used

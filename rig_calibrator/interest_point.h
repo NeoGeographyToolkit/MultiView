@@ -286,6 +286,12 @@ void saveImagesAndDepthClouds(std::vector<cameraImage> const& cams);
 // Read an image with 3 floats per pixel. OpenCV's imread() cannot do that.
 void readXyzImage(std::string const& filename, cv::Mat & img);
 
+// For nvm data that has the keypoints shifted relative to the optical
+// center, undo this shift when 'undo_shift' is true. So, add the optical center.
+// When 'undo_shift' is false, subtract the optical center.
+void shiftKeypoints(bool undo_shift, dense_map::RigSet const& R,
+                    dense_map::nvmData & nvm); // output
+  
 // Read camera information and images from a list or from an NVM file.
 // Can interpolate/extrapolate poses for data from an extra list.  
 void readListOrNvm(// Inputs

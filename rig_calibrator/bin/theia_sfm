@@ -60,10 +60,12 @@ def processArgs(args, base_dir):
                         help = "Rig configuration file.")
 
     parser.add_argument("--images",  dest="images", default="",
-                        help = "Images, as individual wildcards. Example: 'dir/cam1/*tif dir/cam2/*tif.")
+                        help = "Images, as individual wildcards. Example: " + \
+                        "'dir/cam1/*tif dir/cam2/*tif.")
 
     parser.add_argument("--image_list",  dest="image_list", default="",
-                        help = "Use the images from this list, instead of setting --images.")
+                        help = "Use the images from this list, instead of setting --images. " + \
+                        "Images must be separated by a newline.")
     
     parser.add_argument("--theia_flags", dest="theia_flags",
                         default="", help="The flags to pass to Theia. By default, " + \

@@ -558,6 +558,34 @@ void findCidReorderMap(nvmData const& nvm,
 
   return;
 }
+
+// For nvm data that has the keypoints shifted relative to the optical
+// center, undo this shift when 'undo_shift' is true. So, add the optical center.
+// When 'undo_shift' is false, subtract the optical center.
+void shiftKeypoints(bool undo_shift, dense_map::RigSet const& R,
+                    dense_map::nvmData & nvm) { // output
+
+  for (size_t cid = 0; cid < nvm.cid_to_filename.size(); cid++) {
+    std::string const& image_name = nvm.cid_to_filename[cid]; // alias
+
+    int cam_type = -1;
+    double timestamp = -1.0;
+    dense_map::findCamTypeAndTimestamp(image_name, R.cam_names,   
+                                       cam_type, timestamp); // output
+
+    Eigen::Vector2d keypoint_offset = R.cam_params[cam_type].GetOpticalOffset();
+
+    int num_fid = nvm.cid_to_keypoint_map[cid].cols();
+    for (int fid  = 0; fid < num_fid; fid++) {
+      if (undo_shift) 
+        nvm.cid_to_keypoint_map.at(cid).col(fid) += keypoint_offset;
+      else
+        nvm.cid_to_keypoint_map.at(cid).col(fid) -= keypoint_offset;
+    }
+  }
+
+  return;
+}
   
 // Append to existing keypoints and pid_to_cid_fid the entries from the nvm file.  
 // Need to account for the fact that the nvm file will likely have the images
@@ -842,7 +870,7 @@ void detectMatchFeatures(// Inputs
      nvm = dense_map::nvmData(); // no longer needed
      return;
   }
-  
+
   // Detect features using multiple threads. Too many threads may result
   // in high memory usage.
   std::ostringstream oss;
@@ -963,7 +991,7 @@ void detectMatchFeatures(// Inputs
       match_map[cid_pair].push_back(openMVG::matching::IndMatch(left_fid, right_fid));
     }
   }
-
+  
   if (!no_nvm_matches) {
     // Find how to map each cid from nvm to cid in 'cams'.
     std::map<int, int> nvm_cid_to_cams_cid;

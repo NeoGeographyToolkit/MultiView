@@ -137,28 +137,33 @@ parser = argparse.ArgumentParser(description = __doc__,
 parser.add_argument("--bag", dest = "bag", help = "Input bag."),
 parser.add_argument("--topics", dest = "topics", default = "",  
                     help = "A list of topics, in quotes, having image, compressed " +
-                    "image, and point cloud data.")
+                    "image, or point cloud (depth) data.")
 parser.add_argument("--dirs", dest = "dirs", default = "",
                     help = "A list of directories, in quotes, one for each topic, " +
                     "in which to save the data for that topic.")
 
 parser.add_argument("--timestamp_list", dest = "timestamp_list", default = "",  
-                    help = "Extract data only for these timestamps. By default, "
-                    + "extract all of them. Each line in this file must have a " +
-                    "number of the form <digits>.<digits> or it will be ignored. " +
-                    "So, a filename containing a timestamp will be accepted.")
+                    help = "Extract data for the timestamps in this list. " +
+                    "If not set, extract all data. Each line in " +
+                    "this file must contain a number of the form " +
+                    "<digits>.<digits> (the timestamp), and perhaps other " +
+                    "text as well, or it will be ignored. So, a " +
+                    "filename containing a timestamp as part of " +
+                    "its name will be accepted.")
 
 parser.add_argument("--timestamp_tol", dest = "timestamp_tol", type = float,
                     default = None,  
-                    help = "Extract the data whose timestamps are closest to the " +
-                    "ones in the input list, rather than equal to them, with this " +
+                    help = "If set, extract the data for each of the given topics " +
+                    "whose timestamps are closest to the " +
+                    "ones in the input list, within this " +
                     "tolerance, in seconds. This should be kept small. It is assumed " +
-                    "the bag stores the data in increasing value of timestamp.")
+                    "the bag stores the data for each topic in increasing value of " +
+                    "timestamp.")
 
 parser.add_argument('--approx_timestamp', dest='approx_timestamp', action='store_true',
                     help = "If using --timestamp_tol, change the timestamp of " +
-                    "the data being saved (which becoems part of the filename) "
-                    + "to be the closest timestamp in the input list.")
+                    "the data being saved (which becomes part of the output filename) " +
+                    "to be the closest timestamp in the input list.")
 
 args = parser.parse_args()
 
@@ -290,10 +295,11 @@ with rosbag.Bag(args.bag, "r") as bag:
                 fh.write(vals.tobytes())
 
                 # TODO(oalexan1): This iteration may be slow.
-                cloud_points = list(point_cloud2.read_points(msg,
-                                                             skip_nans = False, # read all
-                                                             field_names = ("x", "y", "z")))
-
+                cloud_points = list(
+                    point_cloud2.read_points(msg,
+                                             skip_nans = False, # read all
+                                             field_names = ("x", "y", "z")))
+                
                 for point in cloud_points:
                     vals = np.array([point[0], point[1], point[2]], dtype=np.float32)
                     fh.write(vals.tobytes())

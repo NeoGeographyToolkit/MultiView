@@ -86,18 +86,23 @@ install(TARGETS fit_rpc RUNTIME DESTINATION ${CMAKE_INSTALL_BINDIR})
 install(TARGETS sfm_submap RUNTIME DESTINATION ${CMAKE_INSTALL_BINDIR})
 install(TARGETS sfm_merge RUNTIME DESTINATION ${CMAKE_INSTALL_BINDIR})
 
-# Install the python tools.
-# TODO(oalexan1): Make a loop here.
-INSTALL(FILES bin/theia_sfm
+# Install the python tools
+set(PY_TOOLS theia_sfm texrecon multi_stereo)
+foreach(tool ${PY_TOOLS})
+INSTALL(FILES bin/${tool}
     PERMISSIONS OWNER_READ OWNER_WRITE OWNER_EXECUTE GROUP_EXECUTE GROUP_READ WORLD_EXECUTE
     DESTINATION bin)
-INSTALL(FILES bin/texrecon
+endforeach()
+# These go to libeexec, as they depend on ROS, and not have ASP build a shell
+# script wrapper around then, which would then result in the system python
+# and ROS not found correctly.
+set(PY_TOOLS list_timestamps extract_bag)
+foreach(tool ${PY_TOOLS})
+INSTALL(FILES bin/${tool}
     PERMISSIONS OWNER_READ OWNER_WRITE OWNER_EXECUTE GROUP_EXECUTE GROUP_READ WORLD_EXECUTE
-    DESTINATION bin)
-INSTALL(FILES bin/multi_stereo
-    PERMISSIONS OWNER_READ OWNER_WRITE OWNER_EXECUTE GROUP_EXECUTE GROUP_READ WORLD_EXECUTE
-    DESTINATION bin)
-
+    DESTINATION libexec)
+endforeach()
+    
 # Install the python tool utils
 INSTALL(FILES bin/rig_utils.py
     PERMISSIONS OWNER_READ OWNER_WRITE GROUP_READ

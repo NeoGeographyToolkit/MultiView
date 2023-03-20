@@ -46,7 +46,8 @@
 DEFINE_string(rig_config, "",
               "Read the configuration of sensors from this file in the format used for "
               "rig_calibrator, even though this tool does not use the rig structure. "
-              "The output of this program can be passed back to rig_calibrator.");
+              "The output of this program can be passed back to rig_calibrator, "
+              "with or without the rig constraint.");
 
 DEFINE_string(output_map, "",
               "Output file containing the merged map.");
@@ -56,6 +57,16 @@ DEFINE_int32(num_image_overlaps_at_endpoints, 10,
              "for matches to this many images at the beginning and end of the "
              "second map.");
 
+DEFINE_bool(fix_first_map, false,
+            "If true, after merging the maps and reconciling the camera poses in "
+            "shared images, overwrite the shared poses with those from the first map.");
+
+DEFINE_bool(no_shift, false,
+            "Assume that in the input .nvm files the features are not shifted "
+            "relative to the optical center. The merged map will then be saved "
+            "the same way. The usual behavior is that .nvm file features are "
+            "shifted, then this tool internally undoes the shift.");
+
 DEFINE_double(close_dist, -1.0,
               "Two triangulated points are considered to be close if no further "
               "than this distance, in meters. Used as inlier threshold when "
@@ -63,10 +74,6 @@ DEFINE_double(close_dist, -1.0,
               "aligned. Auto-computed, taking into account the extent of "
               "a tight subset of the triangulated points and printed on screen if "
               "not set. This is an advanced option. ");
-
-DEFINE_bool(fix_first_map, false,
-            "If true, after merging the maps and reconciling the camera poses in "
-            "shared images, overwrite the shared poses with those from the first map.");
 
 void parameterValidation(int argc, char** argv) {
 
@@ -108,25 +115,34 @@ int main(int argc, char** argv) {
                      in0.pid_to_cid_fid,  
                      in0.pid_to_xyz,  
                      in0.cid_to_cam_t_global);
-
+  if (!FLAGS_no_shift) {
+    bool undo_shift = true; // remove the shift relative to the optical center
+    dense_map::shiftKeypoints(undo_shift, R, in0);
+  }
+  
   // Successively append the maps
   dense_map::nvmData out_map;
   for (int i = 2; i < argc; i++) {
+    
     dense_map::nvmData in1;
     dense_map::ReadNvm(argv[i],
-                     in1.cid_to_keypoint_map,  
-                     in1.cid_to_filename,  
-                     in1.pid_to_cid_fid,  
-                     in1.pid_to_xyz,  
-                     in1.cid_to_cam_t_global);
-
+                       in1.cid_to_keypoint_map,  
+                       in1.cid_to_filename,  
+                       in1.pid_to_cid_fid,  
+                       in1.pid_to_xyz,  
+                       in1.cid_to_cam_t_global);
+    if (!FLAGS_no_shift) {
+      bool undo_shift = true; // remove the shift relative to the optical center
+      dense_map::shiftKeypoints(undo_shift, R, in1);
+    }
+    
     // TODO(oalexan1): Add flag to not have to transform second map, then use
     // this code to merge the theia nvm and produced nvm.
     sparse_mapping::MergeMaps(in0, in1, R,
-                              FLAGS_num_image_overlaps_at_endpoints,  
+                              FLAGS_num_image_overlaps_at_endpoints,
                               FLAGS_close_dist,  
                               out_map);
-
+    
     if (i + 1 < argc) {
       // There are more maps to marge. Let in0 be what we have so far,
       // and will merge onto it at the next iteration
@@ -152,7 +168,13 @@ int main(int argc, char** argv) {
       out_map.cid_to_cam_t_global[out_cid] = in0.cid_to_cam_t_global[in0_cid];
     }
   }
+
+  if (!FLAGS_no_shift) {
+    bool undo_shift = false; // put back the shift
+    dense_map::shiftKeypoints(undo_shift, R, out_map);
+  }
   
+  // TODO(oalexan1): Throw out outliers!
   dense_map::WriteNvm(out_map.cid_to_keypoint_map,
                       out_map.cid_to_filename,
                       out_map.pid_to_cid_fid,
