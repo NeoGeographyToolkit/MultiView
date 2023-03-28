@@ -306,20 +306,6 @@ void readListOrNvm(// Inputs
                    std::vector<std::map<double, dense_map::ImageMessage>> & image_maps,
                    std::vector<std::map<double, dense_map::ImageMessage>> & depth_maps);
   
-// Append to existing keypoints and pid_to_cid_fid the entries from the nvm file.  
-// Need to account for the fact that the nvm file will likely have the images
-// in different order than in the 'cams' vector, and may have more such images,
-// as later we may have used bracketing to thin them out. So, some book-keeping is
-// necessary.
-void appendNvmMatches(// Inputs
-                      std::vector<camera::CameraParameters> const& cam_params,
-                      std::vector<dense_map::cameraImage>   const& cams,
-                      bool read_nvm_no_shift,
-                      nvmData const& nvm,
-                      // Outputs (these get appended to)
-                      std::vector<std::map<int, int>> & pid_to_cid_fid,
-                      std::vector<std::vector<std::pair<float, float>>> & keypoint_vec);
-
 // Break up each track of keypoints of length N into N pairs, (T0,
 // T1), (T1, T2), ,,. (T(N-1), T0). Find their indices in the merged
 // set of keypoints. Repeat this for each input map to merge and

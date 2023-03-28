@@ -587,28 +587,30 @@ void shiftKeypoints(bool undo_shift, dense_map::RigSet const& R,
   return;
 }
   
-// Append to existing keypoints and pid_to_cid_fid the entries from the nvm file.  
-// Need to account for the fact that the nvm file will likely have the images
-// in different order than in the 'cams' vector, and may have more such images,
-// as later we may have used bracketing to thin them out. So, some book-keeping is
-// necessary.
-void appendNvmMatches(// Inputs
-                      std::vector<dense_map::cameraImage>   const& cams,
-                      std::vector<Eigen::Vector2d>          const& keypoint_offsets,
-                      nvmData                               const& nvm,
-                      // Outputs (these get appended to)
-                      std::vector<std::map<int, int>> & pid_to_cid_fid,
-                      std::vector<std::vector<std::pair<float, float>>> & keypoint_vec) {
-  
+// Transform nvm matches. Account for the fact that the nvm file will
+// likely have the images in different order than in the 'cams'
+// vector, and may have more such images, as later we may have used
+// bracketing to thin them out. Also many need to add a keypoint
+// offset.
+void transformNvm(// Inputs
+                  std::vector<dense_map::cameraImage>   const& cams,
+                  std::vector<Eigen::Vector2d>          const& keypoint_offsets,
+                  nvmData                               const& nvm,
+                  // Outputs
+                  std::vector<std::map<int, int>> & pid_to_cid_fid,
+                  std::vector<std::vector<std::pair<float, float>>> & keypoint_vec) {
+
+  // Sanity checks
   if (!keypoint_vec.empty() && keypoint_vec.size() != cams.size()) 
     LOG(FATAL) << "There must be as many sets of keypoints as images, or none at all.\n";
-
-  if (keypoint_vec.empty()) 
-    keypoint_vec.resize(cams.size());
-
   if (nvm.pid_to_cid_fid.size() != nvm.pid_to_xyz.size()) 
     LOG(FATAL) << "There must be as many tracks as triangulated points for them.\n";
   
+  // Wipe the outputs
+  pid_to_cid_fid.clear();
+  keypoint_vec.clear();
+  keypoint_vec.resize(cams.size());
+
   // Find how to map each cid from nvm to cid in 'cams'.
   std::map<int, int> nvm_cid_to_cams_cid;
   dense_map::findCidReorderMap(nvm, cams,
@@ -812,6 +814,58 @@ void addMatchPairs(// Append from these
   } 
   return;
 }
+
+// Given some tracks read from nvm from disk, append the ones from
+// nvm. Some remapping is needed.  given that 'fid' values already
+// exist for the given tracks and that the nvm read from disk
+// may have the images in different order. New keypoints are recorded
+// with the help of keypoint_count and merged_keypoint_map.
+void transformAppendNvm(// Append from these
+                        std::vector<std::map<int, int>>  const& nvm_pid_to_cid_fid,
+                        std::vector<Eigen::Matrix2Xd>    const& nvm_cid_to_keypoint_map,
+                        std::map<int, int>               const& cid2cid,
+                        std::vector<Eigen::Vector2d>     const& keypoint_offsets,
+                        int cid_shift,
+                        size_t num_out_cams,
+                        // Outputs, append to these 
+                        std::vector<int> & keypoint_count,
+                        std::vector<std::map<std::pair<float, float>, int>>
+                        & merged_keypoint_map) {
+  
+  // Sanity checks
+  if (num_out_cams != keypoint_count.size()) 
+    LOG(FATAL) << "Keypoint count was not initialized correctly.\n";
+  if (num_out_cams != merged_keypoint_map.size()) 
+    LOG(FATAL) << "Keypoint map was not initialized correctly.\n";
+  if (num_out_cams != dense_map::maxMapVal(cid2cid) + 1)
+    LOG(FATAL) << "Unexpected value for the size of the output map.\n";
+  if (num_out_cams != keypoint_offsets.size())
+    LOG(FATAL) << "There must exist as many images as optical offsets.\n";
+
+  for (size_t pid = 0; pid < nvm_pid_to_cid_fid.size(); pid++) {
+
+    auto const& cid_fid = nvm_pid_to_cid_fid[pid]; // alias
+    for (auto map_it = cid_fid.begin(); map_it != cid_fid.end(); map_it++) {
+
+      int cid = -1; // will change soon
+      std::pair<float, float> K;
+      updateCidFindKeypoint(map_it, nvm_cid_to_keypoint_map, cid2cid,
+                            keypoint_offsets, cid_shift,  
+                            cid, K);
+      
+      // Insert K in the keypoint map and increment the count,
+      // unless it already exists
+      auto & key_map = merged_keypoint_map.at(cid); // alias, will be changed
+      if (key_map.find(K) != key_map.end()) 
+        continue; // exists already
+      
+      key_map[K] = keypoint_count[cid];
+      keypoint_count[cid]++;
+    }
+  }
+
+  return;
+}
   
 // Helper function to add an ip to the keypoint map if not there.
 // In either case find its fid, which is the keypoint map value.
@@ -864,13 +918,11 @@ void detectMatchFeatures(// Inputs
   }
 
   if (num_overlaps == 0 && !no_nvm_matches) {
-    // If we do not need to create new matches, just append existing ones.
-    // We do not attempt merging the tracks in the nvm file among themselves,
-    // as done further down.
-    dense_map::appendNvmMatches(// Inputs
-                                cams, keypoint_offsets, nvm,  
-                                // Outputs (these get appended to)
-                                pid_to_cid_fid, keypoint_vec);
+    // If we do not need to create new matches, just reorganize the ones read in.
+    dense_map::transformNvm(// Inputs
+                            cams, keypoint_offsets, nvm,  
+                            // Outputs
+                            pid_to_cid_fid, keypoint_vec);
     nvm = dense_map::nvmData(); // no longer needed
     return;
   }
@@ -1039,10 +1091,6 @@ void detectMatchFeatures(// Inputs
                              match_map); // append and update
   }
   
-  // TODO(oalexan1): Append here pairs from input nvm! Use the tensor.cc logic!
-  // Do here addKeypoints(), addMatchPairs(). Modify those to take in
-  // a keypoint_shift function.
-
   // Create keypoint_vec from keypoint_map. That just reorganizes the data
   // to the format expected later.
   keypoint_vec.clear();
@@ -1060,7 +1108,7 @@ void detectMatchFeatures(// Inputs
   // De-allocate data not needed anymore and take up a lot of RAM
   matches.clear(); matches = MATCH_MAP();
   keypoint_map.clear(); keypoint_map.shrink_to_fit();
-  cid_to_keypoint_map.clear(); cid_to_keypoint_map.shrink_to_fit();
+  cid_to_keypoint_map.clear(); cid_to_keypoint_map.shrink_to_fit(); 
 
   // If feature A in image I matches feather B in image J, which
   // matches feature C in image K, then (A, B, C) belong together in
