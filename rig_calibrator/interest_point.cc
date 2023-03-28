@@ -687,6 +687,8 @@ void updateCidFindKeypoint(std::map<int, int>::const_iterator map_it,
 
 // Add keypoints from a map, appending to existing keypoints. Take into
 // account how this map's cid gets transformed to the new map cid.
+// Note that keypoint_offsets are applied before the cid2cid transform gets used!
+// This is very error-prone!
 void addKeypoints(// Append from these
                   std::vector<std::map<int, int>>  const& pid_to_cid_fid,
                   std::vector<Eigen::Matrix2Xd>    const& cid_to_keypoint_map,
@@ -740,6 +742,8 @@ void addKeypoints(// Append from these
 // accumulate the pairs. Later these will be combined into new tracks
 // and any repeated data will be fused. This is very tied to the
 // addKeypoints() function.
+// Note that keypoint_offsets are applied before the cid2cid transform gets used!
+// This is very error-prone!
 void addMatchPairs(// Append from these
                    std::vector<std::map<int, int>>  const& pid_to_cid_fid,
                    std::vector<Eigen::Matrix2Xd>    const& cid_to_keypoint_map,
@@ -858,7 +862,7 @@ void detectMatchFeatures(// Inputs
     else
       keypoint_offsets[cid] = cam_params[cams[cid].camera_type].GetOpticalOffset();
   }
-  
+
   if (num_overlaps == 0 && !no_nvm_matches) {
     // If we do not need to create new matches, just append existing ones.
     // We do not attempt merging the tracks in the nvm file among themselves,
@@ -867,10 +871,10 @@ void detectMatchFeatures(// Inputs
                                 cams, keypoint_offsets, nvm,  
                                 // Outputs (these get appended to)
                                 pid_to_cid_fid, keypoint_vec);
-     nvm = dense_map::nvmData(); // no longer needed
-     return;
+    nvm = dense_map::nvmData(); // no longer needed
+    return;
   }
-
+  
   // Detect features using multiple threads. Too many threads may result
   // in high memory usage.
   std::ostringstream oss;
@@ -996,7 +1000,29 @@ void detectMatchFeatures(// Inputs
     // Find how to map each cid from nvm to cid in 'cams'.
     std::map<int, int> nvm_cid_to_cams_cid;
     dense_map::findCidReorderMap(nvm, cams,
-                               nvm_cid_to_cams_cid); // output
+                                 nvm_cid_to_cams_cid); // output
+
+
+    // Add the optical center shift, if needed.
+    size_t num_images = cams.size();
+    keypoint_offsets.clear();
+    keypoint_offsets.resize(num_images);
+    for (size_t nvm_cid = 0; nvm_cid < num_images; nvm_cid++) {
+
+      // This is a bugfix. The addKeypoints() function below expects
+      // that keypoint_offsets be indexed by nvm_cid and not reordered cid.
+      auto it = nvm_cid_to_cams_cid.find(nvm_cid);
+      if (it == nvm_cid_to_cams_cid.end()) 
+        LOG(FATAL) << "Bookkeeping error when merging tracks.\n";
+      int cams_cid = it->second;
+      
+      if (read_nvm_no_shift)
+        keypoint_offsets[nvm_cid] = Eigen::Vector2d(0, 0);
+      else
+        keypoint_offsets[nvm_cid]
+          = cam_params[cams[cams_cid].camera_type].GetOpticalOffset();
+    }
+    
     // Add the nvm matches as pairs. The track building below may merge tracks
     // that are duplicate in the nvm file and/or show up both in the nvm file
     // and the interest points just found. We compensate for the ip in the

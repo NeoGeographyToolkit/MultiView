@@ -1827,6 +1827,8 @@ void MergeMaps(dense_map::nvmData const& A,
   // Just add keypoints and update the counter as they are found. This is already
   // done that way in detectMatchFeatures().
   // First, collect all keypoints
+  // Note that keypoint_offsets are applied before the cid2cid transform gets used!
+  // This is very error-prone!
   std::vector<Eigen::Vector2d> keypoint_offsets(num_out_cams, Eigen::Vector2d(0, 0));
   std::vector<std::map<std::pair<float, float>, int>> merged_keypoint_map(num_out_cams);
   std::vector<int> keypoint_count(num_out_cams, 0); // how many keypoints so far
@@ -1849,6 +1851,8 @@ void MergeMaps(dense_map::nvmData const& A,
   // Add all pairs of matches, for all pairs of keypoints in all tracks for 
   // all images. Go through the same motions as above, but now we know the
   // fid of each keypoint, stored in merged_keypoint_map.
+  // Note that keypoint_offsets are applied before the cid2cid transform gets used!
+  // This is very error-prone!
   openMVG::matching::PairWiseMatches match_map;
   // Add A
   cid_shift = 0; // A and C start with same images, so no shift

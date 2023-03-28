@@ -326,6 +326,8 @@ void appendNvmMatches(// Inputs
 // accumulate the pairs. Later these will be combined into new tracks
 // and any repeated data will be fused. This is very tied to the
 // addKeypoints() function.
+// Note that keypoint_offsets are applied before the cid2cid transform gets used!
+// This is very error-prone!
 void addMatchPairs(// Append from these
                    std::vector<std::map<int, int>>  const& pid_to_cid_fid,
                    std::vector<Eigen::Matrix2Xd>    const& cid_to_keypoint_map,
@@ -338,6 +340,8 @@ void addMatchPairs(// Append from these
 
 // Add keypoints from a map, appending to existing keypoints. Take into
 // account how this map's cid gets transformed to the new map cid.
+// Note that keypoint_offsets are applied before the cid2cid transform gets used!
+// This is very error-prone!
 void addKeypoints(// Append from these
                   std::vector<std::map<int, int>>  const& pid_to_cid_fid,
                   std::vector<Eigen::Matrix2Xd>    const& cid_to_keypoint_map,
