@@ -830,8 +830,9 @@ void transformAppendNvm(// Append from these
                         // Outputs, append to these 
                         std::vector<int> & keypoint_count,
                         std::vector<std::map<std::pair<float, float>, int>>
-                        & merged_keypoint_map) {
-  
+                        & merged_keypoint_map,
+                        std::vector<std::map<int, int>>& pid_to_cid_fid) {
+
   // Sanity checks
   if (num_out_cams != keypoint_count.size()) 
     LOG(FATAL) << "Keypoint count was not initialized correctly.\n";
@@ -844,6 +845,7 @@ void transformAppendNvm(// Append from these
 
   for (size_t pid = 0; pid < nvm_pid_to_cid_fid.size(); pid++) {
 
+    std::map<int, int> out_cid_fid;
     auto const& cid_fid = nvm_pid_to_cid_fid[pid]; // alias
     for (auto map_it = cid_fid.begin(); map_it != cid_fid.end(); map_it++) {
 
@@ -858,10 +860,16 @@ void transformAppendNvm(// Append from these
       auto & key_map = merged_keypoint_map.at(cid); // alias, will be changed
       if (key_map.find(K) != key_map.end()) 
         continue; // exists already
-      
-      key_map[K] = keypoint_count[cid];
+
+      int fid = keypoint_count[cid];
+      key_map[K] = fid;
+      out_cid_fid[cid] = fid;
       keypoint_count[cid]++;
     }
+
+    // Append the transformed track
+    if (out_cid_fid.size() > 1)
+      pid_to_cid_fid.push_back(out_cid_fid);
   }
 
   return;
@@ -992,7 +1000,8 @@ void detectMatchFeatures(// Inputs
     }
     thread_pool.Join();
   }
-  cid_to_descriptor_map = std::vector<cv::Mat>();  // Wipe, takes memory
+  cid_to_keypoint_map = std::vector<Eigen::Matrix2Xd>(); // wipe, no longer needed
+  cid_to_descriptor_map = std::vector<cv::Mat>();  // Wipe, no longer needed
 
   if (save_matches) {
     if (out_dir.empty())
@@ -1047,7 +1056,17 @@ void detectMatchFeatures(// Inputs
       match_map[cid_pair].push_back(openMVG::matching::IndMatch(left_fid, right_fid));
     }
   }
-  
+  matches.clear(); matches = MATCH_MAP(); // mo longer needed
+
+  // If feature A in image I matches feather B in image J, which
+  // matches feature C in image K, then (A, B, C) belong together in
+  // a track, and will have a single triangulated xyz. Build such a track.
+  buildTracks(match_map, pid_to_cid_fid);
+  match_map = openMVG::matching::PairWiseMatches();  // wipe this, no longer needed
+
+  // Append tracks being read from nvm. This turned out to work better than to try
+  // to merge these tracks with the ones from the pairwise matching above, as the latter
+  // would make many good tracks disappear.
   if (!no_nvm_matches) {
     // Find how to map each cid from nvm to cid in 'cams'.
     std::map<int, int> nvm_cid_to_cams_cid;
@@ -1061,7 +1080,7 @@ void detectMatchFeatures(// Inputs
     keypoint_offsets.resize(num_images);
     for (size_t nvm_cid = 0; nvm_cid < num_images; nvm_cid++) {
 
-      // This is a bugfix. The addKeypoints() function below expects
+      // This is a bugfix. The transformAppendNvm() function below expects
       // that keypoint_offsets be indexed by nvm_cid and not reordered cid.
       auto it = nvm_cid_to_cams_cid.find(nvm_cid);
       if (it == nvm_cid_to_cams_cid.end()) 
@@ -1075,20 +1094,14 @@ void detectMatchFeatures(// Inputs
           = cam_params[cams[cams_cid].camera_type].GetOpticalOffset();
     }
     
-    // Add the nvm matches as pairs. The track building below may merge tracks
-    // that are duplicate in the nvm file and/or show up both in the nvm file
-    // and the interest points just found. We compensate for the ip in the
-    // nvm being in different order and needing an offset. Also note
-    // that we keep on appending to fid_count and keypoint_map.
+    // Add the nvm matches. Unlike the transformNvm() function above,
+    // the keypoints are shared with the newly created matches. Later
+    // that will be used to remove duplicates.
     int cid_shift = 0; // part of the API
-    dense_map::addKeypoints(nvm.pid_to_cid_fid, nvm.cid_to_keypoint_map,  
-                            nvm_cid_to_cams_cid,
-                            keypoint_offsets, cid_shift, num_images,  
-                            fid_count, keypoint_map); // append and update
-    dense_map::addMatchPairs(nvm.pid_to_cid_fid, nvm.cid_to_keypoint_map,  
-                             nvm_cid_to_cams_cid, keypoint_offsets, keypoint_map,
-                             cid_shift, num_images,  
-                             match_map); // append and update
+    dense_map::transformAppendNvm(nvm.pid_to_cid_fid, nvm.cid_to_keypoint_map,  
+                                  nvm_cid_to_cams_cid,
+                                  keypoint_offsets, cid_shift, num_images,
+                                  fid_count, keypoint_map, pid_to_cid_fid); // append
   }
   
   // Create keypoint_vec from keypoint_map. That just reorganizes the data
@@ -1105,18 +1118,10 @@ void detectMatchFeatures(// Inputs
     }
   }
   
-  // De-allocate data not needed anymore and take up a lot of RAM
-  matches.clear(); matches = MATCH_MAP();
-  keypoint_map.clear(); keypoint_map.shrink_to_fit();
-  cid_to_keypoint_map.clear(); cid_to_keypoint_map.shrink_to_fit(); 
-
-  // If feature A in image I matches feather B in image J, which
-  // matches feature C in image K, then (A, B, C) belong together in
-  // a track, and will have a single triangulated xyz. Build such a track.
-  buildTracks(match_map, pid_to_cid_fid);
-  match_map = openMVG::matching::PairWiseMatches();  // wipe this, no longer needed
+  // De-allocate data not needed anymore
   nvm = dense_map::nvmData(); // no longer needed
-
+  keypoint_map.clear(); keypoint_map.shrink_to_fit();
+  
   return;
 }
 
