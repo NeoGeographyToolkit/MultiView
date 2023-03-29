@@ -674,8 +674,8 @@ void updateCidFindKeypoint(std::map<int, int>::const_iterator map_it,
   cid += cid_shift; // only for map B that gets appended, which starts later
 
   // Add the keypoint offset, using the updated cid
-  K.first  += keypoint_offsets[cid][0];
-  K.second += keypoint_offsets[cid][1];
+  K.first  += keypoint_offsets.at(cid)[0];
+  K.second += keypoint_offsets.at(cid)[1];
   
   // cid gets replaced by cid2cid[cid], the value after removing repetitions
   auto it = cid2cid.find(cid);
@@ -709,8 +709,6 @@ void addKeypoints(// Append from these
     LOG(FATAL) << "Keypoint map was not initialized correctly.\n";
   if (num_out_cams != dense_map::maxMapVal(cid2cid) + 1)
     LOG(FATAL) << "Unexpected value for the size of the output map.\n";
-  if (num_out_cams != keypoint_offsets.size())
-    LOG(FATAL) << "There must exist as many images as optical offsets.\n";
 
   for (size_t pid = 0; pid < pid_to_cid_fid.size(); pid++) {
 
@@ -728,7 +726,7 @@ void addKeypoints(// Append from these
       auto & key_map = merged_keypoint_map.at(cid); // alias, will be changed
       if (key_map.find(K) != key_map.end()) 
         continue; // exists already
-      
+
       key_map[K] = keypoint_count[cid];
       keypoint_count[cid]++;
     }
@@ -760,8 +758,6 @@ void addMatchPairs(// Append from these
     LOG(FATAL) << "Keypoint map was not initialized correctly.\n";
   if (num_out_cams != dense_map::maxMapVal(cid2cid) + 1)
     LOG(FATAL) << "Unexpected value for the size of the output map.\n";
-  if (num_out_cams != keypoint_offsets.size())
-    LOG(FATAL) << "There must exist as many images as optical offsets.\n";
   
   for (size_t pid = 0; pid < pid_to_cid_fid.size(); pid++) {
     
@@ -839,8 +835,6 @@ void transformAppendNvm(// Append from these
     LOG(FATAL) << "Keypoint map was not initialized correctly.\n";
   if (num_out_cams != dense_map::maxMapVal(cid2cid) + 1)
     LOG(FATAL) << "Unexpected value for the size of the output map.\n";
-  if (num_out_cams != keypoint_offsets.size())
-    LOG(FATAL) << "There must exist as many images as optical offsets.\n";
 
   for (size_t pid = 0; pid < nvm_pid_to_cid_fid.size(); pid++) {
 

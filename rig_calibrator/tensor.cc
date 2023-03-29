@@ -76,10 +76,6 @@ DEFINE_bool(skip_filtering, false,
             "Skip filtering of outliers after bundle adjustment.");
 DEFINE_bool(skip_adding_new_matches_on_merging, false,
             "When merging maps, do not take advantage of performed matching to add new tracks.");
-DEFINE_bool(fast_merge, false,
-            "When merging maps that have shared images, use their camera poses to "
-            "find the transform from other maps to first map, and skip finding "
-            "additional matches among the images.");
 DEFINE_double(reproj_thresh, 5.0,
               "Filter points with re-projection error higher than this.");
 
@@ -1538,13 +1534,14 @@ void MergeMaps(dense_map::nvmData const& A,
                dense_map::nvmData const& B,
                dense_map::RigSet const& R,
                int num_image_overlaps_at_endpoints,
+               bool fast_merge,
                double close_dist,
                dense_map::nvmData & C) { // output merged map
   
   // Wipe the output
   C = dense_map::nvmData();
 
-  if (FLAGS_fast_merge && num_image_overlaps_at_endpoints > 0) {
+  if (fast_merge && num_image_overlaps_at_endpoints > 0) {
     std::cout << "Setting number of image overlaps at end points to zero, "
               << "as fast merging is used.\n";
     num_image_overlaps_at_endpoints = 0;
@@ -1571,7 +1568,7 @@ void MergeMaps(dense_map::nvmData const& A,
                           image_pairs, cams); // Outputs
   
   Eigen::Affine3d B2A_trans;
-  if (FLAGS_fast_merge) {
+  if (fast_merge) {
 
     // Calc all transforms from B poses to A poses
     std::vector<Eigen::MatrixXd> B2A_vec;
@@ -1828,8 +1825,9 @@ void MergeMaps(dense_map::nvmData const& A,
   // done that way in detectMatchFeatures().
   // First, collect all keypoints
   // Note that keypoint_offsets are applied before the cid2cid transform gets used!
+  // There must be enough for all the input cameras.
   // This is very error-prone!
-  std::vector<Eigen::Vector2d> keypoint_offsets(num_out_cams, Eigen::Vector2d(0, 0));
+  std::vector<Eigen::Vector2d> keypoint_offsets(num_acid + num_bcid, Eigen::Vector2d(0, 0));
   std::vector<std::map<std::pair<float, float>, int>> merged_keypoint_map(num_out_cams);
   std::vector<int> keypoint_count(num_out_cams, 0); // how many keypoints so far
   // Add A

@@ -102,6 +102,7 @@ namespace sparse_mapping {
                  dense_map::nvmData const& B_in,
                  dense_map::RigSet const& R,
                  int num_image_overlaps_at_endpoints,
+                 bool fast_merge,
                  double close_dist,
                  dense_map::nvmData & C_out);
 

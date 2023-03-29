@@ -59,6 +59,11 @@ DEFINE_bool(fix_first_map, false,
             "If true, after merging the maps and reconciling the camera poses for the "
             "shared images, overwrite the shared poses with those from the first map.");
 
+DEFINE_bool(fast_merge, false,
+            "When merging maps that have shared images, use their camera poses to "
+            "find the transform from other maps to first map, and skip finding "
+            "additional matches among the images.");
+
 DEFINE_bool(no_shift, false,
             "Assume that in the input .nvm files the features are not shifted "
             "relative to the optical center. The merged map will then be saved "
@@ -90,7 +95,7 @@ void parameterValidation(int argc, char** argv) {
   if (FLAGS_output_map == "")
     LOG(FATAL) << "No output map was specified.";
   
-  if (FLAGS_num_image_overlaps_at_endpoints <= 0)
+  if (!FLAGS_fast_merge && FLAGS_num_image_overlaps_at_endpoints <= 0)
     LOG(FATAL) << "Must have num_image_overlaps_at_endpoints > 0.";
 
   if (FLAGS_fix_first_map && argc != 3)
@@ -138,6 +143,7 @@ int main(int argc, char** argv) {
     // this code to merge the theia nvm and produced nvm.
     sparse_mapping::MergeMaps(in0, in1, R,
                               FLAGS_num_image_overlaps_at_endpoints,
+                              FLAGS_fast_merge,
                               FLAGS_close_dist,  
                               out_map);
     
