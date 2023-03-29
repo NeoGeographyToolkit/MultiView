@@ -260,8 +260,8 @@ DEFINE_double(parameter_tolerance, 1e-12, "Stop when the optimization variables 
 
 DECLARE_int32(num_threads); // declared externally
 
-DEFINE_int32(num_match_threads, 8, "How many threads to use in feature detection/matching. "
-             "A large number can use a lot of memory.");
+DEFINE_int32(num_match_threads, 8, "How many threads to use in feature "
+             "detection/matching. A large number can use a lot of memory.");
 
 DEFINE_bool(no_rig, false,
             "Do not assumes the cameras are on a rig. Hence the pose of any "

@@ -510,10 +510,10 @@ void buildTracks(openMVG::matching::PairWiseMatches const& match_map,
   openMVG::tracks::STLMAPTracks map_tracks;
   trackBuilder.ExportToSTL(map_tracks);
   trackBuilder = openMVG::tracks::TracksBuilder();   // wipe it
-  
+
   if (map_tracks.empty())
-    LOG(FATAL)
-      << "No tracks left after filtering. Perhaps images are too dis-similar?\n";
+    LOG(FATAL) << "No tracks left after filtering. Perhaps images "
+               << "are too dis-similar?\n";
   
   // Populate the filtered tracks
   size_t num_elems = map_tracks.size();
@@ -573,10 +573,9 @@ void shiftKeypoints(bool undo_shift, dense_map::RigSet const& R,
     dense_map::findCamTypeAndTimestamp(image_name, R.cam_names,   
                                        cam_type, timestamp); // output
 
-    Eigen::Vector2d keypoint_offset = R.cam_params[cam_type].GetOpticalOffset();
-
     int num_fid = nvm.cid_to_keypoint_map[cid].cols();
-    for (int fid  = 0; fid < num_fid; fid++) {
+    Eigen::Vector2d keypoint_offset = R.cam_params[cam_type].GetOpticalOffset();
+    for (int fid = 0; fid < num_fid; fid++) {
       if (undo_shift) 
         nvm.cid_to_keypoint_map.at(cid).col(fid) += keypoint_offset;
       else
@@ -723,7 +722,7 @@ void addKeypoints(// Append from these
       updateCidFindKeypoint(map_it, cid_to_keypoint_map, cid2cid,
                             keypoint_offsets, cid_shift,  
                             cid, K);
-      
+
       // Insert K in the keypoint map and increment the count,
       // unless it already exists
       auto & key_map = merged_keypoint_map.at(cid); // alias, will be changed
@@ -819,7 +818,7 @@ void addMatchPairs(// Append from these
 // nvm. Some remapping is needed.  given that 'fid' values already
 // exist for the given tracks and that the nvm read from disk
 // may have the images in different order. New keypoints are recorded
-// with the help of keypoint_count and merged_keypoint_map.
+// with the help of fid_count and merged_keypoint_map.
 void transformAppendNvm(// Append from these
                         std::vector<std::map<int, int>>  const& nvm_pid_to_cid_fid,
                         std::vector<Eigen::Matrix2Xd>    const& nvm_cid_to_keypoint_map,
@@ -828,13 +827,13 @@ void transformAppendNvm(// Append from these
                         int cid_shift,
                         size_t num_out_cams,
                         // Outputs, append to these 
-                        std::vector<int> & keypoint_count,
+                        std::vector<int> & fid_count,
                         std::vector<std::map<std::pair<float, float>, int>>
                         & merged_keypoint_map,
-                        std::vector<std::map<int, int>>& pid_to_cid_fid) {
+                        std::vector<std::map<int, int>> & pid_to_cid_fid) {
 
   // Sanity checks
-  if (num_out_cams != keypoint_count.size()) 
+  if (num_out_cams != fid_count.size()) 
     LOG(FATAL) << "Keypoint count was not initialized correctly.\n";
   if (num_out_cams != merged_keypoint_map.size()) 
     LOG(FATAL) << "Keypoint map was not initialized correctly.\n";
@@ -854,24 +853,29 @@ void transformAppendNvm(// Append from these
       updateCidFindKeypoint(map_it, nvm_cid_to_keypoint_map, cid2cid,
                             keypoint_offsets, cid_shift,  
                             cid, K);
-      
+
       // Insert K in the keypoint map and increment the count,
-      // unless it already exists
-      auto & key_map = merged_keypoint_map.at(cid); // alias, will be changed
-      if (key_map.find(K) != key_map.end()) 
-        continue; // exists already
-
-      int fid = keypoint_count[cid];
-      key_map[K] = fid;
+      // unless it already exists. In either case get the fid.
+      auto key_it = merged_keypoint_map.at(cid).find(K);
+      int fid = -1;
+      if (key_it != merged_keypoint_map.at(cid).end()) {
+        fid = key_it->second;
+      } else {
+        // fid is the last count, then increment the count
+        fid = fid_count[cid];
+        merged_keypoint_map.at(cid)[K] = fid_count[cid];
+        fid_count[cid]++;
+      }
+      
+      // Create the track
       out_cid_fid[cid] = fid;
-      keypoint_count[cid]++;
     }
-
+    
     // Append the transformed track
     if (out_cid_fid.size() > 1)
       pid_to_cid_fid.push_back(out_cid_fid);
   }
-
+  
   return;
 }
   
@@ -897,6 +901,20 @@ void findFid(std::pair<float, float> const & ip,
   return;
 }
 
+// Remove duplicate tracks. There can still be two tracks with one contained
+// in the other or otherwise having shared elements. 
+void rmDuplicateTracks(std::vector<std::map<int, int>> & pid_to_cid_fid) {
+
+  int num_tracks = pid_to_cid_fid.size();
+  // vector to set, and back
+  std::set<std::map<int, int>> track_set(pid_to_cid_fid.begin(), pid_to_cid_fid.end());
+  pid_to_cid_fid.assign(track_set.begin(), track_set.end());
+
+  int diff = num_tracks - int(pid_to_cid_fid.size());
+  std::cout << "Removed " << diff << " duplicate tracks ("
+            << 100.0 * double(diff)/double(num_tracks) << "%)\n";
+}
+  
 void detectMatchFeatures(// Inputs
                          std::vector<dense_map::cameraImage> const& cams,
                          std::vector<camera::CameraParameters> const& cam_params,
@@ -915,6 +933,8 @@ void detectMatchFeatures(// Inputs
   keypoint_vec.clear();
   pid_to_cid_fid.clear();
 
+  std::cout << "Tracks read from disk: " << nvm.pid_to_cid_fid.size() << std::endl;
+  
   // Add the optical center shift, if needed
   size_t num_images = cams.size();
   std::vector<Eigen::Vector2d> keypoint_offsets(num_images);
@@ -1093,7 +1113,9 @@ void detectMatchFeatures(// Inputs
         keypoint_offsets[nvm_cid]
           = cam_params[cams[cams_cid].camera_type].GetOpticalOffset();
     }
-    
+
+    std::cout << "New tracks: " << pid_to_cid_fid.size() << std::endl;
+
     // Add the nvm matches. Unlike the transformNvm() function above,
     // the keypoints are shared with the newly created matches. Later
     // that will be used to remove duplicates.
@@ -1121,7 +1143,13 @@ void detectMatchFeatures(// Inputs
   // De-allocate data not needed anymore
   nvm = dense_map::nvmData(); // no longer needed
   keypoint_map.clear(); keypoint_map.shrink_to_fit();
-  
+
+  // Remove duplicate tracks. Those can happen since additional tracks being
+  // created in matching can duplicate tracks read from disk. Ideally also
+  // shorter tracks contained in longer tracks should be removed, and tracks
+  // that can be merged without conflicts should be merged.
+  rmDuplicateTracks(pid_to_cid_fid);
+
   return;
 }
 
@@ -1911,6 +1939,7 @@ void flagOutlierByExclusionDist(// Inputs
   pid_cid_fid_inlier.resize(pid_to_cid_fid.size());
 
   // Iterate though interest point matches
+  int num_excl = 0;
   for (size_t pid = 0; pid < pid_to_cid_fid.size(); pid++) {
     for (auto cid_fid = pid_to_cid_fid[pid].begin(); cid_fid != pid_to_cid_fid[pid].end();
          cid_fid++) {
@@ -1922,16 +1951,23 @@ void flagOutlierByExclusionDist(// Inputs
       pid_cid_fid_inlier[pid][cid][fid] = 1;
 
       // Flag as outliers pixels at the image boundary.
-      Eigen::Vector2d dist_pix(keypoint_vec[cid][fid].first, keypoint_vec[cid][fid].second);
+      Eigen::Vector2d dist_pix(keypoint_vec[cid][fid].first,
+                               keypoint_vec[cid][fid].second);
       Eigen::Vector2i dist_size = cam_params[cam_type].GetDistortedSize();
       Eigen::Vector2i dist_crop_size = cam_params[cam_type].GetDistortedCropSize();
       // Note that if dist_crop_size equals dist_size, which is image
       // size, no outliers are flagged
       if (std::abs(dist_pix[0] - dist_size[0] / 2.0) > dist_crop_size[0] / 2.0  ||
-          std::abs(dist_pix[1] - dist_size[1] / 2.0) > dist_crop_size[1] / 2.0) 
+          std::abs(dist_pix[1] - dist_size[1] / 2.0) > dist_crop_size[1] / 2.0) {
         dense_map::setMapValue(pid_cid_fid_inlier, pid, cid, fid, 0);
+        num_excl++;
+      }
     }
   }
+
+  std::cout << "Removed " << num_excl
+            << " features based on distorted_crop_size region.\n";
+  
   return;
 }
 
@@ -2013,7 +2049,7 @@ void flagOutliersByTriAngleAndReprojErr(// Inputs
   std::cout << std::setprecision(4) << "Removed " << num_outliers_by_angle
             << " outlier features with small angle of convergence, out of "
             << num_total_features << " ("
-            << (100.0 * num_outliers_by_angle) / num_total_features << " %)\n";
+            << (100.0 * num_outliers_by_angle) / num_total_features << "%)\n";
 
   int num_outliers_reproj = 0;
   num_total_features = 0;  // reusing this variable
@@ -2045,7 +2081,7 @@ void flagOutliersByTriAngleAndReprojErr(// Inputs
 
   std::cout << std::setprecision(4) << "Removed " << num_outliers_reproj
             << " outlier features using reprojection error, out of " << num_total_features
-            << " (" << (100.0 * num_outliers_reproj) / num_total_features << " %)\n";
+            << " (" << (100.0 * num_outliers_reproj) / num_total_features << "%)\n";
 
   return;
 }

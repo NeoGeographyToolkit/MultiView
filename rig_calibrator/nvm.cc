@@ -121,15 +121,18 @@ void ReadNvm(std::string               const & input_filename,
 
 // Write the inliers in nvm format. The keypoints are shifted relative to the optical
 // center, as written by Theia if shift_keypoints is specified.
-void writeInliersToNvm(std::string                                       const& nvm_file,
-                       bool                                                     shift_keypoints, 
-                       std::vector<camera::CameraParameters>             const& cam_params,
-                       std::vector<dense_map::cameraImage>               const& cams,
-                       std::vector<Eigen::Affine3d>                      const& world_to_cam,
-                       std::vector<std::vector<std::pair<float, float>>> const& keypoint_vec,
-                       std::vector<std::map<int, int>>                   const& pid_to_cid_fid,
-                       std::vector<std::map<int, std::map<int, int>>>    const& pid_cid_fid_inlier,
-                       std::vector<Eigen::Vector3d>                      const& xyz_vec) {
+// We handle properly the case when a (cid, fid) shows up in many tracks
+// (this was a bug).
+void writeInliersToNvm
+(std::string                                       const& nvm_file,
+ bool                                                     shift_keypoints, 
+ std::vector<camera::CameraParameters>             const& cam_params,
+ std::vector<dense_map::cameraImage>               const& cams,
+ std::vector<Eigen::Affine3d>                      const& world_to_cam,
+ std::vector<std::vector<std::pair<float, float>>> const& keypoint_vec,
+ std::vector<std::map<int, int>>                   const& pid_to_cid_fid,
+ std::vector<std::map<int, std::map<int, int>>>    const& pid_cid_fid_inlier,
+ std::vector<Eigen::Vector3d>                      const& xyz_vec) {
   
   // Sanity checks
   if (world_to_cam.size() != cams.size())
@@ -150,13 +153,10 @@ void writeInliersToNvm(std::string                                       const& 
     cid_to_filename[cid] = cams[cid].image_name;
   }
   
-  // Copy over only inliers
+  // Copy over only inliers, and tracks of length >= 2.
   std::vector<std::map<int, int>> nvm_pid_to_cid_fid;
   std::vector<Eigen::Vector3d> nvm_pid_to_xyz;
 
-  // Keep track how many fid we end up having for each cid
-  std::vector<int> fid_count(keypoint_vec.size(), 0);
-  
   for (size_t pid = 0; pid < pid_to_cid_fid.size(); pid++) {
 
     std::map<int, int> nvm_cid_fid;
@@ -169,16 +169,16 @@ void writeInliersToNvm(std::string                                       const& 
       if (!dense_map::getMapValue(pid_cid_fid_inlier, pid, cid, fid))
         continue;
 
-      Eigen::Vector2d dist_ip(keypoint_vec[cid][fid].first, keypoint_vec[cid][fid].second);
+      Eigen::Vector2d dist_ip(keypoint_vec[cid][fid].first,
+                              keypoint_vec[cid][fid].second);
 
       // Offset relative to the optical center
       if (shift_keypoints) 
         dist_ip -= cam_params[cams[cid].camera_type].GetOpticalOffset();
 
       // Add this to the keypoint map for cid in the location at fid_count[cid]
-      cid_to_keypoint_map.at(cid).col(fid_count[cid]) = dist_ip;
-      nvm_cid_fid[cid] = fid_count[cid];
-      fid_count[cid]++;
+      cid_to_keypoint_map.at(cid).col(fid) = dist_ip;
+      nvm_cid_fid[cid] = fid;
     }
 
     // Keep only tracks with at least two points
@@ -188,10 +188,6 @@ void writeInliersToNvm(std::string                                       const& 
     }
   }
   
-  // Shrink to keep only the inlier keypoints we added
-  for (size_t cid = 0; cid < cams.size(); cid++)
-    cid_to_keypoint_map.at(cid).conservativeResize(Eigen::NoChange_t(), fid_count[cid]);
-
   WriteNvm(cid_to_keypoint_map, cid_to_filename, nvm_pid_to_cid_fid,  
            nvm_pid_to_xyz, world_to_cam, nvm_file);
 
