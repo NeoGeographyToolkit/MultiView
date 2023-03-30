@@ -324,6 +324,26 @@ void addMatchPairs(// Append from these
                    int cid_shift, size_t num_out_cams,
                    openMVG::matching::PairWiseMatches & match_map); // append here
 
+// Given some tracks read from nvm from disk, append the ones from
+// nvm. Some remapping is needed.  given that 'fid' values already
+// exist for the given tracks and that the nvm read from disk
+// may have the images in different order. New keypoints are recorded
+// with the help of fid_count and merged_keypoint_map.
+// Note that keypoint_offsets are applied before the cid2cid transform gets used!
+// This is very error-prone!
+void transformAppendNvm(// Append from these
+                        std::vector<std::map<int, int>>  const& nvm_pid_to_cid_fid,
+                        std::vector<Eigen::Matrix2Xd>    const& nvm_cid_to_keypoint_map,
+                        std::map<int, int>               const& cid2cid,
+                        std::vector<Eigen::Vector2d>     const& keypoint_offsets,
+                        int cid_shift,
+                        size_t num_out_cams,
+                        // Outputs, append to these 
+                        std::vector<int> & fid_count,
+                        std::vector<std::map<std::pair<float, float>, int>>
+                        & merged_keypoint_map,
+                        std::vector<std::map<int, int>> & pid_to_cid_fid);
+  
 // Add keypoints from a map, appending to existing keypoints. Take into
 // account how this map's cid gets transformed to the new map cid.
 // Note that keypoint_offsets are applied before the cid2cid transform gets used!
@@ -339,6 +359,10 @@ void addKeypoints(// Append from these
                   std::vector<int> & keypoint_count,
                   std::vector<std::map<std::pair<float, float>, int>>
                   & merged_keypoint_map);
+
+// Remove duplicate tracks. There can still be two tracks with one contained
+// in the other or otherwise having shared elements. 
+void rmDuplicateTracks(std::vector<std::map<int, int>> & pid_to_cid_fid);
   
 void flagOutlierByExclusionDist(// Inputs
                                 std::vector<camera::CameraParameters> const& cam_params,

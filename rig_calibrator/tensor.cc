@@ -1530,6 +1530,8 @@ void setupLoadMatchingImages(std::vector<std::string> const& image_files,
 // shared poses.  It is assumed features in keypoint maps are not
 // shifted relative to the optical center. The caller is responsible
 // to ensure that.
+// TODO(oalexan1): Modularize and move to some new tracks.cc file,
+// together with other logic from interest_point.cc.
 void MergeMaps(dense_map::nvmData const& A,
                dense_map::nvmData const& B,
                dense_map::RigSet const& R,
@@ -1537,7 +1539,7 @@ void MergeMaps(dense_map::nvmData const& A,
                bool fast_merge,
                double close_dist,
                dense_map::nvmData & C) { // output merged map
-  
+
   // Wipe the output
   C = dense_map::nvmData();
 
@@ -1570,6 +1572,7 @@ void MergeMaps(dense_map::nvmData const& A,
   Eigen::Affine3d B2A_trans;
   if (fast_merge) {
 
+    // TODO(oalexan1): Modularize this block
     // Calc all transforms from B poses to A poses
     std::vector<Eigen::MatrixXd> B2A_vec;
 
@@ -1714,7 +1717,7 @@ void MergeMaps(dense_map::nvmData const& A,
 #endif
 
 #if 1
-    // TODO(oalexan1): Make this into a function named findMap2ToMap1Transform().
+    // TODO(oalexan1): Make this into a function named findMapToMapTransform().
     double inlier_threshold = estimateCloseDistance(A_xyz_vec);
     if (close_dist > 0.0) 
       inlier_threshold = close_dist;
@@ -1814,65 +1817,48 @@ void MergeMaps(dense_map::nvmData const& A,
     C.cid_to_filename = cid_to_filename2;
   }
 
+#if 1
   // By now we have 3 maps: A, B, and the new one in C having shared
   // tracks. Each of these has its own images and indices, and C
   // has repeated indices too, and need to merge them all into
-  // a single set of tracks.
-#if 1
+  // a single set of tracks. We will not merge tracks, just remove
+  // duplicates.
   // Factor this block out and call it mergeTracks().
-  // TODO(oalexan1): addKeypoints() can be merged into addMatchPairs().
-  // Just add keypoints and update the counter as they are found. This is already
-  // done that way in detectMatchFeatures().
-  // First, collect all keypoints
   // Note that keypoint_offsets are applied before the cid2cid transform gets used!
   // There must be enough for all the input cameras.
   // This is very error-prone!
   std::vector<Eigen::Vector2d> keypoint_offsets(num_acid + num_bcid, Eigen::Vector2d(0, 0));
   std::vector<std::map<std::pair<float, float>, int>> merged_keypoint_map(num_out_cams);
-  std::vector<int> keypoint_count(num_out_cams, 0); // how many keypoints so far
+  std::vector<int> find_count(num_out_cams, 0); // how many keypoints so far
+  std::vector<std::map<int, int>> merged_pid_to_cid_fid;
   // Add A
   int cid_shift = 0; // A and C start with same images, so no shift
-  dense_map::addKeypoints(A.pid_to_cid_fid, A.cid_to_keypoint_map,  
-                          cid2cid, keypoint_offsets, cid_shift, num_out_cams,  
-                          keypoint_count, merged_keypoint_map); // append and update
+  dense_map::transformAppendNvm(A.pid_to_cid_fid, A.cid_to_keypoint_map,  
+                                cid2cid, keypoint_offsets, cid_shift, num_out_cams,
+                                // Append below
+                                find_count, merged_keypoint_map,
+                                merged_pid_to_cid_fid);
   // Add B
   cid_shift = num_acid; // the B map starts later
-  dense_map::addKeypoints(B.pid_to_cid_fid, B.cid_to_keypoint_map,  
-                          cid2cid, keypoint_offsets, cid_shift, num_out_cams,  
-                          keypoint_count, merged_keypoint_map); // append and update
+  dense_map::transformAppendNvm(B.pid_to_cid_fid, B.cid_to_keypoint_map,  
+                                cid2cid, keypoint_offsets, cid_shift, num_out_cams,  
+                                // Append below
+                                find_count, merged_keypoint_map,
+                                merged_pid_to_cid_fid);
   // Add C
   cid_shift = 0; // no shift, C is consistent with itself
-  dense_map::addKeypoints(C.pid_to_cid_fid, C.cid_to_keypoint_map,  
-                          cid2cid, keypoint_offsets, cid_shift, num_out_cams,  
-                          keypoint_count, merged_keypoint_map); // append and update
+  dense_map::transformAppendNvm(C.pid_to_cid_fid, C.cid_to_keypoint_map,  
+                                cid2cid, keypoint_offsets, cid_shift, num_out_cams,  
+                                // Append below
+                                find_count, merged_keypoint_map,
+                                merged_pid_to_cid_fid);
 
-  // Add all pairs of matches, for all pairs of keypoints in all tracks for 
-  // all images. Go through the same motions as above, but now we know the
-  // fid of each keypoint, stored in merged_keypoint_map.
-  // Note that keypoint_offsets are applied before the cid2cid transform gets used!
-  // This is very error-prone!
-  openMVG::matching::PairWiseMatches match_map;
-  // Add A
-  cid_shift = 0; // A and C start with same images, so no shift
-  dense_map::addMatchPairs(A.pid_to_cid_fid, A.cid_to_keypoint_map,  
-                           cid2cid, keypoint_offsets, merged_keypoint_map,
-                           cid_shift, num_out_cams,  
-                           match_map); // append and update
-  // Add B
-  cid_shift = num_acid; // the B map starts later
-  dense_map::addMatchPairs(B.pid_to_cid_fid, B.cid_to_keypoint_map,  
-                           cid2cid, keypoint_offsets, merged_keypoint_map,
-                           cid_shift, num_out_cams,  
-                           match_map); // append and update
-  // Add C
-  cid_shift = 0; // no shift, C is consistent with itself
-  dense_map::addMatchPairs(C.pid_to_cid_fid, C.cid_to_keypoint_map,  
-                           cid2cid, keypoint_offsets, merged_keypoint_map,
-                           cid_shift, num_out_cams,  
-                           match_map); // append and update
+  // Overwrite C.pid_to_cid_fid after the merge
+  C.pid_to_cid_fid = merged_pid_to_cid_fid;
+  merged_pid_to_cid_fid = std::vector<std::map<int, int>>();
 
-  // Build tracks, overwriting C.pid_to_cid_fid
-  dense_map::buildTracks(match_map, C.pid_to_cid_fid);
+  // Remove duplicate tracks
+  dense_map::rmDuplicateTracks(C.pid_to_cid_fid);
 
   // Update C.cid_to_keypoint_map. This has the same data as
   // merged_keypoint_map but need to reverse key and value and use

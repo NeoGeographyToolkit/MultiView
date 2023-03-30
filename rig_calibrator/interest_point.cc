@@ -690,6 +690,8 @@ void updateCidFindKeypoint(std::map<int, int>::const_iterator map_it,
 // account how this map's cid gets transformed to the new map cid.
 // Note that keypoint_offsets are applied before the cid2cid transform gets used!
 // This is very error-prone!
+// TODO(oalexan1): addKeypoints() can be merged into addMatchPairs().
+// Just add keypoints and update the counter as they are found.
 void addKeypoints(// Append from these
                   std::vector<std::map<int, int>>  const& pid_to_cid_fid,
                   std::vector<Eigen::Matrix2Xd>    const& cid_to_keypoint_map,
@@ -742,7 +744,13 @@ void addKeypoints(// Append from these
 // and any repeated data will be fused. This is very tied to the
 // addKeypoints() function.
 // Note that keypoint_offsets are applied before the cid2cid transform gets used!
-// This is very error-prone!
+// This is very error-prone! // TODO(oalexan1): Remove that logic and the shift
+// as well from this function to make it easier to understand.
+// TODO(oalexan1): Incorporate here the addKeypoints() logic which
+// mirrors a lot of this.
+// TODO(oalexan1): Test at some point using this to rebuild and merge the tracks in
+// a merged map. The concern is that it will result in conflicting tracks
+// which will be removed, so this should be an option.
 void addMatchPairs(// Append from these
                    std::vector<std::map<int, int>>  const& pid_to_cid_fid,
                    std::vector<Eigen::Matrix2Xd>    const& cid_to_keypoint_map,
@@ -815,6 +823,10 @@ void addMatchPairs(// Append from these
 // exist for the given tracks and that the nvm read from disk
 // may have the images in different order. New keypoints are recorded
 // with the help of fid_count and merged_keypoint_map.
+// Note that keypoint_offsets are applied before the cid2cid transform gets used!
+// This is very error-prone!
+// TODO(oalexan1): cid_shift and keypoint_offsets should be applied outside
+// this function as they make it hard to understand.
 void transformAppendNvm(// Append from these
                         std::vector<std::map<int, int>>  const& nvm_pid_to_cid_fid,
                         std::vector<Eigen::Matrix2Xd>    const& nvm_cid_to_keypoint_map,
@@ -833,7 +845,7 @@ void transformAppendNvm(// Append from these
     LOG(FATAL) << "Keypoint count was not initialized correctly.\n";
   if (num_out_cams != merged_keypoint_map.size()) 
     LOG(FATAL) << "Keypoint map was not initialized correctly.\n";
-  if (num_out_cams != dense_map::maxMapVal(cid2cid) + 1)
+  if (num_out_cams < dense_map::maxMapVal(cid2cid) + 1)
     LOG(FATAL) << "Unexpected value for the size of the output map.\n";
 
   for (size_t pid = 0; pid < nvm_pid_to_cid_fid.size(); pid++) {
@@ -848,6 +860,7 @@ void transformAppendNvm(// Append from these
                             keypoint_offsets, cid_shift,  
                             cid, K);
 
+      // TODO(oalexan1): Use below the function findFid(), with testing.
       // Insert K in the keypoint map and increment the count,
       // unless it already exists. In either case get the fid.
       auto key_it = merged_keypoint_map.at(cid).find(K);
