@@ -16,6 +16,9 @@
  * under the License.
  */
 
+// TODO(oalexan1): This file must be broken up into several files, for example,
+// ba.cc, tracks.cc, interest_point.cc, triangulation.cc, sfm_merge.cc, etc.
+
 #include <rig_calibrator/tensor.h>
 #include <rig_calibrator/ransac.h>
 #include <rig_calibrator/reprojection.h>
@@ -1516,6 +1519,38 @@ void setupLoadMatchingImages(std::vector<std::string> const& image_files,
     }
   }
 }
+
+// Compute the transform from the B map to the A map by finding the median
+// transform based on the shared images
+Eigen::Affine3d computeTransformFromBToA(const dense_map::nvmData& A,
+                                         const dense_map::nvmData& B) {
+  // Calc all transforms from B poses to A poses
+  std::vector<Eigen::MatrixXd> B2A_vec;
+  
+  // Put the B poses in a map
+  std::map<std::string, Eigen::Affine3d> B_world_to_cam;
+  for (size_t cid = 0; cid < B.cid_to_cam_t_global.size(); cid++)
+    B_world_to_cam[B.cid_to_filename[cid]] = B.cid_to_cam_t_global[cid];
+  
+  // Find the transform from B to A based on shared poses
+  for (size_t cid = 0; cid < A.cid_to_filename.size(); cid++) {
+    auto b_it = B_world_to_cam.find(A.cid_to_filename[cid]);
+    if (b_it == B_world_to_cam.end()) 
+      continue;
+    
+    auto const& A_world_to_cam = A.cid_to_cam_t_global[cid];
+    auto const& B_world_to_cam = b_it->second;
+    
+    // Go from world of B to world of A
+    B2A_vec.push_back( ((A_world_to_cam.inverse()) * B_world_to_cam).matrix() );
+  }
+
+  // Find the median transform, for robustness
+  Eigen::Affine3d B2A_trans;
+  B2A_trans.matrix() = dense_map::median_matrix(B2A_vec);
+  
+  return B2A_trans;
+}
   
 // Merge two maps. See sfm_merge.cc. Approach: Find matches among
 // several images in map A and several in map B, based on
@@ -1572,36 +1607,14 @@ void MergeMaps(dense_map::nvmData const& A,
   Eigen::Affine3d B2A_trans;
   if (fast_merge) {
 
-    // TODO(oalexan1): Modularize this block
-    // Calc all transforms from B poses to A poses
-    std::vector<Eigen::MatrixXd> B2A_vec;
-
     // This will be empty, as we add no new features, during merging,
     // but ensure it has the right size.
     C.cid_to_keypoint_map.clear();
     C.cid_to_keypoint_map.resize(C.cid_to_filename.size());
 
-    // Put the B poses in a map
-    std::map<std::string, Eigen::Affine3d> B_world_to_cam;
-    for (size_t cid = 0; cid < B.cid_to_cam_t_global.size(); cid++)
-      B_world_to_cam[B.cid_to_filename[cid]] = B.cid_to_cam_t_global[cid];
-
-    // Find the transform from B to A based on shared poses
-    for (size_t cid = 0; cid < A.cid_to_filename.size(); cid++) {
-      auto b_it = B_world_to_cam.find(A.cid_to_filename[cid]);
-      if (b_it == B_world_to_cam.end()) 
-        continue;
-
-      auto const& A_world_to_cam = A.cid_to_cam_t_global[cid];
-      auto const& B_world_to_cam = b_it->second;
-
-      // Go from world of B to world of A
-      B2A_vec.push_back( ((A_world_to_cam.inverse()) * B_world_to_cam).matrix() );
-    }
-
-    // Find the median transform, for robustness
-    B2A_trans.matrix() = dense_map::median_matrix(B2A_vec);
-    
+    // Compute the transform from the B map to the A map by finding the median
+    // transform based on the shared images
+    B2A_trans = computeTransformFromBToA(A, B);
   } else {
     // TODO(oalexan1): Modularize all this block
   
@@ -1808,6 +1821,7 @@ void MergeMaps(dense_map::nvmData const& A,
   // Update C.cid_to_cam_t_global by merging poses for same images in the two maps
   MergePoses(cid2cid, C.cid_to_cam_t_global);
 
+  // TODO(oalexan1): Make this a function too
   // Merge camera names
   {
     std::vector<std::string> cid_to_filename2(num_out_cams);
@@ -1877,6 +1891,7 @@ void MergeMaps(dense_map::nvmData const& A,
 #endif
   
   // Merge the camera vector
+  // TODO(oalexan1): Make this a function
   {
     std::vector<dense_map::cameraImage> merged_cams(num_out_cams);
     for (size_t cid = 0; cid < cams.size(); cid++) 
