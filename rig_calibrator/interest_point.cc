@@ -544,11 +544,15 @@ void findCidReorderMap(nvmData const& nvm,
                          
   // First find how to map each cid from nvm to cid in 'cams'.
   std::map<std::string, int> nvm_image_name_to_cid;
-  for (size_t nvm_cid = 0; nvm_cid < nvm.cid_to_filename.size(); nvm_cid++)
+  for (size_t nvm_cid = 0; nvm_cid < nvm.cid_to_filename.size(); nvm_cid++) {
     nvm_image_name_to_cid[nvm.cid_to_filename[nvm_cid]] = nvm_cid;
+  }
   
+  std::set<std::string> cam_set;
   for (size_t cid = 0; cid < cams.size(); cid++) {
     std::string const& image_name = cams[cid].image_name;
+    cam_set.insert(image_name);
+
     auto nvm_it = nvm_image_name_to_cid.find(image_name);
     if (nvm_it == nvm_image_name_to_cid.end()) 
       LOG(FATAL) << "Could not look up image: " << image_name
@@ -558,6 +562,18 @@ void findCidReorderMap(nvmData const& nvm,
     nvm_cid_to_cams_cid[nvm_cid] = cid;
   }
 
+  // This is an important sanity check. Warn the user when not all images
+  // from the NVM file are among the ones being used.
+  if (cams.size() < nvm.cid_to_filename.size()) {
+    std::cout << "Warning: Some images from the nvm file read from disk are "
+              << "not present among the images being used. Perhaps they "
+              << "were removed during bracketing (if applicable).\n";
+    for (size_t nvm_it = 0; nvm_it < nvm.cid_to_filename.size(); nvm_it++) {
+      if (cam_set.find(nvm.cid_to_filename[nvm_it]) == cam_set.end()) 
+        std::cout << "\t" << nvm.cid_to_filename[nvm_it] << std::endl;
+    }
+  }
+  
   return;
 }
 
@@ -636,7 +652,7 @@ void transformNvm(// Inputs
       // Find cid value in 'cams' based on cid value in the nvm
       auto it = nvm_cid_to_cams_cid.find(nvm_cid);
       if (it == nvm_cid_to_cams_cid.end()) 
-        continue; // this image may not have been within brackets
+        continue; // this image may not have been within brackets and was thrown out
       int cid = it->second;
       
       // Add the optical center shift, if needed
@@ -657,7 +673,7 @@ void transformNvm(// Inputs
 
 // Helper function to find a keypoint for given iterator and update cid in the merged
 // map with repetitions removed (via cid2cid).
-void updateCidFindKeypoint(std::map<int, int>::const_iterator map_it,
+bool updateCidFindKeypoint(std::map<int, int>::const_iterator map_it,
                            std::vector<Eigen::Matrix2Xd> const& cid_to_keypoint_map,
                            std::map<int, int>            const& cid2cid,
                            std::vector<Eigen::Vector2d>  const& keypoint_offsets,
@@ -681,11 +697,12 @@ void updateCidFindKeypoint(std::map<int, int>::const_iterator map_it,
   
   // cid gets replaced by cid2cid[cid], the value after removing repetitions
   auto it = cid2cid.find(cid);
-  if (it == cid2cid.end()) 
-    LOG(FATAL) << "Bookkeeping error when merging tracks.\n";
+  if (it == cid2cid.end())
+    return false; // cid2cid is missing this keypoint, just ignore it
+
   cid = it->second;
 
-  return;
+  return true;
 }
 
 // Add keypoints from a map, appending to existing keypoints. Take into
@@ -721,10 +738,12 @@ void addKeypoints(// Append from these
 
       int cid = -1; // will change soon
       std::pair<float, float> K;
-      updateCidFindKeypoint(map_it, cid_to_keypoint_map, cid2cid,
-                            keypoint_offsets, cid_shift,  
-                            cid, K);
-
+      bool ans = updateCidFindKeypoint(map_it, cid_to_keypoint_map, cid2cid,
+                                       keypoint_offsets, cid_shift,  
+                                       cid, K);
+      if (!ans) 
+        continue;
+      
       // Insert K in the keypoint map and increment the count,
       // unless it already exists
       auto & key_map = merged_keypoint_map.at(cid); // alias, will be changed
@@ -777,9 +796,11 @@ void addMatchPairs(// Append from these
       // First element in the pair
       int cid1 = -1; // will change soon
       std::pair<float, float> K1;
-      updateCidFindKeypoint(map_it1, cid_to_keypoint_map, cid2cid,
-                            keypoint_offsets, cid_shift,    
-                            cid1, K1); // output
+      bool ans = updateCidFindKeypoint(map_it1, cid_to_keypoint_map, cid2cid,
+                                       keypoint_offsets, cid_shift,    
+                                       cid1, K1); // output
+      if (!ans)
+        continue;
       
       // Find the second element in the pair. If at the end of the track,
       // and the track length is more than 2, use the earliest element.
@@ -794,10 +815,12 @@ void addMatchPairs(// Append from these
       }
       int cid2 = -1; // will change soon
       std::pair<float, float> K2;
-      updateCidFindKeypoint(map_it2, cid_to_keypoint_map, cid2cid,
-                            keypoint_offsets, cid_shift,  
-                            cid2, K2); // output
-
+      ans = updateCidFindKeypoint(map_it2, cid_to_keypoint_map, cid2cid,
+                                  keypoint_offsets, cid_shift,  
+                                  cid2, K2); // output
+      if (!ans) 
+        continue;
+      
       // No point in adding a match from an image to itself
       if (cid1 == cid2) 
         continue;
@@ -858,10 +881,12 @@ void transformAppendNvm(// Append from these
 
       int cid = -1; // will change soon
       std::pair<float, float> K;
-      updateCidFindKeypoint(map_it, nvm_cid_to_keypoint_map, cid2cid,
-                            keypoint_offsets, cid_shift,  
-                            cid, K);
-
+      bool ans = updateCidFindKeypoint(map_it, nvm_cid_to_keypoint_map, cid2cid,
+                                       keypoint_offsets, cid_shift,  
+                                       cid, K);
+      if (!ans) 
+        continue; // could not lookup cid in cid2cid
+      
       // TODO(oalexan1): Use below the function findFid(), with testing.
       // Insert K in the keypoint map and increment the count,
       // unless it already exists. In either case get the fid.
@@ -942,20 +967,24 @@ void detectMatchFeatures(// Inputs
   keypoint_vec.clear();
   pid_to_cid_fid.clear();
 
-  std::cout << "Tracks read from disk: " << nvm.pid_to_cid_fid.size() << std::endl;
+  if (!no_nvm_matches) 
+    std::cout << "Tracks read from disk: " << nvm.pid_to_cid_fid.size() << std::endl;
   
-  // Add the optical center shift, if needed
   size_t num_images = cams.size();
-  std::vector<Eigen::Vector2d> keypoint_offsets(num_images);
-  for (size_t cid = 0; cid < num_images; cid++) {
-    if (read_nvm_no_shift)
-      keypoint_offsets[cid] = Eigen::Vector2d(0, 0);
-    else
-      keypoint_offsets[cid] = cam_params[cams[cid].camera_type].GetOpticalOffset();
-  }
-
   if (num_overlaps == 0 && !no_nvm_matches) {
-    // If we do not need to create new matches, just reorganize the ones read in.
+    // Add the optical center shift, if needed
+    // Here keypoint_offsets are for the cid in the order in cams, not in nvm.
+    // TODO(oalexan1): This is confusing and needs to be dealt with at some point.
+    std::vector<Eigen::Vector2d> keypoint_offsets(num_images);
+    for (int cid = 0; cid < num_images; cid++) {
+      if (read_nvm_no_shift)
+        keypoint_offsets[cid] = Eigen::Vector2d(0, 0);
+      else
+        keypoint_offsets[cid] = cam_params[cams[cid].camera_type].GetOpticalOffset();
+    }
+    
+    // If we do not need to create new matches, just reorganize the ones read in
+    // and quit.
     dense_map::transformNvm(// Inputs
                             cams, keypoint_offsets, nvm,  
                             // Outputs
@@ -1091,6 +1120,7 @@ void detectMatchFeatures(// Inputs
   // matches feature C in image K, then (A, B, C) belong together in
   // a track, and will have a single triangulated xyz. Build such a track.
   buildTracks(match_map, pid_to_cid_fid);
+  std::cout << "Tracks obtained after matching: " << pid_to_cid_fid.size() << std::endl;
   match_map = openMVG::matching::PairWiseMatches();  // wipe this, no longer needed
 
   // Append tracks being read from nvm. This turned out to work better than to try
@@ -1104,16 +1134,24 @@ void detectMatchFeatures(// Inputs
 
 
     // Add the optical center shift, if needed.
-    size_t num_images = cams.size();
-    keypoint_offsets.clear();
-    keypoint_offsets.resize(num_images);
-    for (size_t nvm_cid = 0; nvm_cid < num_images; nvm_cid++) {
+    std::vector<Eigen::Vector2d> keypoint_offsets(nvm.cid_to_filename.size());
+    for (size_t nvm_cid = 0; nvm_cid < nvm.cid_to_filename.size(); nvm_cid++) {
 
-      // This is a bugfix. The transformAppendNvm() function below expects
-      // that keypoint_offsets be indexed by nvm_cid and not reordered cid.
+      // This is a bugfix. The transformAppendNvm() function below
+      // expects that keypoint_offsets be indexed by nvm_cid and not
+      // reordered cid in cams.
+      // TODO(oalexan1): This is confusing. The keypoint offsets in transformAppendNvm()
+      // better be applied after nvm_cid_to_cams_cid is applied. Also merge
+      // with function transformNvm() and remove the latter.
       auto it = nvm_cid_to_cams_cid.find(nvm_cid);
-      if (it == nvm_cid_to_cams_cid.end()) 
-        LOG(FATAL) << "Bookkeeping error when merging tracks.\n";
+      if (it == nvm_cid_to_cams_cid.end()) {
+        // This nvm_cid does not exist in cams. A warning about that
+        // was given in findCidReorderMap(). Give a value to this
+        // but it won't be used.
+        keypoint_offsets[nvm_cid] = Eigen::Vector2d(0, 0);
+        continue;
+      }
+      
       int cams_cid = it->second;
       
       if (read_nvm_no_shift)
@@ -1123,7 +1161,6 @@ void detectMatchFeatures(// Inputs
           = cam_params[cams[cams_cid].camera_type].GetOpticalOffset();
     }
 
-    std::cout << "New tracks: " << pid_to_cid_fid.size() << std::endl;
 
     // Add the nvm matches. Unlike the transformNvm() function above,
     // the keypoints are shared with the newly created matches. Later

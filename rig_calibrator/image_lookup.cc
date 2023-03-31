@@ -66,11 +66,36 @@ void findCamTypeAndTimestamp(std::string const& image_file,
   std::string cam_name = camName(image_file);
     
   std::string basename = fs::path(image_file).filename().string();
-  if (basename.empty() || basename[0] < '0' || basename[0] > '9')
-    LOG(FATAL) << "Image name (without directory) must start with digits. Got: "
-               << basename << "\n";
-  timestamp = atof(basename.c_str());
 
+  // Remove anything which is not a digit out of the basename, and keep only the first
+  // period.
+  bool have_dot = false;
+  std::string timestamp_str;
+  for (size_t it = 0; it < basename.size(); it++) {
+
+    if (basename[it] == '.') {
+      if (have_dot) 
+        continue;
+      have_dot = true;
+      timestamp_str += basename[it];
+      continue;
+    }
+
+    if (basename[it] < '0' || basename[it] > '9') 
+      continue;
+    
+    timestamp_str += basename[it];
+  }
+
+  if (timestamp_str.empty())
+    LOG(FATAL) << "Image name (without directory) must have digits as part of "
+               << "their name, which will be converted to a timestamp. Got: "
+               << basename << "\n";
+
+  // TODO(oalexan1): There is a chance the timestamp will become non-unique.
+  // Extracting the timestamp from image name may not be the best idea.
+  timestamp = atof(timestamp_str.c_str());
+  
   // Infer cam type from cam name
   bool success = false;
   for (size_t cam_it = 0; cam_it < cam_names.size(); cam_it++) {

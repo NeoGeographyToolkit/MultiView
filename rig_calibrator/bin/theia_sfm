@@ -133,7 +133,8 @@ def genTheiaInputs(rig_config, args, image_array):
         extensions.add(ext)
     
     if len(extensions) > 1:
-        raise Exception("Input images have a mix of filename extensions. Use just one.")
+        raise Exception("Input images have a mix of filename extensions. Use just one. " + \
+                        "Found: ", extensions)
     if len(extensions) == 0:
         raise Exception("The input image set is invalid.")
     extension = list(extensions)[0]
