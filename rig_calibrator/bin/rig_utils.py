@@ -114,7 +114,7 @@ def readConfigVals(handle, tag, num_vals):
         # Quietly gloss over ref_sensor_name, as we don't need it.
         if len(vals) > 0 and vals[0] == 'ref_sensor_name:':
             continue
-        
+
         if len(vals) == 0 or vals[0] != tag:
             raise Exception("Failed to read entry for: " + tag)
 
@@ -156,6 +156,7 @@ def parseRigConfig(rig_config_file):
                 raise Exception("Expecting 0, 1, 4, or 5 distortion coefficients")
 
             (vals, handle) = readConfigVals(handle, "distortion_type:", 1)
+            
             if len(camera["distortion_coeffs"]) == 0 and vals[0] != "no_distortion":
                 raise Exception("When there are no distortion coefficients, distortion type " + \
                                 "must be: no_distortion")
@@ -188,6 +189,9 @@ def parseRigConfig(rig_config_file):
 
             cameras.append(camera)
 
+    if len(cameras) == 0:
+        raise Exception("No sensors found in " + rig_config_file)
+    
     return cameras
 
 def imageExtension(images):
