@@ -17,6 +17,8 @@
  * under the License.
  */
 
+// TODO(oalexan1): Move track logic to tracks.cc.
+
 #include <rig_calibrator/basic_algs.h>
 #include <rig_calibrator/interest_point.h>
 #include <rig_calibrator/camera_image.h>
