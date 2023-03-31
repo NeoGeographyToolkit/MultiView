@@ -35,9 +35,6 @@ def sanityChecks(args):
     if args.rig_config == "":
         raise Exception("The path to the rig configuration file was not specified.")
 
-    if int(args.images == "") + int(args.image_list == "") != 1:
-        raise Exception("Must set the input images using --images or --image_list but not both.")
-
     if args.theia_flags == "":
         raise Exception("The path to the Theia flags was not specified.")
 
@@ -64,8 +61,8 @@ def processArgs(args, base_dir):
                         "'dir/cam1/*tif dir/cam2/*tif.")
 
     parser.add_argument("--image_list",  dest="image_list", default="",
-                        help = "Use the images from this list, instead of setting --images. " + \
-                        "Images must be separated by a newline.")
+                        help = "Use the images from this list, instead of setting " + \
+                        "--images. Images must be separated by a newline.")
     
     parser.add_argument("--theia_flags", dest="theia_flags",
                         default="", help="The flags to pass to Theia. By default, " + \
@@ -75,14 +72,9 @@ def processArgs(args, base_dir):
     parser.add_argument("--out_dir", dest="out_dir", default="",
                         help="The output directory (only the 'cameras.nvm' " + \
                         "file in it is needed afterwards).")
-    
-    args = parser.parse_args()
 
-    # Remove continuation lines in the string (those are convenient
-    # for readability in docs)
-    args.images = args.images.replace('\\', '')
-    args.images = args.images.replace('\n', ' ')
-    
+    args, other = parser.parse_known_args()
+
     # Set the Theia path if missing
     if args.theia_flags == "":
         args.theia_flags = base_dir + "/share/theia_flags.txt"
@@ -92,22 +84,20 @@ def processArgs(args, base_dir):
         parser.print_help()
         sys.exit(1)
 
-    sanityChecks(args)
+    # Remove cont,inuation lines in the string (those are convenient
+    # for readability in docs)
+    args.images = args.images.replace('\\', '')
+    args.images = args.images.replace('\n', ' ')
+
+    if int(args.images != "") + int(args.image_list != "") + int(len(other) > 0) != 1:
+        raise Exception("Must set the input images using --images or " + \
+                        "--image_list, or individual images, but only mixing these.")
     
-    return args
-
-def genTheiaInputs(rig_config, args):
-    '''
-    Create the inputs as Theia wants them.
-    '''
-
-    # Initialize the datastructure
-    images = {}
-    extensions = set()
-
-    # Expand all wildcards
+    # The inputs can be given as wildcards, file having an image list,
+    # or individually specified images
     image_array = []
     for image_wildcard in args.images.split():
+        # Expand all wildcards
         image_array += glob.glob(image_wildcard)
     # Use the image list, if provided
     if args.image_list != "":
@@ -115,6 +105,22 @@ def genTheiaInputs(rig_config, args):
             image_array = f.readlines()
         for it in range(len(image_array)):
             image_array[it] = image_array[it].rstrip() # rm newlines
+    # Use images specified on the command line with no quotes
+    if len(other) > 0:
+        image_array = other[:]
+        
+    sanityChecks(args)
+    
+    return (args, image_array)
+
+def genTheiaInputs(rig_config, args, image_array):
+    '''
+    Create the inputs as Theia wants them.
+    '''
+
+    # Initialize the datastructure
+    images = {}
+    extensions = set()
 
     # Parse the images for all cameras
     image_array = sorted(image_array)
@@ -283,12 +289,12 @@ if __name__ == "__main__":
         else:
             os.environ[key] = base_dir + '/lib' + ':' + os.environ[key]
     
-    args = processArgs(sys.argv, base_dir)
+    (args, image_array) = processArgs(sys.argv, base_dir)
 
     rig_config = rig_utils.parseRigConfig(args.rig_config)
 
     (calib_file, sym_image_dir, images, sym_images, image_extension) \
-                 = genTheiaInputs(rig_config, args)
+                 = genTheiaInputs(rig_config, args, image_array)
 
     reconstruction_file = args.out_dir + "/reconstruction"
     matching_dir = args.out_dir + "/matches"
