@@ -321,28 +321,25 @@ if __name__ == "__main__":
     sanity_checks(args)
     rig_utils.mkdir_p(args.out_dir)
 
+    sensors = args.rig_sensor.split()
+    sensor_dir = "_".join(sensors) # for when there are multiple sensors
+    tool_base_dir = os.path.dirname(os.path.dirname(os.path.abspath(sys.argv[0])))
+
+    # Read the images and camera poses
+    # TODO(oalexan1): Make the block below a function
     all_distorted_images = []
     all_undistorted_images = []
     all_cams = []
     all_cam_to_world_files = []
-
-    sensors = args.rig_sensor.split()
-    sensor_dir = "_".join(sensors) # for when there are multiple sensors
-
-    tool_base_dir = os.path.dirname(os.path.dirname(os.path.abspath(sys.argv[0])))
-
-    # Read the images and camera poses
-    subset_list = "" # part of the api, not used
-
     for sensor in sensors:
     
+        subset_list = "" # part of the api, not used
         (distorted_images, world_to_cam) \
                            = rig_utils.parse_cameras(args.camera_poses,
                                                      subset_list,
                                                      sensor,
                                                      args.first_image_index,
                                                      args.last_image_index)
-        
         # Write undistorted images
         extension = '.tif' # use lossless .tif extension for undistorted images
         extra_opts = []
@@ -352,14 +349,12 @@ if __name__ == "__main__":
                                                               distorted_images,
                                                               tool_base_dir,
                                                               extension, extra_opts, suff)
-        
         # Write camera poses in the format of ASP and voxblox
         (undistorted_images, cameras, cam_to_world_files) \
                              = write_asp_and_voxblox_cameras(undist_intrinsics_file,
                                                              distorted_images,
                                                              undistorted_images,
                                                              world_to_cam)
-
         all_distorted_images += distorted_images
         all_undistorted_images += undistorted_images
         all_cams += cameras
@@ -370,11 +365,7 @@ if __name__ == "__main__":
     # to skip these steps, must go through the motions to produce
     # some lists of files neded for mesh generation later.
     pcd_files = []
-    print("--dist images ", all_distorted_images)
-    print("-undist images ", all_undistorted_images)
-    print("-cams ", all_cams)
     pairs = gen_pairs(args, all_distorted_images)
-    
     for pair in pairs:
         L = pair[0]
         R = pair[1]
