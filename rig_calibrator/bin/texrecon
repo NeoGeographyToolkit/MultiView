@@ -205,7 +205,7 @@ if __name__ == "__main__":
     sensors = args.rig_sensor.split()
     for sensor in sensors:
         (images, world_to_cam) \
-                 = rig_utils.parse_images_and_camera_poses(args.camera_poses, args.subset,
+                 = rig_utils.parse_cameras(args.camera_poses, args.subset,
                                                            sensor)
         
         extension = '.jpg' # extension of undistorted images, as preferred by texrecon

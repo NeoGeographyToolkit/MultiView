@@ -7,6 +7,27 @@ if sys.version_info < (3, 0, 0):
     print('\nERROR: Must use Python 3.0 or greater.')
     sys.exit(1)
 
+def create_index_dict(lst):
+    """
+    Create a dictionary mapping each element in the input list to its index in the list.
+    """
+    index_dict = {}
+    for index, value in enumerate(lst):
+        index_dict[value] = index
+
+    return index_dict
+    
+def read_lists(file1, file2):
+    """
+    Given two input lists, returns a list of tuples where each tuple contains one element
+    from the first list and one element from the second list.
+    """
+    with open(file1, 'r') as f1, open(file2, 'r') as f2:
+        list1 = [line.strip() for line in f1]
+        list2 = [line.strip() for line in f2]
+    return [(a, b) for a in list1 for b in list2]
+
+
 def mkdir_p(path):
     if path == "":
         return  # this can happen when path is os.path.dirname("myfile.txt")
@@ -38,6 +59,20 @@ def which(program):
 
     return None
 
+def find_tool(tool_base_dir, tool):
+    """
+    Find a given program either in the given dir, or based on PATH.
+    """
+    tool_path = tool_base_dir + "/bin/" + tool
+    if not os.path.exists(tool_path):
+        print("Could not find " + tool_path)
+        tool_path = which(tool)
+        if tool_path is None:
+            raise Exception("Could not find " + tool + " in the PATH either.")
+        else:
+            print("Using: " + tool_path)
+    return tool_path
+        
 def add_missing_quotes(vals):
     """
     Given a list of strings, protect each one having spaces with quotes, if not present.
@@ -209,7 +244,7 @@ def imageExtension(images):
         raise Exception("The input image set is invalid.")
     return list(extensions)[0]
 
-def parse_images_and_camera_poses(image_list, subset_list, rig_sensor,
+def parse_cameras(image_list, subset_list, rig_sensor,
                                   # These indices will start from 1, if specified
                                   first_image_index = None, last_image_index = None):
 

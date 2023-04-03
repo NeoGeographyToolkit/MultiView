@@ -221,7 +221,8 @@ void matchFeaturesWithCams(std::mutex* match_mutex, int left_image_index, int ri
                            Eigen::Affine3d const& left_world_to_cam,
                            Eigen::Affine3d const& right_world_to_cam,
                            double reprojection_error,
-                           cv::Mat const& left_descriptors, cv::Mat const& right_descriptors,
+                           cv::Mat const& left_descriptors,
+                           cv::Mat const& right_descriptors,
                            Eigen::Matrix2Xd const& left_keypoints,
                            Eigen::Matrix2Xd const& right_keypoints,
                            bool verbose,
@@ -256,7 +257,8 @@ void matchFeaturesWithCams(std::mutex* match_mutex, int left_image_index, int ri
         (dist_right_ip, &undist_right_ip);
 
       Eigen::Vector3d X =
-        dense_map::TriangulatePair(left_params.GetFocalLength(), right_params.GetFocalLength(),
+        dense_map::TriangulatePair(left_params.GetFocalLength(),
+                                   right_params.GetFocalLength(),
                                    left_world_to_cam, right_world_to_cam,
                                    undist_left_ip, undist_right_ip);
 
@@ -609,6 +611,7 @@ void shiftKeypoints(bool undo_shift, dense_map::RigSet const& R,
 // vector, and may have more such images, as later we may have used
 // bracketing to thin them out. Also many need to add a keypoint
 // offset.
+// TODO(oalexan1): Wipe this function. Use transformAppendNvm().
 void transformNvm(// Inputs
                   std::vector<dense_map::cameraImage>   const& cams,
                   std::vector<Eigen::Vector2d>          const& keypoint_offsets,
@@ -992,6 +995,10 @@ void detectMatchFeatures(// Inputs
     nvm = dense_map::nvmData(); // no longer needed
     return;
   }
+
+#if 1
+  // TODO(oalexan1): This should be a function called detectMatchFeatures().
+  // The parent function should be detectMatchFeaturesAppendNvm().
   
   // Detect features using multiple threads. Too many threads may result
   // in high memory usage.
@@ -1123,6 +1130,8 @@ void detectMatchFeatures(// Inputs
   std::cout << "Tracks obtained after matching: " << pid_to_cid_fid.size() << std::endl;
   match_map = openMVG::matching::PairWiseMatches();  // wipe this, no longer needed
 
+#endif // this should be end of function detectMatchFeatures()
+
   // Append tracks being read from nvm. This turned out to work better than to try
   // to merge these tracks with the ones from the pairwise matching above, as the latter
   // would make many good tracks disappear.
@@ -1174,6 +1183,8 @@ void detectMatchFeatures(// Inputs
   
   // Create keypoint_vec from keypoint_map. That just reorganizes the data
   // to the format expected later.
+  // TODO(oalexan1): This must be a function called keypointMapToVec().
+  // TODO(oalexan1): Use std::vector<Eigen::Matrix2Xd> as in nvm instead.
   keypoint_vec.clear();
   keypoint_vec.resize(num_images);
   for (size_t cid = 0; cid < num_images; cid++) {
