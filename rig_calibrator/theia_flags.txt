@@ -64,7 +64,7 @@
 --reconstruction_estimator=GLOBAL
 --min_track_length=2
 --max_track_length=50
---reconstruct_largest_connected_component=false
+--reconstruct_largest_connected_component=true
 
 # Set to true if all views were captured with the same camera. If true, then a
 # single set of camera intrinsic parameters will be used for all views in the
@@ -119,7 +119,7 @@
 # Set this parameter to a value other than NONE if you want to utilize a robust
 # cost function during bundle adjustment. This can increase robustness to outliers
 # during the optimization.
---bundle_adjustment_robust_loss_function=HUBER
+--bundle_adjustment_robust_loss_function=CAUCHY
 
 # Set this value to the determine the reprojection error in pixels at which
 # robustness begins (if a robust cost function is being used).
@@ -133,7 +133,7 @@
 
 # After BA, remove any points that have a reprojection error greater
 # than this.
---max_reprojection_error_pixels=500.0
+--max_reprojection_error_pixels=50.0
 
 ############### Track Subsampling Options ###############
 
@@ -160,8 +160,8 @@
 --min_num_optimized_tracks_per_view=100
 
 ############### Triangulation Options ###############
---min_triangulation_angle_degrees=0.3
---triangulation_reprojection_error_pixels=500.0
+--min_triangulation_angle_degrees=0.2
+--triangulation_reprojection_error_pixels=50.0
 --bundle_adjust_tracks=true
 
 ############### Logging Options ###############
