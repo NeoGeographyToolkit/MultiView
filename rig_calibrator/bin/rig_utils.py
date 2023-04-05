@@ -16,15 +16,27 @@ def create_index_dict(lst):
         index_dict[value] = index
 
     return index_dict
-    
+
+def read_list(file):
+    '''
+    Read entries from a file. Ignore empty lines.
+    '''
+    vals = []
+    with open(file, 'r') as f:
+        for line in f.readlines():
+            line = line.rstrip()
+            if line == "":
+                continue
+            vals.append(line)
+    return vals
+
 def read_lists(file1, file2):
     """
     Given two input lists, returns a list of tuples where each tuple contains one element
     from the first list and one element from the second list.
     """
-    with open(file1, 'r') as f1, open(file2, 'r') as f2:
-        list1 = [line.strip() for line in f1]
-        list2 = [line.strip() for line in f2]
+    list1 = read_list(file1)
+    list2 = read_list(file2)
     return [(a, b) for a in list1 for b in list2]
 
 
@@ -245,23 +257,18 @@ def imageExtension(images):
     return list(extensions)[0]
 
 def parse_cameras(image_list, subset_list, rig_sensor,
-                                  # These indices will start from 1, if specified
-                                  first_image_index = None, last_image_index = None):
+                  # These indices will start from 1, if specified
+                  first_image_index = None, last_image_index = None):
 
     # If desired to process only a subset
     subset = set()
     if subset_list != "":
-        with open(subset_list, 'r') as f:
-            lines = f.readlines()
+            lines = read_list(subset_list)
             for line in lines:
-                line = line.rstrip()
-                if line == "":
-                    continue
                 subset.add(line)
 
     # Read the limage file
-    with open(image_list, 'r') as f:
-        lines = f.readlines()
+    lines = read_list(image_list)
 
     images = []
     world_to_cam = []
@@ -285,7 +292,8 @@ def parse_cameras(image_list, subset_list, rig_sensor,
         if (len(subset) > 0) and (image not in subset):
             # Use only the subset
             continue
-        
+
+        # Use only desired sensor
         curr_sensor = os.path.basename(os.path.dirname(image))
         if curr_sensor != rig_sensor:
             continue
@@ -315,7 +323,8 @@ def parse_cameras(image_list, subset_list, rig_sensor,
         
     return (images, world_to_cam)
 
-def undistort_images(args, rig_sensor, images, tools_base_dir, extension, extra_opts, suff):
+def undistort_images(args, rig_sensor, images, tools_base_dir, extension,
+                     extra_opts, suff):
 
     # Form the list of distorted images
     dist_image_list = args.out_dir + "/" + rig_sensor + "/distorted_index.txt"

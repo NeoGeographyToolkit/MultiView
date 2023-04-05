@@ -43,9 +43,9 @@ def process_args(args):
                         help = "Rig configuration file.")
     
     parser.add_argument("--rig_sensor", dest="rig_sensor", default="",
-                        help="Which rig sensors to use. Must be among the " + \
-                        "sensors specified via --rig_config. To use images from " +
-                        "several sensors, pass in a quoted list of them, " + \
+                        help="Which rig sensors to use. Must be among the "       + \
+                        "sensors specified via --rig_config. To use images from " + \
+                        "several sensors, pass in a quoted list of them, "        + \
                         "separated by a space.")
 
     parser.add_argument("--camera_poses", dest="camera_poses",
@@ -172,6 +172,9 @@ def write_asp_and_voxblox_cameras(undist_intrinsics_file, distorted_images,
                                   undistorted_images,
                                   world_to_cam):
 
+    if len(undistorted_images) != len(world_to_cam):
+        raise Exception("Expecting as many undistorted images as cameras.")
+    
     (widx, widy, f, cx, cy) = rig_utils.read_intrinsics(undist_intrinsics_file)
     undist_image_dict = {}
     for image in undistorted_images:
@@ -208,8 +211,8 @@ def write_asp_and_voxblox_cameras(undist_intrinsics_file, distorted_images,
         
         count = count + 1
         
-    print("Found " + str(len(undistorted_images)) + " undistorted images.")
-    print("Wrote: " + str(count) + " cameras.")
+    print("Found " + str(len(undistorted_images)) + " undistorted image(s).")
+    print("Wrote: " + str(count) + " camera(s).")
 
     return (undistorted_images_out, cameras, cam_to_world_files)
 
@@ -332,14 +335,25 @@ if __name__ == "__main__":
     all_cams = []
     all_cam_to_world_files = []
     for sensor in sensors:
-    
-        subset_list = "" # part of the api, not used
-        (distorted_images, world_to_cam) \
-                           = rig_utils.parse_cameras(args.camera_poses,
-                                                     subset_list,
-                                                     sensor,
-                                                     args.first_image_index,
-                                                     args.last_image_index)
+
+        # For the case when only a subset of images is used, and those
+        # are set via lists
+        # TODO(oalexan1): Make this a function called parse_all_cameras()
+        lists = [""]
+        if args.left != "" and args.right != "":
+            lists = [args.left, args.right]
+        distorted_images = []
+        world_to_cam = []
+        for subset_list in lists:
+            (local_distorted_images, local_world_to_cam) \
+                                 = rig_utils.parse_cameras(args.camera_poses,
+                                                           subset_list,
+                                                           sensor,
+                                                           args.first_image_index,
+                                                           args.last_image_index)
+            distorted_images += local_distorted_images
+            world_to_cam += local_world_to_cam
+            
         # Write undistorted images
         extension = '.tif' # use lossless .tif extension for undistorted images
         extra_opts = []

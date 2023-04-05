@@ -314,6 +314,8 @@ void lookupImagesAndBrackets(// Inputs
     image_start_positions[cam_it] = image_data[cam_it].begin();
     depth_start_positions[cam_it] = depth_data[cam_it].begin();
   }
+
+  double big = std::numeric_limits<double>::max();
   
   // Populate the data for each camera image
   for (int beg_ref_it = 0; beg_ref_it < num_ref_cams; beg_ref_it++) {
@@ -345,7 +347,7 @@ void lookupImagesAndBrackets(// Inputs
           dense_map::lookupImage(cam.timestamp, image_data[cam_type],
                                  // Outputs
                                  cam.image, cam.image_name, 
-                                 image_start_positions[cam_type],  // this will move forward
+                                 image_start_positions[cam_type], // this will move forward
                                  found_time);
         
         if (!have_lookup)
@@ -368,7 +370,7 @@ void lookupImagesAndBrackets(// Inputs
         double beg_timestamp     = ref_timestamps[beg_ref_it] + ref_to_cam_offset;
         double end_timestamp     = ref_timestamps[end_ref_it] + ref_to_cam_offset;
         if (end_timestamp == beg_timestamp && last_timestamp)  // necessary adjustment
-          end_timestamp = std::nextafter(end_timestamp, end_timestamp + 1.0); 
+          end_timestamp = std::nextafter(end_timestamp, big); 
 
         if (end_timestamp <= beg_timestamp)
           LOG(FATAL) << "Ref timestamps must be in strictly increasing order.\n";
@@ -402,8 +404,10 @@ void lookupImagesAndBrackets(// Inputs
                                    // found_time will be updated now
                                    found_time);
 
+          // Need not succeed, but then there's no need to go on as we
+          // are at the end
           if (!have_lookup)
-            break;  // Need not succeed, but then there's no need to go on as we are at the end
+            break; 
 
           // Check if the found time is in the bracket
           bool is_in_bracket = (beg_timestamp <= found_time && found_time < end_timestamp);
@@ -422,7 +426,7 @@ void lookupImagesAndBrackets(// Inputs
           // Go forward in time. We count on the fact that
           // lookupImage() looks forward from given guess.
           // Careful here with the api of std::nextafter().
-          curr_timestamp = std::nextafter(found_time, found_time + 1.0);
+          curr_timestamp = std::nextafter(found_time, big);
         }
 
         if (best_time < 0.0) continue;  // bracketing failed
@@ -457,9 +461,11 @@ void lookupImagesAndBrackets(// Inputs
         // Find the range of potential future values of ref_to_cam_offset so that
         // cam.timestamp still respects these bounds.
         min_timestamp_offset[cam_type]
-          = std::max(min_timestamp_offset[cam_type], cam.timestamp - ref_timestamps[end_ref_it]);
+          = std::max(min_timestamp_offset[cam_type],
+                     cam.timestamp - ref_timestamps[end_ref_it]);
         max_timestamp_offset[cam_type]
-          = std::min(max_timestamp_offset[cam_type], cam.timestamp - ref_timestamps[beg_ref_it]);
+          = std::min(max_timestamp_offset[cam_type],
+                     cam.timestamp - ref_timestamps[beg_ref_it]);
       }
 
       // Look up the closest depth in time (either before or after cam.timestamp)

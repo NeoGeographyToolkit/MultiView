@@ -101,10 +101,7 @@ def processArgs(args, base_dir):
         image_array += glob.glob(image_wildcard)
     # Use the image list, if provided
     if args.image_list != "":
-        with open(args.image_list, 'r') as f:
-            image_array = f.readlines()
-        for it in range(len(image_array)):
-            image_array[it] = image_array[it].rstrip() # rm newlines
+        image_array = rig_utils.read_list(args.image_list)
     # Use images specified on the command line with no quotes
     if len(other) > 0:
         image_array = other[:]
@@ -242,7 +239,7 @@ def genTheiaInputs(rig_config, args, image_array):
 
     return (calib_file, sym_image_dir, images, sym_images, extension)
 
-def put_orig_images(nvm_file, final_nvm_file,
+def write_with_full_path(nvm_file, final_nvm_file,
                     offset_file, final_offset_file,
                     images, sym_images):
     """
@@ -312,10 +309,13 @@ if __name__ == "__main__":
         count += 1
         os.remove(old_matches)
 
-    cmd = [base_dir + "/bin/build_reconstruction", "--flagfile", args.theia_flags, "--images",
-           sym_image_dir + "/*" + image_extension, "--calibration_file", calib_file,
-           "--output_reconstruction", reconstruction_file, "--matching_working_directory",
-           matching_dir, "--intrinsics_to_optimize", "NONE"]
+    cmd = [base_dir + "/bin/build_reconstruction", "--flagfile",
+           args.theia_flags, "--images",
+           sym_image_dir + "/*" + image_extension,
+           "--calibration_file", calib_file,
+           "--output_reconstruction", reconstruction_file,
+           "--matching_working_directory", matching_dir,
+           "--intrinsics_to_optimize", "NONE"]
     rig_utils.run_cmd(cmd)
     
     nvm_file = reconstruction_file + ".nvm"
@@ -328,5 +328,6 @@ if __name__ == "__main__":
     offset_file = reconstruction_file + "_offsets.txt";
     final_offset_file = args.out_dir + "/cameras_offsets.txt";
     
-    put_orig_images(nvm_file, final_nvm_file, offset_file, final_offset_file, images, sym_images)
+    write_with_full_path(nvm_file, final_nvm_file, offset_file, final_offset_file,
+                         images, sym_images)
     
