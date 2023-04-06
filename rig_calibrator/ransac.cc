@@ -23,7 +23,7 @@
 #include <set>
 #include <functional>
 
-namespace sparse_mapping {
+namespace dense_map {
 
 // Get a given number of unique random integers within a given range
 // (inclusive). It is very important that the generator be stored

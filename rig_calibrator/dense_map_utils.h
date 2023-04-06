@@ -178,13 +178,6 @@ void pickTimestampsInBounds(std::vector<double> const& timestamps, double left_b
 // Must always have NUM_EXIF the last.
 enum ExifData { TIMESTAMP = 0, EXPOSURE_TIME, ISO, APERTURE, FOCAL_LENGTH, NUM_EXIF };
 
-// A utility for saving a camera in a format ASP understands.
-// TODO(oalexan1): Expose the sci cam intrinsics rather than having
-// them hard-coded.
-void saveTsaiCamera(Eigen::MatrixXd const& desired_cam_to_world_trans,
-                      std::string const& output_dir,
-                      double curr_time, std::string const& suffix);
-
 // Find the depth measurement. Use nearest neighbor interpolation
 // to look into the depth cloud.
 bool depthValue(// Inputs

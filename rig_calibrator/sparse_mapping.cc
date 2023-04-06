@@ -46,39 +46,6 @@ DEFINE_bool(verbose_parsing, false,
 
 namespace sparse_mapping {
 
-// Compute the n-weight slerp, analogous to the linear combination
-// W[0]*Q[0] + ... + W[n-1]*Q[n-1]. This is experimental.
-// We assume the sum of weights is 1.
-Eigen::Quaternion<double> slerp_n(std::vector<double> const& W,
-                                  std::vector<Eigen::Quaternion<double> > const& Q) {
-  if (W.size() != Q.size())
-    LOG(FATAL) << "Expecting as many quaternions as weights.";
-  
-  if (Q.empty())
-    LOG(FATAL) << "Expecting at least one quaternion and weight.";
-
-  if (Q.size() == 1)
-    return Q[0];
-
-  if (Q.size() == 2) {
-    if (!(std::abs(W[0] + W[1] - 1.0) < 1e-6 && W[0] >= 0 && W[1] >= 0))
-      LOG(FATAL) << "Expecting the weights to be >= 0 and sum up to 1.";
-    return Q[0].slerp(W[1], Q[1]);
-  }
-
-  // Call recursively this function with fewer terms
-  double sum = W[0] + W[1];
-  if (sum == 0) sum = 1.0;
-  Eigen::Quaternion<double> q = Q[0].slerp(W[1]/sum, Q[1]);
-  std::vector<double> W2 = W;
-  std::vector<Eigen::Quaternion<double>> Q2 = Q;
-  W2.erase(W2.begin());
-  Q2.erase(Q2.begin());
-  W2[0] = sum;
-  Q2[0] = q;
-  return slerp_n(W2, Q2);
-}
-
   // Statistics for filtering
   struct FilterStats{
     int total;

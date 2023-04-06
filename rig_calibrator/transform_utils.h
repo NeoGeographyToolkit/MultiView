@@ -110,18 +110,18 @@ void calc_world_to_cam_no_rig(// Inputs
                               // Output
                               std::vector<Eigen::Affine3d>& world_to_cam);
   
-  void calc_world_to_cam_rig_or_not
-  (// Inputs
-   bool no_rig, std::vector<dense_map::cameraImage> const& cams,
-   std::vector<double> const& world_to_ref_vec, std::vector<double> const& ref_timestamps,
-   std::vector<double> const& ref_to_cam_vec, std::vector<double> const& world_to_cam_vec,
-   std::vector<double> const& ref_to_cam_timestamp_offsets,
-   // Output
-   std::vector<Eigen::Affine3d>& world_to_cam);
-
-  void affine_transform_to_array(Eigen::Affine3d const& aff, double* arr);
-void array_to_affine_transform(Eigen::Affine3d& aff, const double* arr);
+void calc_world_to_cam_rig_or_not
+(// Inputs
+ bool no_rig, std::vector<dense_map::cameraImage> const& cams,
+ std::vector<double> const& world_to_ref_vec, std::vector<double> const& ref_timestamps,
+ std::vector<double> const& ref_to_cam_vec, std::vector<double> const& world_to_cam_vec,
+ std::vector<double> const& ref_to_cam_timestamp_offsets,
+ // Output
+ std::vector<Eigen::Affine3d>& world_to_cam);
   
+void affine_transform_to_array(Eigen::Affine3d const& aff, double* arr);
+void array_to_affine_transform(Eigen::Affine3d& aff, const double* arr);
+
 // Extract a rigid transform to an array of length NUM_RIGID_PARAMS
 void rigid_transform_to_array(Eigen::Affine3d const& aff, double* arr);
 
@@ -129,6 +129,13 @@ void rigid_transform_to_array(Eigen::Affine3d const& aff, double* arr);
 // transform. Normalize the quaternion to make it into a rotation.
 void array_to_rigid_transform(Eigen::Affine3d& aff, const double* arr);
 
+// Compute the n-weight slerp, analogous to the linear combination
+// W[0]*Q[0] + ... + W[n-1]*Q[n-1]. This is experimental.
+// We assume the sum of weights is 1.
+// TODO(oalexan1): Move this to transform_utils.cc.
+Eigen::Quaternion<double> slerp_n(std::vector<double> const& W,
+                                  std::vector<Eigen::Quaternion<double>> const& Q);
+  
 // Given two sets of 3D points, find the rotation + translation + scale
 // which best maps the first set to the second.
 // Source: http://en.wikipedia.org/wiki/Kabsch_algorithm

@@ -30,7 +30,7 @@
 #include <limits>
 
 
-namespace sparse_mapping {
+namespace dense_map {
 
   void get_n_unique_integers(int min_val, int max_val, int num,
                              std::mt19937 * generator, std::vector<int> * values);

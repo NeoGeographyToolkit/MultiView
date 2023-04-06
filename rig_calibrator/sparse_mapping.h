@@ -58,9 +58,6 @@ namespace sparse_mapping {
   // cid_to_camera_transform - Index on CID. Contains affine transform
   //    representing camera_t_global.
 
-  Eigen::Quaternion<double> slerp_n(std::vector<double> const& W,
-                                    std::vector<Eigen::Quaternion<double> > const& Q);
-
   bool IsBinaryDescriptor(std::string const& descriptor);
 
   // Logic for implementing if two histogram equalization flags are compatible

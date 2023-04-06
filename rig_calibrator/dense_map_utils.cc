@@ -546,39 +546,6 @@ void pickTimestampsInBounds(std::vector<double> const& timestamps,
   return;
 }
 
-// A debug utility for saving a camera in a format ASP understands.
-// TODO(oalexan1): Expose the sci cam intrinsics.
-// TODO(oalexan1): Support in ASP the rig_calibrator distortion models.
-void saveTsaiCamera(Eigen::MatrixXd const& desired_cam_to_world_trans,
-                        std::string const& output_dir,
-                      double curr_time, std::string const& suffix) {
-  char filename_buffer[1000];
-  auto T = desired_cam_to_world_trans;
-  double shift = 6378137.0;  // planet radius, pretend this is a satellite camera
-  snprintf(filename_buffer, sizeof(filename_buffer), "%s/%10.7f_%s.tsai",
-           output_dir.c_str(), curr_time,
-           suffix.c_str());
-  std::cout << "Writing: " << filename_buffer << std::endl;
-  std::ofstream ofs(filename_buffer);
-  ofs.precision(18);
-  ofs << "VERSION_3\n";
-  ofs << "fu = 1138.4943\n";
-  ofs << "fv = 1138.4943\n";
-  ofs << "cu = 680.36447\n";
-  ofs << "cv = 534.00133\n";
-  ofs << "u_direction = 1 0 0\n";
-  ofs << "v_direction = 0 1 0\n";
-  ofs << "w_direction = 0 0 1\n";
-  ofs << "C = " << T(0, 3) + shift << ' ' << T(1, 3) << ' ' << T(2, 3) << "\n";
-  ofs << "R = "
-      << T(0, 0) << ' ' << T(0, 1) << ' ' << T(0, 2) << ' '
-      << T(1, 0) << ' ' << T(1, 1) << ' ' << T(1, 2) << ' '
-      << T(2, 0) << ' ' << T(2, 1) << ' ' << T(2, 2) << "\n";
-  ofs << "pitch = 1\n";
-  ofs << "NULL\n";
-  ofs.close();
-}
-
 // Convert a string of space-separated numbers to a vector
 void strToVec(std::string const& str, std::vector<double> & vec) {
 
@@ -591,8 +558,9 @@ void strToVec(std::string const& str, std::vector<double> & vec) {
 
 // Read the images, depth clouds, and their metadata
 // Save the properties of images. Use space as separator.
-void saveCameraPoses(std::string const& out_dir, std::vector<dense_map::cameraImage> const& cams,
-                    std::vector<Eigen::Affine3d> const& world_to_cam) {
+void saveCameraPoses(std::string const& out_dir,
+                     std::vector<dense_map::cameraImage> const& cams,
+                     std::vector<Eigen::Affine3d> const& world_to_cam) {
   dense_map::createDir(out_dir);
   std::string image_list = out_dir + "/cameras.txt";
   std::cout << "Writing: " << image_list << std::endl;
@@ -602,7 +570,7 @@ void saveCameraPoses(std::string const& out_dir, std::vector<dense_map::cameraIm
   if (!f.is_open()) LOG(FATAL) << "Cannot open file for writing: " << image_list << "\n";
   f.precision(17);
 
-  f << "# image_file world_to_image_transform\n";
+  f << "# image_file world_to_camera_transform\n";
 
   for (size_t it = 0; it < cams.size(); it++) {
 

@@ -59,15 +59,16 @@ void ReadNvm(std::string               const & input_filename,
 
 // Write the inliers in nvm format. The keypoints are shifted relative to the optical
 // center, as written by Theia.
-void writeInliersToNvm(std::string                                       const& nvm_file,
-                       bool                                                     shift_keypoints,
-                       std::vector<camera::CameraParameters>             const& cam_params,
-                       std::vector<dense_map::cameraImage>               const& cams,
-                       std::vector<Eigen::Affine3d>                      const& world_to_cam,
-                       std::vector<std::vector<std::pair<float, float>>> const& keypoint_vec,
-                       std::vector<std::map<int, int>>                   const& pid_to_cid_fid,
-                       std::vector<std::map<int, std::map<int, int>>>    const& pid_cid_fid_inlier,
-                       std::vector<Eigen::Vector3d>                      const& xyz_vec);
+void writeInliersToNvm
+(std::string                                       const& nvm_file,
+ bool                                                     shift_keypoints,
+ std::vector<camera::CameraParameters>             const& cam_params,
+ std::vector<dense_map::cameraImage>               const& cams,
+ std::vector<Eigen::Affine3d>                      const& world_to_cam,
+ std::vector<std::vector<std::pair<float, float>>> const& keypoint_vec,
+ std::vector<std::map<int, int>>                   const& pid_to_cid_fid,
+ std::vector<std::map<int, std::map<int, int>>>    const& pid_cid_fid_inlier,
+ std::vector<Eigen::Vector3d>                      const& xyz_vec);
   
 // Write an nvm file. Keypoints may or may not be shifted relative to the optical center.
 void WriteNvm(std::vector<Eigen::Matrix2Xd> const& cid_to_keypoint_map,
@@ -77,6 +78,19 @@ void WriteNvm(std::vector<Eigen::Matrix2Xd> const& cid_to_keypoint_map,
               std::vector<Eigen::Affine3d> const& cid_to_cam_t_global,
               std::string const& output_filename);
 
+// A utility for saving a camera in a format ASP understands. For now do not save
+// the distortion.
+void writePinholeCamera(camera::CameraParameters const& cam_params,
+                        Eigen::Affine3d const& world_to_cam,
+                        std::string const& filename);
+  
+// Save the optimized cameras in ASP's Pinhole format. For now do not save
+// the distortion model.
+void writePinholeCameras(std::vector<camera::CameraParameters> const& cam_params,
+                         std::vector<dense_map::cameraImage>   const& cams,
+                         std::vector<Eigen::Affine3d>          const& world_to_cam,
+                         std::string                           const& out_dir);
+  
 }  // namespace dense_map
 
 #endif  // NVM_H_

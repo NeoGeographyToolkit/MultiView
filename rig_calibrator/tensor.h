@@ -97,15 +97,6 @@ namespace sparse_mapping {
                         bool fix_all_cameras = false,
                         std::set<int> const& fixed_cameras = std::set<int>());
 
-  // Merge two maps
-  void MergeMaps(dense_map::nvmData const& A_in,
-                 dense_map::nvmData const& B_in,
-                 dense_map::RigSet const& R,
-                 int num_image_overlaps_at_endpoints,
-                 bool fast_merge,
-                 double close_dist,
-                 dense_map::nvmData & C_out);
-
   // Extract a submap in-place.
   void ExtractSubmap(std::vector<std::string> const& images_to_keep,
                      dense_map::nvmData & nvm);

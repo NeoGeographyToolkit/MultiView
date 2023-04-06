@@ -19,12 +19,15 @@
 #ifndef RIG_CALIBRATOR_BASIC_ALGS_H
 #define RIG_CALIBRATOR_BASIC_ALGS_H
 
-// Some basic algorithms on STL data structures
+// Some low-level algorithms
 
 #include <glog/logging.h>
+#include <Eigen/Geometry>
+
 #include <map>
 #include <algorithm>
-
+#include <set>
+#include <vector>
 namespace dense_map {
 
 // Look up a map value and throw an error when not found
@@ -73,8 +76,6 @@ void setMapValue(std::vector<std::map<int, std::map<int, T>>> & pid_cid_fid,
   fid_it->second = val;
 }
 
-std::string file_extension(std::string const& file);
-
 // Maximum value in a map
 template<typename K, typename V>
 V maxMapVal(const std::map<K,V> &map) {
@@ -87,6 +88,41 @@ V maxMapVal(const std::map<K,V> &map) {
                               });
   return key->second;
 }
+
+// Find a file extension ()  
+std::string file_extension(std::string const& file);
+
+// Convert keypoints to Eigen format
+void vec2eigen(std::vector<std::pair<float, float>> const& vec,
+               Eigen::Matrix2Xd & mat);
+
+// Convert keypoints from Eigen format
+void eigen2vec(Eigen::Matrix2Xd const& mat,
+               std::vector<std::pair<float, float>> & vec);
+
+// Read a vector of strings from a file, with spaces and newlines
+// acting as separators.  Store them in a set.
+void readList(std::string const& file, std::set<std::string> & list);
+
+// The cam name is the subdir having the images.
+// Example: mydir/nav_cam/file.jpg has nav_cam as the cam name.
+std::string camName(std::string const& image_file);
+
+// Find cam type based on cam name
+void camTypeFromName(std::string const& cam_name,
+                     std::vector<std::string> const& cam_names,
+                     int& cam_type);
+  
+// Given a file with name <path to>/<cam name>/<digits>.<digits>.jpg,
+// find the cam name, then look up the cam type. Also find the timestamp.
+void findCamTypeAndTimestamp(std::string const& image_file,
+                             std::vector<std::string> const& cam_names,
+                             // Outputs
+                             int    & cam_type,
+                             double & timestamp);
+  
+// Replace .<extension> with <suffix>  
+std::string changeFileSuffix(std::string filename, std::string new_suffix);
   
 }  // end namespace dense_map
 

@@ -23,6 +23,8 @@
 #include <rig_calibrator/reprojection.h>
 #include <rig_calibrator/nvm.h>
 #include <rig_calibrator/rig_config.h>
+#include <rig_calibrator/merge_maps.h>
+#include <rig_calibrator/basic_algs.h>
 
 #include <opencv2/features2d/features2d.hpp>
 
@@ -69,6 +71,12 @@ DEFINE_bool(no_shift, false,
             "relative to the optical center. The merged map will then be saved "
             "the same way. The usual behavior is that .nvm file features are "
             "shifted, then this tool internally undoes the shift.");
+
+DEFINE_bool(no_transform, false,
+            "Do not compute and apply a transform between the other "
+            "maps to the first one. This keeps the camera poses as "
+            "they are (shared poses and features will be reconciled). "
+            "This will succeed even when the two maps do not overlap.");
 
 DEFINE_double(close_dist, -1.0,
               "Two triangulated points are considered to be close if no further "
@@ -141,11 +149,12 @@ int main(int argc, char** argv) {
     
     // TODO(oalexan1): Add flag to not have to transform second map, then use
     // this code to merge the theia nvm and produced nvm.
-    sparse_mapping::MergeMaps(in0, in1, R,
-                              FLAGS_num_image_overlaps_at_endpoints,
-                              FLAGS_fast_merge,
-                              FLAGS_close_dist,  
-                              out_map);
+    dense_map::MergeMaps(in0, in1, R,
+                         FLAGS_num_image_overlaps_at_endpoints,
+                         FLAGS_fast_merge,
+                         FLAGS_no_transform,
+                         FLAGS_close_dist,
+                         out_map);
     
     if (i + 1 < argc) {
       // There are more maps to marge. Let in0 be what we have so far,
@@ -186,6 +195,11 @@ int main(int argc, char** argv) {
                       out_map.cid_to_cam_t_global,
                       FLAGS_output_map);
 
+  // Save the optical offsets
+  if (!FLAGS_no_shift)
+    dense_map::writeOpticalCenters(FLAGS_output_map, out_map.cid_to_filename,
+                                   R.cam_names, R.cam_params);
+  
   return 0;
 }
 

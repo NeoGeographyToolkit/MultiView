@@ -193,10 +193,8 @@ void writeInliersToNvm
 
   // Write the optical center per image
   if (shift_keypoints) {
-    int file_len = nvm_file.size(); // cast to int to make subtraction safe
     // Remove .nvm and add new suffix
-    std::string offset_path = nvm_file.substr(0, std::max(file_len - 4, 0))
-      + "_offsets.txt";
+    std::string offset_path = changeFileSuffix(nvm_file, "_offsets.txt");
     std::cout << "Writing optical center per image: " << offset_path << std::endl;
     std::ofstream offset_fh(offset_path.c_str());
     offset_fh.precision(17);   // Save with the highest precision
@@ -274,6 +272,79 @@ void WriteNvm(std::vector<Eigen::Matrix2Xd> const& cid_to_keypoint_map,
   // Close the file
   f.flush();
   f.close();
+}
+
+// For an image like image_dir/my_cam/image.png, create the file
+// out_dir/image.tsai.
+std::string pinholeFile(std::string const& out_dir, std::string const& image_file) {
+
+  std::string cam_name = camName(image_file);
+  std::string prefix = fs::path(image_file).stem().string();
+
+  return out_dir + "/" + cam_name + "/" + prefix + ".tsai";
+}
+  
+// A utility for saving a camera in a format ASP understands. For now do not save
+// the distortion.
+void writePinholeCamera(camera::CameraParameters const& cam_params,
+                        Eigen::Affine3d const& world_to_cam,
+                        std::string const& filename) {
+
+  // Go from world_to_cam to cam_to_world
+  Eigen::MatrixXd T = world_to_cam.inverse().matrix();
+
+  // TODO(oalexan1): Must make subdirectory!
+
+  // Must create the directory having the output file
+  std::string out_dir = fs::path(filename).parent_path().string();
+  dense_map::createDir(out_dir);
+  
+  std::ofstream ofs(filename);
+  ofs.precision(17);
+  ofs << "VERSION_3\n";
+  ofs << "fu = " << cam_params.GetFocalVector()[0] << "\n";
+  ofs << "fv = " << cam_params.GetFocalVector()[1] << "\n";
+  ofs << "cu = " << cam_params.GetOpticalOffset()[0] << "\n";
+  ofs << "cv = " << cam_params.GetOpticalOffset()[1] << "\n";
+  ofs << "u_direction = 1 0 0\n";
+  ofs << "v_direction = 0 1 0\n";
+  ofs << "w_direction = 0 0 1\n";
+  ofs << "C = " << T(0, 3) << ' ' << T(1, 3) << ' ' << T(2, 3) << "\n";
+  ofs << "R = "
+      << T(0, 0) << ' ' << T(0, 1) << ' ' << T(0, 2) << ' '
+      << T(1, 0) << ' ' << T(1, 1) << ' ' << T(1, 2) << ' '
+      << T(2, 0) << ' ' << T(2, 1) << ' ' << T(2, 2) << "\n";
+  ofs << "pitch = 1\n";
+  ofs << "NULL\n";
+  ofs.close();
+  
+}
+  
+// Save the optimized cameras in ASP's Pinhole format. For now do not save
+// the distortion model.
+void writePinholeCameras(std::vector<camera::CameraParameters> const& cam_params,
+                         std::vector<dense_map::cameraImage>   const& cams,
+                         std::vector<Eigen::Affine3d>          const& world_to_cam,
+                         std::string                           const& out_dir) {
+
+  // Sanity checks
+  if (world_to_cam.size() != cams.size())
+    LOG(FATAL) << "Expecting as many world-to-camera transforms as cameras.\n";
+
+  std::string pinhole_dir = out_dir + "/pinhole";
+  std::cout << "Writing pinhole cameras to: " << pinhole_dir << std::endl;
+
+  for (size_t cid = 0; cid < cams.size(); cid++) {
+    std::string const& image_file = cams[cid].image_name;
+
+    int cam_type = cams[cid].camera_type;
+    
+    std::string camFile = dense_map::pinholeFile(pinhole_dir, image_file);
+    dense_map::writePinholeCamera(cam_params[cam_type],  
+                                  world_to_cam[cid], camFile);
+  }
+  
+  return;
 }
   
 }  // end namespace dense_map

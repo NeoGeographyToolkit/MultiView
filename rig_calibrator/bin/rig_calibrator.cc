@@ -331,12 +331,17 @@ DEFINE_bool(save_nvm_no_shift, false,
             "drawn with stereo_gui.");
 
 DEFINE_bool(save_matches, false,
-            "Save the interest point matches (all matches and inlier matches, after filtering). "
-            "Stereo Pipeline's viewer can be used for visualizing these.");
+            "Save the interest point matches (all matches and inlier "
+            "matches, after filtering). stereo_gui can be used to "
+            "visualize these.");
 
 DEFINE_bool(export_to_voxblox, false,
-            "Save the depth clouds and optimized transforms needed to create a mesh with voxblox "
-            "(if depth clouds exist).");
+            "Save the depth clouds and optimized transforms needed to create "
+            "a mesh with voxblox (if depth clouds exist).");
+
+DEFINE_bool(save_pinhole_cameras, false,
+            "Save the optimized cameras in ASP's Pinhole format. "
+            "The distortion model does not get saved.");
 
 DEFINE_bool(save_transformed_depth_clouds, false,
             "Save the depth clouds with the camera transform applied to them to make "
@@ -1799,14 +1804,19 @@ int main(int argc, char** argv) {
   }
 
   if (FLAGS_export_to_voxblox)
-    dense_map::exportToVoxblox(R.cam_names, cams, R.depth_to_image, world_to_cam, FLAGS_out_dir);
+    dense_map::exportToVoxblox(R.cam_names, cams, R.depth_to_image,
+                               world_to_cam, FLAGS_out_dir);
 
   if (FLAGS_save_transformed_depth_clouds)
     dense_map::saveTransformedDepthClouds(R.cam_names, cams, R.depth_to_image,
                                           world_to_cam, FLAGS_out_dir);
+
+  if (FLAGS_save_pinhole_cameras)
+    dense_map::writePinholeCameras(R.cam_params, cams, world_to_cam, FLAGS_out_dir);
   
   std::string conv_angles_file = FLAGS_out_dir + "/convergence_angles.txt";
-  dense_map::savePairwiseConvergenceAngles(pid_to_cid_fid, keypoint_vec, cams, world_to_cam,  
+  dense_map::savePairwiseConvergenceAngles(pid_to_cid_fid, keypoint_vec,
+                                           cams, world_to_cam,  
                                            xyz_vec,  pid_cid_fid_inlier,  
                                            conv_angles_file);
   
