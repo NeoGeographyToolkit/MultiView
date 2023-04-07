@@ -565,7 +565,7 @@ void mergeCameraPoses(std::vector<dense_map::cameraImage> &C_cams,
                       std::map<int, int> const& cid2cid,
                       int num_out_cams) {
   std::vector<dense_map::cameraImage> merged_cams(num_out_cams);
-  for (size_it cid = 0; cid < C_cams.size(); cid++) {
+  for (size_t cid = 0; cid < C_cams.size(); cid++) {
     auto it = cid2cid.find(cid);
     if (it == cid2cid.end())
       LOG(FATAL) << "cid2cid does not contain cid " << cid << ".\n";
