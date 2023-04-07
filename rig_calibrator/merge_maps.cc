@@ -543,7 +543,38 @@ void writeOpticalCenters(const std::string& output_map_path,
   }
   offset_fh.close();
 }  
+
+// Merge the camera names using cid2cid, which remaps the cid to remove repetitions
+// and sort the images by time.
+void mergeCameraNames(std::vector<std::string> & cid_to_filename,
+                      const std::map<int, int> & cid2cid, 
+                      int num_out_cams) {
+  std::vector<std::string> cid_to_filename2(num_out_cams);
+  for (size_t cid = 0; cid < cid_to_filename.size(); cid++) {
+    auto it = cid2cid.find(cid);
+    if (it == cid2cid.end())
+      LOG(FATAL) << "cid2cid does not contain cid " << cid << ".\n";
+    cid_to_filename2.at(it->second) = cid_to_filename[cid];
+  }
   
+  cid_to_filename = cid_to_filename2;
+}
+
+// Merge the camera poses using cid2cid, which remaps the cids to remove repetitions.
+void mergeCameraPoses(std::vector<dense_map::cameraImage> &C_cams,
+                      std::map<int, int> const& cid2cid,
+                      int num_out_cams) {
+  std::vector<dense_map::cameraImage> merged_cams(num_out_cams);
+  for (size_it cid = 0; cid < C_cams.size(); cid++) {
+    auto it = cid2cid.find(cid);
+    if (it == cid2cid.end())
+      LOG(FATAL) << "cid2cid does not contain cid " << cid << ".\n";
+    merged_cams[it->second] = C_cams[cid];
+  }
+
+  C_cams = merged_cams;
+}
+
 // Merge two maps. See sfm_merge.cc. Approach: Find matches among
 // several images in map A and several in map B, based on
 // num_image_overlaps_at_endpoints. Then build tracks (so merging the
@@ -730,17 +761,9 @@ void MergeMaps(dense_map::nvmData const& A,
   // Update C.cid_to_cam_t_global by merging poses for same images in the two maps
   MergePoses(cid2cid, C.cid_to_cam_t_global);
 
-  // TODO(oalexan1): Make this a function too
-  // Merge camera names
-  {
-    // Make the code below into a function called mergeCameraNames().
-    std::vector<std::string> cid_to_filename2(num_out_cams);
-    for (size_t cid = 0; cid < C.cid_to_filename.size(); cid++)
-      cid_to_filename2[cid2cid[cid]] = C.cid_to_filename[cid];
-
-    C.cid_to_filename = cid_to_filename2;
-  }
-
+  // Merge the camera names too, based on cid2cid
+  mergeCameraNames(C.cid_to_filename, cid2cid, num_out_cams);
+  
 #if 1
   // By now we have 3 maps: A, B, and the new one in C having shared
   // tracks. Each of these has its own images and indices, and C
@@ -801,15 +824,8 @@ void MergeMaps(dense_map::nvmData const& A,
   }
 #endif
   
-  // Merge the camera vector
-  // TODO(oalexan1): Make this a function
-  {
-    std::vector<dense_map::cameraImage> merged_cams(num_out_cams);
-    for (size_t cid = 0; cid < C_cams.size(); cid++) 
-      merged_cams[cid2cid[cid]] = C_cams[cid];
-
-    C_cams = merged_cams;
-  }
+  // Merge the camera poses as well (remove duplicates)
+  mergeCameraPoses(C_cams, cid2cid, num_out_cams);
   
   // Create C_keypoint_vec. Same info as C.cid_to_keypoint_map but different structure.
   dense_map::KeypointVecT C_keypoint_vec;

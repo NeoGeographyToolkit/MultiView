@@ -120,15 +120,19 @@ def genTheiaInputs(rig_config, args, image_array):
     extensions = set()
 
     # Parse the images for all cameras
+    image_set = set()
     image_array = sorted(image_array)
     for image in image_array:
+        image_set.add(image)
         sensor_name = os.path.basename(os.path.dirname(image))
         if sensor_name not in images:
             images[sensor_name] = []
         images[sensor_name].append(image)
         ext = rig_utils.imageExtension(images[sensor_name])
         extensions.add(ext)
-    
+
+    if len(image_set) != len(image_array):
+        raise Exception("Found duplicate input images.")
     if len(extensions) > 1:
         raise Exception("Input images have a mix of filename extensions. Use just one. " + \
                         "Found: ", extensions)
