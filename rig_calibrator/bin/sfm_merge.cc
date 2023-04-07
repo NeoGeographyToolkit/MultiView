@@ -73,7 +73,7 @@ DEFINE_bool(no_shift, false,
             "shifted, then this tool internally undoes the shift.");
 
 DEFINE_bool(no_transform, false,
-            "Do not compute and apply a transform between the other "
+            "Do not compute and apply a transform from the other "
             "maps to the first one. This keeps the camera poses as "
             "they are (shared poses and features will be reconciled). "
             "This will succeed even when the two maps do not overlap.");

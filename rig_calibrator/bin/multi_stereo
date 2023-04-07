@@ -128,7 +128,7 @@ def gen_pairs(args, all_distorted_images):
         return index_pairs
 
     dist_indices = rig_utils.create_index_dict(all_distorted_images)
-    image_pairs = rig_utils.read_lists(args.left, args.right)
+    image_pairs = rig_utils.read_image_pairs(args.left, args.right)
     for pair in image_pairs:
         left_index = dist_indices[pair[0]]
         right_index = dist_indices[pair[1]]
@@ -297,7 +297,8 @@ def run_pair(left_image, right_image, left_cam, right_cam, args, sensor_dir, too
 
     return pcd_file
 
-def fuse_clouds(args, sensor_dir, tool_base_dir, undistorted_images, cam_to_world_files):
+def fuse_clouds(args, pairs, sensor_dir, tool_base_dir, undistorted_images, 
+                cam_to_world_files):
     """
     Fuse the results in a mesh with voxblox.
     """
@@ -306,8 +307,10 @@ def fuse_clouds(args, sensor_dir, tool_base_dir, undistorted_images, cam_to_worl
     fused_mesh = args.out_dir + "/" + sensor_dir + "/fused_mesh.ply"
     print("Writing: " + voxblox_index)
     with open(voxblox_index, "w") as handle:
-        for t in range(len(undistorted_images) - 1):
-            handle.write(cam_to_world_files[t] + "\n")
+        for t in range(len(pairs)):
+            L=pairs[t][0]
+            R=pairs[t][1]
+            handle.write(cam_to_world_files[L] + "\n")
             handle.write(pcd_files[t] + "\n")
 
     args.mesh_gen_options = args.mesh_gen_options.replace('\\', ' ')
@@ -387,8 +390,9 @@ if __name__ == "__main__":
                             all_cams[L], all_cams[R],
                             args, sensor_dir, tool_base_dir,
                             step_dict[args.first_step], step_dict[args.last_step])
+        print("got pcd file: " + pcd_file)
         pcd_files.append(pcd_file)
         
     if step_dict[args.first_step] <= 2 and step_dict[args.last_step] >= 2:
-        fuse_clouds(args, sensor_dir, tool_base_dir,
+        fuse_clouds(args, pairs, sensor_dir, tool_base_dir,
                     all_undistorted_images, all_cam_to_world_files)

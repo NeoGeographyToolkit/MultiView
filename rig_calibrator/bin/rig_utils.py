@@ -30,15 +30,21 @@ def read_list(file):
             vals.append(line)
     return vals
 
-def read_lists(file1, file2):
+def read_image_pairs(file1, file2):
     """
     Given two input lists, returns a list of tuples where each tuple contains one element
     from the first list and one element from the second list.
     """
     list1 = read_list(file1)
     list2 = read_list(file2)
-    return [(a, b) for a in list1 for b in list2]
+    if len(list1) != len(list2):
+        raise Exception("The two input lists must have the same length.")
+    
+    pairs = []
+    for it in range(len(list1)):
+        pairs.append((list1[it], list2[it]))
 
+    return pairs
 
 def mkdir_p(path):
     if path == "":
@@ -53,7 +59,10 @@ def mkdir_p(path):
                             path + " as a file with this name exists.")
 
 def which(program):
-    """Find if a program is in the PATH"""
+    """
+    Find the absolute path to a program based on the PATH environment variable.
+    If not found, return None.
+    """
 
     def is_exe(fpath):
         return os.path.isfile(fpath) and os.access(fpath, os.X_OK)
