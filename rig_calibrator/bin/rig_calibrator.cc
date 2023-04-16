@@ -94,6 +94,8 @@
 // and the indices pointing to the left and right ref bracketing
 // cameras are identical.
 
+// TODO(oalexan1): Move these to cost_function.cc, together will
+// all logic for the cost function.
 #include <ceres/ceres.h>
 #include <ceres/rotation.h>
 #include <ceres/problem.h>
@@ -120,6 +122,7 @@
 #include <rig_calibrator/camera_image.h>
 #include <rig_calibrator/rig_config.h>
 #include <rig_calibrator/nvm.h>
+#include <rig_calibrator/cost_function.h>
 
 #include <gflags/gflags.h>
 #include <glog/logging.h>
@@ -1013,7 +1016,7 @@ void applyRegistration(bool no_rig, bool scale_depth,
   
   return;
 }
-
+                             
 int main(int argc, char** argv) {
   google::InitGoogleLogging(argv[0]);
   google::ParseCommandLineFlags(&argc, &argv, true);
@@ -1354,58 +1357,20 @@ int main(int argc, char** argv) {
         if (!dense_map::getMapValue(pid_cid_fid_inlier, pid, cid, fid))
           continue;
 
+        // Find timestamps and pointers to bracketing cameras ref_to_cam transform.
+        // This strongly depends on whether we are using a rig or not.
         int cam_type = cams[cid].camera_type;
         double beg_ref_timestamp = -1.0, end_ref_timestamp = -1.0, cam_timestamp = -1.0;
-
-        // Pointers to bracketing cameras and ref to cam transform. Their precise
-        // definition is spelled out below.
         double *beg_cam_ptr = NULL, *end_cam_ptr = NULL, *ref_to_cam_ptr = NULL;
+        dense_map::calcBracketing(// Inputs
+                      FLAGS_no_rig, cid, cam_type, cams, ref_timestamps, R,
+                      world_to_cam_vec, world_to_ref_vec, ref_to_cam_vec,
+                      ref_identity_vec, right_identity_vec,
+                      // Outputs
+                      beg_cam_ptr, end_cam_ptr, ref_to_cam_ptr,
+                      beg_ref_timestamp, end_ref_timestamp,
+                      cam_timestamp);
 
-        // TODO(oalexan1): Move the block below to: rigOrNoRigOptPtrs().
-        if (!FLAGS_no_rig) {
-          // Model the rig, use timestamps
-          int beg_ref_index = cams[cid].beg_ref_index;
-          int end_ref_index = cams[cid].end_ref_index;
-
-          // Left bracketing ref cam for a given cam. For a ref cam, this is itself.
-          beg_cam_ptr = &world_to_ref_vec[dense_map::NUM_RIGID_PARAMS * beg_ref_index];
-
-          // Right bracketing camera. When the cam is the ref type,
-          // or when this cam is the last one and has exactly
-          // same timestamp as the ref cam, this is not used.
-          if (R.isRefSensor(R.cam_names[cam_type]) || beg_ref_index == end_ref_index)
-            end_cam_ptr = &right_identity_vec[0];
-          else
-            end_cam_ptr = &world_to_ref_vec[dense_map::NUM_RIGID_PARAMS * end_ref_index];
-
-          // The beg and end timestamps will be the same only for the
-          // ref cam or for last non-ref cam whose timestamp is same
-          // as ref cam timestamp which is also last.
-          beg_ref_timestamp = ref_timestamps[beg_ref_index];
-          end_ref_timestamp = ref_timestamps[end_ref_index];
-          cam_timestamp = cams[cid].timestamp;  // uses current camera's clock
-
-        } else {
-          // No rig. Then, beg_cam_ptr is just current camera, not the
-          // ref bracketing cam, end_cam_ptr is the identity. The timestamps
-          // will be the same, so the camera brackets itself.
-          cam_timestamp     = cams[cid].timestamp;
-          beg_ref_timestamp = cam_timestamp;
-          end_ref_timestamp = cam_timestamp;
-
-          // Note how we use world_to_cam_vec and not world_to_ref_vec for 
-          // the beg cam. The end cam is unused.
-          beg_cam_ptr = &world_to_cam_vec[dense_map::NUM_RIGID_PARAMS * cid];
-          end_cam_ptr = &right_identity_vec[0];
-        }
-
-        // Transform from reference camera to given camera. Won't be used when
-        // FLAGS_no_rig is true or when the cam is of ref type.
-        if (FLAGS_no_rig || R.isRefSensor(R.cam_names[cam_type]))
-          ref_to_cam_ptr = &ref_identity_vec[0];
-        else
-          ref_to_cam_ptr = &ref_to_cam_vec[dense_map::NUM_RIGID_PARAMS * cam_type];
-        
         Eigen::Vector2d dist_ip(keypoint_vec[cid][fid].first,
                                 keypoint_vec[cid][fid].second);
 
