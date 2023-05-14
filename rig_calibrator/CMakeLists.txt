@@ -9,7 +9,7 @@ target_link_libraries(rig_calibrator_lib
     rig_calibrator_openMVG rig_calibrator_camera_model
     texture_reconstruction ${TEXRECON_LIBRARIES} ${OpenCV_LIBRARIES} ${CERES_LIBRARIES}
     ${JPEG_LIBRARIES} ${PNG_LIBRARIES} ${TIFF_LIBRARIES}
-    TBB::tbb TBB::tbbmalloc mve mve_util
+    TBB::tbb TBB::tbbmalloc mveCore mveUtil
     gflags glog Boost::filesystem pcl_common pcl_io_ply pcl_io)
 
 # Build the rig_calibrator tool
