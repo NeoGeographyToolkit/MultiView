@@ -53,20 +53,20 @@ FIND_PACKAGE(TBB REQUIRED)
 
 # GFlags 
 find_package(Gflags REQUIRED)
-if (GFLAGS_FOUND)
+if (Gflags_FOUND)
    message("-- Found Google Flags: ${GFLAGS_INCLUDE_DIRS} in namespace: ${GFLAGS_NAMESPACE}")
-else (GFLAGS_FOUND)
+else (Gflags_FOUND)
    message(FATAL_ERROR "Can't find Google FLAGS.")
-endif (GFLAGS_FOUND)
+endif (Gflags_FOUND)
 
 # GLog
 find_package(Glog REQUIRED)
-if (GLOG_FOUND)
+if (Glog_FOUND)
   message("-- Found Google Logging: ${GLOG_INCLUDE_DIRS}")
-else (GLOG_FOUND)
+else (Glog_FOUND)
   message(FATAL_ERROR "Can't find Glog. Please set GLOG_INCLUDE_DIR & "
     "GLOG_LIBRARY")
-endif (GLOG_FOUND)
+endif (Glog_FOUND)
 
 # Eigen
 find_package(Eigen3 3 REQUIRED NO_MODULE)
@@ -101,7 +101,7 @@ set(BOOST_INCLUDEDIR "${MULTIVIEW_DEPS_DIR}/include")
 set(Boost_NO_SYSTEM_PATHS ON) # Do not search anywhere else
 set(Boost_DEBUG OFF) # to help figure out issues
 set(Boost_DETAILED_FAILURE_MSG OFF) # When on, helps with debugging
-find_package(Boost 1.72 REQUIRED COMPONENTS filesystem)
+find_package(Boost REQUIRED COMPONENTS filesystem)
 if (Boost_FOUND)
     message("Successfully found Boost version ${Boost_VERSION}.")
     message("Boost include dir = ${Boost_INCLUDE_DIRS}")

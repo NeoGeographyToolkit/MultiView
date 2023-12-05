@@ -21,6 +21,7 @@
 
 #include <boost/filesystem.hpp>
 #include <glog/logging.h>
+#include <fstream>
 
 namespace fs = boost::filesystem;
 
