@@ -10,7 +10,11 @@ set(CMAKE_BUILD_TYPE "Release")
 message(STATUS "Setting build type: ${CMAKE_BUILD_TYPE}")
 
 set(CMAKE_CXX_STANDARD 11)
-add_compile_options(-Wno-deprecated-declarations) # for Mac
+
+# Make clang behave
+if (APPLE)
+  add_compile_options(-Wno-error -Wno-deprecated-declarations -Wno-unused-but-set-variable -Wno-implicit-const-int-float-conversion)
+endif()
 
 # Where to search for dependencies
 set(CMAKE_PREFIX_PATH "${MULTIVIEW_DEPS_DIR};${CMAKE_PREFIX_PATH}")
