@@ -332,15 +332,36 @@ void writePinholeCameras(std::vector<camera::CameraParameters> const& cam_params
   std::string pinhole_dir = out_dir + "/pinhole";
   std::cout << "Writing pinhole cameras to: " << pinhole_dir << std::endl;
 
+  std::vector<std::string> cam_names; 
   for (size_t cid = 0; cid < cams.size(); cid++) {
     std::string const& image_file = cams[cid].image_name;
-
     int cam_type = cams[cid].camera_type;
-    
     std::string camFile = dense_map::pinholeFile(pinhole_dir, image_file);
     dense_map::writePinholeCamera(cam_params[cam_type],  
                                   world_to_cam[cid], camFile);
+    cam_names.push_back(camFile);
   }
+
+  // Must ensure that all camera names without directory are unique
+  std::set<std::string> base_names;
+  for (size_t it = 0; it < cam_names.size(); it++) {
+    std::string base_name = fs::path(cam_names[it]).filename().string();
+    if (base_names.find(base_name) != base_names.end())
+      LOG(FATAL) << "Non-unique camera name (without directory): " << base_name 
+                 << ". It will not be possible to use these cameras with bundle_adjust.";
+    base_names.insert(base_name);
+  }
+  
+  // Also save their list. Useful for bundle adjustment.
+  std::string camera_list = out_dir + "/camera_list.txt";
+  std::string dir = fs::path(camera_list).parent_path().string();
+  dense_map::createDir(dir);
+  
+  std::cout << "Writing: " << camera_list << std::endl;
+  std::ofstream ofs(camera_list.c_str());
+  for (size_t it = 0; it < cam_names.size(); it++)
+    ofs << cam_names[it] << "\n";
+  ofs.close();
   
   return;
 }

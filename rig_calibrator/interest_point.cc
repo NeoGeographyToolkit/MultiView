@@ -1356,6 +1356,18 @@ void saveInlierMatchPairs(// Inputs
     std::cout << "Writing: " << match_file << std::endl;
     dense_map::writeMatchFile(match_file, match_pair.first, match_pair.second);
   }
+  
+  // The image names (without directory) must be unique, or else bundle
+  // adjustment will fail.
+  std::set<std::string> base_names;
+  for (size_t it = 0; it < cams.size(); it++) {
+    std::string base_name = fs::path(cams[it].image_name).filename().string(); 
+    if (base_names.find(base_name) != base_names.end())
+      LOG(FATAL) << "Non-unique image name (without directory): " << base_name 
+                 << ". It will not be possible to use these matches with bundle_adjust.";
+    base_names.insert(base_name);
+  }
+  
 }
 
 // TODO(oalexan1): All the logic below has little to do with interest
@@ -2213,6 +2225,23 @@ void savePairwiseConvergenceAngles(// Inputs
         << vals[0.25 * len] << ' ' << vals[0.5 * len] << ' ' << vals[0.75*len] << ' '
         << len << std::endl;
   }
+  ofs.close();
+
+  return;
+}
+
+// Save the list of images, for use with bundle_adjust.
+void saveImageList(std::vector<dense_map::cameraImage> const& cams,
+                   std::string const& image_list) {
+
+  // Create the directory having image_list
+  std::string dir = fs::path(image_list).parent_path().string();
+  dense_map::createDir(dir);
+  
+  std::cout << "Writing: " << image_list << std::endl;
+  std::ofstream ofs(image_list.c_str());
+  for (size_t it = 0; it < cams.size(); it++)
+    ofs << cams[it].image_name << std::endl;
   ofs.close();
 
   return;

@@ -1776,6 +1776,10 @@ int main(int argc, char** argv) {
     dense_map::saveTransformedDepthClouds(R.cam_names, cams, R.depth_to_image,
                                           world_to_cam, FLAGS_out_dir);
 
+  // Save the list of images (useful for bundle_adjust)
+  std::string image_list = FLAGS_out_dir + "/image_list.txt";
+  dense_map::saveImageList(cams, image_list); 
+
   if (FLAGS_save_pinhole_cameras)
     dense_map::writePinholeCameras(R.cam_params, cams, world_to_cam, FLAGS_out_dir);
   
@@ -1784,6 +1788,5 @@ int main(int argc, char** argv) {
                                            cams, world_to_cam,  
                                            xyz_vec,  pid_cid_fid_inlier,  
                                            conv_angles_file);
-  
   return 0;
 } // NOLINT // TODO(oalexan1): Remove this, after making the code more modular

@@ -275,6 +275,9 @@ void saveInlierMatchPairs(// Inputs
                            const& pid_cid_fid_inlier,
                            std::string const& out_dir);
 
+// Save the list of images, for use with bundle_adjust.
+void saveImageList(std::vector<dense_map::cameraImage> const& cams,
+                   std::string const& image_list);
 
 // Write an image with 3 floats per pixel. OpenCV's imwrite() cannot do that.
 void saveXyzImage(std::string const& filename, cv::Mat const& img);
