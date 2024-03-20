@@ -472,15 +472,12 @@ Eigen::Vector3d Triangulate(std::vector<double>          const& focal_length_vec
 }
 
 // Form the match file name. Assume the input images are of the form
-// cam_name/image.jpg Keep the name of the cameras as part of the
-// match file name, to avoid the case when two different cameras have
-// images with the same name.
+// cam_name/image.jpg. Use the ASP convention of the match file being
+// run/run-image1__image2.match. This assumes all input images are unique.
 std::string matchFileName(std::string const& match_dir,
-                          std::string const& left_image, std::string const& right_image,
+                          std::string const& left_image, 
+                          std::string const& right_image,
                           std::string const& suffix) {
-  // Keep the name of the cameras as part of the match file name,
-  // to avoid the case when two different cameras have
-  // images with the same name.
   std::string left_cam_name
     = boost::filesystem::path(left_image).parent_path().stem().string();
   std::string right_cam_name
@@ -492,9 +489,8 @@ std::string matchFileName(std::string const& match_dir,
 
   std::string left_stem = boost::filesystem::path(left_image).stem().string();
   std::string right_stem = boost::filesystem::path(right_image).stem().string();
-
-  std::string match_file = match_dir + "/" + left_cam_name + "-" + left_stem + "__"
-    + right_cam_name + "-" + right_stem + suffix + ".match";
+  std::string match_file = match_dir + "/run-" + left_stem + "__"
+    + right_stem + suffix + ".match";
 
   return match_file;
 }
@@ -1296,7 +1292,7 @@ void multiViewTriangulation(// Inputs
 // Given all the merged and filtered tracks in pid_cid_fid, for each
 // image pair cid1 and cid2 with cid1 < cid2 < cid1 + num_overlaps + 1,
 // save the matches of this pair which occur in the set of tracks.
-void saveInlinerMatchPairs(// Inputs
+void saveInlierMatchPairs(// Inputs
                            std::vector<dense_map::cameraImage> const& cams,
                            int num_overlaps,
                            std::vector<std::map<int, int>> const& pid_to_cid_fid,
@@ -1305,6 +1301,7 @@ void saveInlinerMatchPairs(// Inputs
                            std::vector<std::map<int, std::map<int, int>>>
                            const& pid_cid_fid_inlier,
                            std::string const& out_dir) {
+
   MATCH_MAP matches;
 
   for (size_t pid = 0; pid < pid_to_cid_fid.size(); pid++) {
@@ -1350,15 +1347,13 @@ void saveInlinerMatchPairs(// Inputs
     std::string match_dir = out_dir + "/matches";
     dense_map::createDir(match_dir);
 
-    std::string suffix = "-inliers";
+    std::string suffix = "";
     std::string match_file = dense_map::matchFileName(match_dir,
                                                       cams[left_cid].image_name,
                                                       cams[right_cid].image_name,
                                                       suffix);
 
-    std::cout << "Writing: " << cams[left_cid].image_name << " "
-              << cams[right_cid].image_name << " "
-              << match_file << std::endl;
+    std::cout << "Writing: " << match_file << std::endl;
     dense_map::writeMatchFile(match_file, match_pair.first, match_pair.second);
   }
 }

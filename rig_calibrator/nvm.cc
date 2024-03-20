@@ -293,8 +293,6 @@ void writePinholeCamera(camera::CameraParameters const& cam_params,
   // Go from world_to_cam to cam_to_world
   Eigen::MatrixXd T = world_to_cam.inverse().matrix();
 
-  // TODO(oalexan1): Must make subdirectory!
-
   // Must create the directory having the output file
   std::string out_dir = fs::path(filename).parent_path().string();
   dense_map::createDir(out_dir);

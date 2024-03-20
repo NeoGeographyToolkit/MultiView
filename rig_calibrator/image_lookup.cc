@@ -34,9 +34,11 @@ namespace fs = boost::filesystem;
 namespace dense_map {
 
   
-// Sort by timestamps adjusted to be relative to the ref camera clock
+// Sort by timestamps adjusted to be relative to the ref camera clock.
+// Additionally sort by image name, so that the order is deterministic.
 bool timestampLess(cameraImage i, cameraImage j) {
-  return (i.ref_timestamp < j.ref_timestamp);
+  return (i.ref_timestamp < j.ref_timestamp) || 
+    (i.ref_timestamp == j.ref_timestamp && i.image_name < j.image_name);
 }
 
 // The images from the bag may need to be resized to be the same
@@ -408,8 +410,10 @@ void lookupImagesAndBrackets(// Inputs
     }  // end loop over camera types
   }    // end loop over ref images
 
-  std::cout << "Timestamp offset allowed ranges based on current bracketing:\n";
-  // Adjust for timestamp_offsets_max_change
+  // Adjust for timestamp_offsets_max_change. Printing the bounds is useful if
+  // the timestamps can be allowed to change. Turn off printing this for now, as
+  // it is rather confusing. 
+  // std::cout << "If optimizing the timestamp offset, its bounds must be, per sensor:\n";
   for (int cam_type = 0; cam_type < num_cam_types; cam_type++) {
     if (R.isRefSensor(R.cam_names[cam_type]))
       continue;  // bounds don't make sense here
@@ -419,16 +423,18 @@ void lookupImagesAndBrackets(// Inputs
     max_timestamp_offset[cam_type] = std::min(max_timestamp_offset[cam_type],
                                               R.ref_to_cam_timestamp_offsets[cam_type]
                                               + timestamp_offsets_max_change);
-
-    // Tighten a bit to ensure we don't exceed things when we add
-    // and subtract timestamps later. Note that timestamps are
-    // measured in seconds and fractions of a second since epoch and
-    // can be quite large so precision loss can easily happen.
-    min_timestamp_offset[cam_type] += 1.0e-5;
-    max_timestamp_offset[cam_type] -= 1.0e-5;
-    std::cout << std::setprecision(8) << R.cam_names[cam_type]
-              << ": [" << min_timestamp_offset[cam_type]
-              << ", " << max_timestamp_offset[cam_type] << "]\n";
+    // Tighten the range a bit to ensure we don't exceed things when we add and
+    // subtract timestamps later. Note that timestamps are measured in seconds
+    // and fractions of a second since epoch and can be quite large so precision
+    // loss can easily happen.
+    double delta = (max_timestamp_offset[cam_type] - min_timestamp_offset[cam_type]);
+    delta = std::max(std::min(delta/10.0, 1.0e-5), 0.0);
+    min_timestamp_offset[cam_type] += delta;
+    max_timestamp_offset[cam_type] -= delta;
+    // Print the timestamp offset allowed ranges
+    // std::cout << std::setprecision(8) << R.cam_names[cam_type]
+    //           << ": [" << min_timestamp_offset[cam_type]
+    //           << ", " << max_timestamp_offset[cam_type] << "]\n";
   }
 
 }

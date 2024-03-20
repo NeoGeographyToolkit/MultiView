@@ -273,7 +273,7 @@ DEFINE_bool(no_rig, false,
 
 DEFINE_string(out_dir, "",
               "Save in this directory the camera intrinsics and extrinsics. "
-              "See also --save-images_and_depth_clouds, --save-matches, --verbose, "
+              "See also --save-images_and_depth_clouds, --save_matches, --verbose, "
               "and --in_dir.");
 
 DEFINE_string(rig_config, "",
@@ -334,8 +334,7 @@ DEFINE_bool(save_nvm_no_shift, false,
             "drawn with stereo_gui.");
 
 DEFINE_bool(save_matches, false,
-            "Save the interest point matches (all matches and inlier "
-            "matches, after filtering). stereo_gui can be used to "
+            "Save the inlier interest point matches. stereo_gui can be used to "
             "visualize these.");
 
 DEFINE_bool(export_to_voxblox, false,
@@ -1232,8 +1231,10 @@ int main(int argc, char** argv) {
   std::vector<std::map<int, int>> pid_to_cid_fid;
   bool filter_matches_using_cams = true;
   std::vector<std::pair<int, int>> input_image_pairs; // will use num_overlaps instead
+  // Do not save these matches. Only inlier matches will be saved later.
+  bool local_save_matches = false;
   dense_map::detectMatchFeatures(// Inputs
-                                 cams, R.cam_params, FLAGS_out_dir, FLAGS_save_matches,
+                                 cams, R.cam_params, FLAGS_out_dir, local_save_matches,
                                  filter_matches_using_cams, world_to_cam,
                                  FLAGS_num_overlaps, input_image_pairs,
                                  FLAGS_initial_max_reprojection_error,
@@ -1717,9 +1718,8 @@ int main(int argc, char** argv) {
     R.depth_to_image[cam_type].linear() *= depth_to_image_scales[cam_type];
 
   if (FLAGS_save_matches)
-    dense_map::saveInlinerMatchPairs(cams, FLAGS_num_overlaps, pid_to_cid_fid,
+    dense_map::saveInlierMatchPairs(cams, FLAGS_num_overlaps, pid_to_cid_fid,
                                      keypoint_vec, pid_cid_fid_inlier, FLAGS_out_dir);
-
 
   // Update the transforms from the world to every camera
   dense_map::calc_world_to_cam_rig_or_not(  // Inputs
@@ -1740,14 +1740,14 @@ int main(int argc, char** argv) {
                       registration_trans, world_to_ref, world_to_cam, R);
 
     // Transform accordingly the triangulated points
-    dense_map::transformInlierTriPoints(registration_trans, pid_to_cid_fid, pid_cid_fid_inlier,  
-                                        xyz_vec);
+    dense_map::transformInlierTriPoints(registration_trans, pid_to_cid_fid, 
+                                        pid_cid_fid_inlier, xyz_vec);
   }
   
   // TODO(oalexan1): Why the call below works without dense_map:: prepended to it?
   if (FLAGS_out_texture_dir != "")
-    dense_map::meshProjectCameras(R.cam_names, R.cam_params, cams, world_to_cam, mesh, bvh_tree,
-                                  FLAGS_out_texture_dir);
+    dense_map::meshProjectCameras(R.cam_names, R.cam_params, cams, world_to_cam, 
+                                  mesh, bvh_tree, FLAGS_out_texture_dir);
 
   dense_map::saveCameraPoses(FLAGS_out_dir, cams, world_to_cam);
   
