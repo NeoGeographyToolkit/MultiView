@@ -136,7 +136,7 @@ RigSet RigSet::subRig(int rig_id) const {
 const std::string FISHEYE_DISTORTION = "fisheye";
 const std::string RADTAN_DISTORTION  = "radtan";
 const std::string RPC_DISTORTION     = "rpc";
-const std::string NO_DISTORION       = "no_distortion";
+const std::string NO_DISTORTION       = "no_distortion";
 
 // Save the optimized rig configuration
 void writeRigConfig(std::string const& out_dir, bool model_rig, RigSet const& R) {
@@ -177,7 +177,7 @@ void writeRigConfig(std::string const& out_dir, bool model_rig, RigSet const& R)
     }
     f << "\n";
 
-    if (D.size() == 0) f << "distortion_type: " << dense_map::NO_DISTORION << "\n";
+    if (D.size() == 0) f << "distortion_type: " << dense_map::NO_DISTORTION << "\n";
     else if (D.size() == 1)
       f << "distortion_type: " << dense_map::FISHEYE_DISTORTION << "\n";
     else if (D.size() >= 4 && D.size() <= 5)
@@ -218,6 +218,7 @@ void writeRigConfig(std::string const& out_dir, bool model_rig, RigSet const& R)
 // read the desired number.
 void readConfigVals(std::ifstream & f, std::string const& tag, int desired_num_vals,
                     Eigen::VectorXd & vals) {
+
   // Clear the output
   vals.resize(0);
 
@@ -242,14 +243,19 @@ void readConfigVals(std::ifstream & f, std::string const& tag, int desired_num_v
     // Here must remove anything after the pound sign
     
     if (line.empty() || line[0] == '#') continue;
+    
+    // Remove commas that occasionally appear in the file
+    for (size_t c = 0; c < line.size(); c++) {
+      if (line[c] == ',') 
+        line[c] = ' ';
+    }
 
     std::istringstream iss(line);
     std::string token;
     iss >> token;
-    double val = 0.0;
-    while (iss >> val) {
-      local_vals.push_back(val);
-    }
+    std::string val; 
+    while (iss >> val)
+      local_vals.push_back(atof(val.c_str()));
 
     if (token == "") 
       continue; // likely just whitespace is present on the line
@@ -274,6 +280,7 @@ void readConfigVals(std::ifstream & f, std::string const& tag, int desired_num_v
 // read the desired number.
 void readConfigVals(std::ifstream & f, std::string const& tag, int desired_num_vals,
                     std::vector<std::string> & vals) {
+
   // Clear the output
   vals.resize(0);
 
@@ -285,10 +292,12 @@ void readConfigVals(std::ifstream & f, std::string const& tag, int desired_num_v
     std::string token;
     iss >> token;
     std::string val;
-    while (iss >> val)
+    while (iss >> val) {
       vals.push_back(val);
+    }
 
-    if (token != tag) throw std::runtime_error("Could not read value for: " + tag);
+    if (token != tag) 
+      throw std::runtime_error("Could not read value for: " + tag);
 
     if (desired_num_vals >= 0 && vals.size() != desired_num_vals)
       throw std::runtime_error("Read an incorrect number of values for: " + tag);
@@ -356,13 +365,12 @@ void readRigConfig(std::string const& rig_config, bool have_rig_transforms, RigS
       readConfigVals(f, "distortion_coeffs:", -1, vals);
       if (vals.size() != 0 && vals.size() != 1 && vals.size() != 4 && vals.size() < 5)
         LOG(FATAL) << "Expecting 0, 1, 4, 5, or more distortion coefficients.\n";
-      
       Eigen::VectorXd distortion = vals;
-      
+
       readConfigVals(f, "distortion_type:", 1, str_vals);
-      if (distortion.size() == 0 && str_vals[0] != dense_map::NO_DISTORION)
+      if (distortion.size() == 0 && str_vals[0] != dense_map::NO_DISTORTION)
         LOG(FATAL) << "When there are no distortion coefficients, distortion type must be: "
-                   << dense_map::NO_DISTORION << "\n";
+                   << dense_map::NO_DISTORTION << "\n";
       if (distortion.size() == 1 && str_vals[0] != dense_map::FISHEYE_DISTORTION)
         LOG(FATAL) << "When there is 1 distortion coefficient, distortion type must be: "
                    << dense_map::FISHEYE_DISTORTION << "\n";

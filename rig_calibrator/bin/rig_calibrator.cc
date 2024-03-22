@@ -343,7 +343,8 @@ DEFINE_bool(export_to_voxblox, false,
 
 DEFINE_bool(save_pinhole_cameras, false,
             "Save the optimized cameras in ASP's Pinhole format. "
-            "The distortion model does not get saved.");
+            "The distortion model gets saved if it is of ``radtan`` type (OpenCV "
+            "radial-tangential distortion model).");
 
 DEFINE_bool(save_transformed_depth_clouds, false,
             "Save the depth clouds with the camera transform applied to them to make "
@@ -1025,7 +1026,7 @@ int main(int argc, char** argv) {
 
   dense_map::RigSet R;
   dense_map::readRigConfig(FLAGS_rig_config, FLAGS_use_initial_rig_transforms, R);
-
+  
   // Sanity check
   size_t max_num_sensors_per_rig = 0;
   for (size_t rig_it = 0; rig_it < R.cam_set.size(); rig_it++) 

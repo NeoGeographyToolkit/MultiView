@@ -313,7 +313,26 @@ void writePinholeCamera(camera::CameraParameters const& cam_params,
       << T(1, 0) << ' ' << T(1, 1) << ' ' << T(1, 2) << ' '
       << T(2, 0) << ' ' << T(2, 1) << ' ' << T(2, 2) << "\n";
   ofs << "pitch = 1\n";
-  ofs << "NULL\n";
+  
+  auto dist = cam_params.GetDistortion();
+  // Dist size is 0, 1, 4, or 5
+  if (dist.size() == 0) {
+    ofs << "NULL\n";
+  } else if (dist.size() == 1) {
+    std::cout << "ASP does not support fisheye distortion. Writing no distortion.\n";
+    ofs << "NULL\n";
+  } else if (dist.size() == 4 || dist.size() == 5) {
+    ofs << "TSAI\n";
+    ofs << "k1 = " << dist[0] << "\n";
+    ofs << "k2 = " << dist[1] << "\n";
+    if (dist.size() > 4)
+      ofs << "k3 = " << dist[4] << "\n";
+    ofs << "p1 = " << dist[2] << "\n";
+    ofs << "p2 = " << dist[3] << "\n";
+  } else {
+    LOG(FATAL) << "Expecting 0, 1, 4, or 5 distortion coefficients.\n";
+  }
+  
   ofs.close();
   
 }
