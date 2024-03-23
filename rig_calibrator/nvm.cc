@@ -325,10 +325,10 @@ void writePinholeCamera(camera::CameraParameters const& cam_params,
     ofs << "TSAI\n";
     ofs << "k1 = " << dist[0] << "\n";
     ofs << "k2 = " << dist[1] << "\n";
-    if (dist.size() > 4)
-      ofs << "k3 = " << dist[4] << "\n";
     ofs << "p1 = " << dist[2] << "\n";
     ofs << "p2 = " << dist[3] << "\n";
+    if (dist.size() > 4)
+      ofs << "k3 = " << dist[4] << "\n";
   } else {
     LOG(FATAL) << "Expecting 0, 1, 4, or 5 distortion coefficients.\n";
   }
