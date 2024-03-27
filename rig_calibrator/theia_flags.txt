@@ -24,7 +24,7 @@
 
 ############### Feature Extraction ###############
 --descriptor=SIFT
---feature_density=DENSE
+--feature_density=NORMAL
 
 ############### Matching Options ###############
 # Perform matching out-of-core. If set to true, the matching_working_directory
