@@ -153,7 +153,7 @@ def readConfigVals(handle, tag, num_vals):
         
         # Wipe everything after pound but keep the newline,
         # as otherwise this will be treated as the last line
-        match = re.match("^(.*?)\#.*?\n", line)
+        match = re.match(r"^(.*?)\#.*?\n", line)
         if match:
             line = match.group(1) + "\n"
 
@@ -161,11 +161,12 @@ def readConfigVals(handle, tag, num_vals):
             # Last line, lacks a newline
             break
 
-        line = line.rstrip() # wipe newlne
+        line = line.rstrip() # wipe newline
         if len(line) == 0:
             continue
         
-        vals = line.split()
+        # Split by commas and/or spaces
+        vals = re.split(r'[,\s]+', line)
 
         # Quietly gloss over ref_sensor_name, as we don't need it.
         if len(vals) > 0 and vals[0] == 'ref_sensor_name:':
@@ -283,7 +284,7 @@ def parse_cameras(image_list, subset_list, rig_sensor,
     world_to_cam = []
     image_count = 0 # Below, the count of the first image will be 1
     for line in lines:
-        m = re.match("^(.*?)\#", line)
+        m = re.match(r"^(.*?)\#", line)
         if m:
             # Wipe comments
             line = m.group(1)
@@ -389,7 +390,7 @@ def read_intrinsics(intrinsics_file):
 
     with open(intrinsics_file, "r") as f:
         for line in f:
-            if re.match("^\s*\#", line):
+            if re.match(r"^\s*\#", line):
                 continue  # ignore the comments
             vals = line.split()
             if len(vals) < 5:
