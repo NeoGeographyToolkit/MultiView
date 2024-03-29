@@ -301,10 +301,11 @@ DEFINE_int32(num_overlaps, 0, "Match an image with this many images (of all came
              "advanced controls, run: rig_calibrator --help | grep -i sift.");
 
 DEFINE_bool(use_initial_rig_transforms, false,
-            "Use the transforms among the sensors of the rig specified via --rig_config. "
-            "That regardless if we continue with using a rig (--no_rig is not set) or "
-            "not. If this option is not set, and a rig is desired, derive the "
-            "rig transforms from the poses of individual cameras.");
+            "Use the transforms between the sensors (ref_to_sensor_transform) of the rig "
+            "specified via --rig_config to initialize all non-reference camera poses based "
+            "on the reference camera poses and the rig transforms. If this option is not "
+            "set, and a rig is desired, derive the rig transforms from the poses of "
+            "individual cameras.");
 
 DEFINE_string(extra_list, "",
               "Add to the SfM solution the camera poses for the additional images/depth "
@@ -1086,19 +1087,23 @@ int main(int argc, char** argv) {
   // De-allocate data we no longer need
   image_maps = std::vector<dense_map::MsgMap>();
   depth_maps = std::vector<dense_map::MsgMap>();
+
+  if (FLAGS_no_rig && FLAGS_use_initial_rig_transforms)
+    LOG(FATAL) << "Cannot use initial rig transforms without a rig.\n";
   
   if (!FLAGS_no_rig && FLAGS_use_initial_rig_transforms) {
     // If we can use the initial rig transform, compute and
     // overwrite overwrite world_to_cam, the transforms from the
-    // world to each camera. This regardless if use continue
-    // using a rig later on.
-     dense_map::calc_world_to_cam_using_rig(// Inputs
-                                            !FLAGS_no_rig,
-                                            cams, world_to_ref, ref_timestamps,
-                                            R.ref_to_cam_trans,
-                                            R.ref_to_cam_timestamp_offsets,
-                                            // Output
-                                            world_to_cam);
+    // world to each non-reference camera. 
+    // TODO(oalexan1): Test if this works with --no_rig. For now this 
+    // combination is not allowed.
+    dense_map::calc_world_to_cam_using_rig(// Inputs
+                                           !FLAGS_no_rig,
+                                           cams, world_to_ref, ref_timestamps,
+                                           R.ref_to_cam_trans,
+                                           R.ref_to_cam_timestamp_offsets,
+                                           // Output
+                                           world_to_cam);
   }
   
   if (!FLAGS_no_rig && !FLAGS_use_initial_rig_transforms) {

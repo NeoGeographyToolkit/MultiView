@@ -113,7 +113,7 @@
 --absolute_pose_reprojection_error_threshold=10
 --partial_bundle_adjustment_num_views=20
 --full_bundle_adjustment_growth_percent=5
---min_num_absolute_pose_inliers=20
+--min_num_absolute_pose_inliers=30
 
 ############### Bundle Adjustment Options ###############
 # Set this parameter to a value other than NONE if you want to utilize a robust

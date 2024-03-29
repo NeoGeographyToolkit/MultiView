@@ -335,3 +335,14 @@ if __name__ == "__main__":
     write_with_full_path(nvm_file, final_nvm_file, offset_file, final_offset_file,
                          images, sym_images)
     
+    # Wipe the reconstruction.nvm file and its offsets, as it has relative paths.
+    # TODO(oalexan1): May need to write cameras.nvm to start with, then overwrite it
+    # in-place.
+    if os.path.exists(nvm_file):
+        #print("Removing: " + nvm_file)
+        os.remove(nvm_file)
+    # Also wipe the offset file
+    if os.path.exists(offset_file):
+        #print("Removing: " + offset_file)
+        os.remove(offset_file)
+    
