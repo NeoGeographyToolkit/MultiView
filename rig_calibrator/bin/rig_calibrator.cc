@@ -304,8 +304,7 @@ DEFINE_bool(use_initial_rig_transforms, false,
             "Use the transforms between the sensors (ref_to_sensor_transform) of the rig "
             "specified via --rig_config to initialize all non-reference camera poses based "
             "on the reference camera poses and the rig transforms. If this option is not "
-            "set, and a rig is desired, derive the rig transforms from the poses of "
-            "individual cameras.");
+            "set, derive the rig transforms from the poses of individual cameras.");
 
 DEFINE_string(extra_list, "",
               "Add to the SfM solution the camera poses for the additional images/depth "
