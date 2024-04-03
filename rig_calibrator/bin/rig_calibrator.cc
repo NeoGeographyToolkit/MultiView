@@ -146,7 +146,7 @@ DEFINE_double(robust_threshold, 0.5,
               "by corresponding weight) much larger than this will be "
               "logarithmically attenuated to affect less the cost function.\n");
 
-DEFINE_int32(num_iterations, 20, "How many solver iterations to perform in calibration.");
+DEFINE_int32(num_iterations, 100, "How many solver iterations to perform in calibration.");
 
 DEFINE_double(bracket_len, 0.6,
               "Lookup non-reference cam images only between consecutive ref cam images "
