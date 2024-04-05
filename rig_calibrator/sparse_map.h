@@ -8,6 +8,9 @@
 #include <rig_calibrator/matching.h>
 #include <rig_calibrator/interest_point.h>
 
+#include <numeric>
+#include <set>
+
 namespace cv {
   class Mat;
   class DMatch;

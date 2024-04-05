@@ -37,133 +37,78 @@
 camera::CameraParameters::CameraParameters(Eigen::Vector2i const& image_size,
     Eigen::Vector2d const& focal_length,
     Eigen::Vector2d const& optical_center,
-    Eigen::VectorXd const& distortion) {
+    Eigen::VectorXd const& distortion,
+    DistortionType distortion_type) {
   SetDistortedSize(image_size);
   SetDistortedCropSize(image_size);
   SetUndistortedSize(image_size);
-  focal_length_ = focal_length;
-  optical_offset_ = optical_center;
-  crop_offset_.setZero();
+  m_focal_length = focal_length;
+  m_optical_offset = optical_center;
+  m_crop_offset.setZero();
   SetDistortion(distortion);
-}
-
-camera::CameraParameters::CameraParameters(std::string const& calibration_file,
-                                           std::string const & base_dir) {
-  std::ifstream f(calibration_file);
-  // it may be a relative path to the map file's directory
-  if (!f.good() && base_dir != "") {
-    f.open(base_dir + "/" + calibration_file);
-  }
-  if (!f.good()) {
-    LOG(FATAL) <<  "Calibration file does not exist: " << calibration_file;
-  }
-
-  cv::FileStorage fs(calibration_file, cv::FileStorage::READ);
-
-  cv::Mat cam_mat, dist_coeffs;
-  Eigen::Vector2i size;
-
-  // Read in distorted image size.
-  fs["width"]  >> size[0];
-  fs["height"] >> size[1];
-  if (size[0] == 0 || size[1] == 0) {
-    fs["image_width"]  >> size[0];
-    fs["image_height"]  >> size[1];
-  }
-  SetDistortedSize(size);
-  SetDistortedCropSize(size);
-
-  // Read in focal length and optical offset
-  fs["intrinsic_matrix"] >> cam_mat;
-  if (cam_mat.rows == 0 || cam_mat.cols == 0)
-    fs["camera_matrix"] >> cam_mat;
-  optical_offset_ << cam_mat.at<double>(0, 2), cam_mat.at<double>(1, 2);
-  focal_length_ << cam_mat.at<double>(0, 0), cam_mat.at<double>(1, 1);
-
-  // Read in the distortion coefficients
-  fs["distortion"] >> dist_coeffs;
-  if (dist_coeffs.rows == 0 || dist_coeffs.cols == 0)
-    fs["distortion_coefficients"] >> dist_coeffs;
-  Eigen::VectorXd buffer(dist_coeffs.cols * dist_coeffs.rows);
-  for (int32_t i = 0; i < buffer.size(); i++) {
-    buffer[i] = dist_coeffs.at<double>(i);
-  }
-  SetDistortion(buffer);
-
-  // Load up the undistorted image size and handle if it was specified.
-  fs["undistorted_width"] >> size[0];
-  fs["undistorted_height"] >> size[1];
-  if (!(size.array() > 0).all()) {
-    size = distorted_image_size_;
-  }
-  SetUndistortedSize(size);
-
-  // Read in crop offset
-  fs["crop_x"] >> size[0];  // These default to zero if not specified
-  fs["crop_y"] >> size[1];
-  crop_offset_ = size;
+  m_distortion_type = distortion_type;
 }
 
 void camera::CameraParameters::SetDistortedSize(Eigen::Vector2i const& image_size) {
-  distorted_image_size_ = image_size;
-  distorted_half_size_ = image_size.cast<double>() / 2.0;
+  m_distorted_image_size = image_size;
+  m_distorted_half_size = image_size.cast<double>() / 2.0;
 }
 
 const Eigen::Vector2i& camera::CameraParameters::GetDistortedSize() const {
-  return distorted_image_size_;
+  return m_distorted_image_size;
 }
 
 const Eigen::Vector2d& camera::CameraParameters::GetDistortedHalfSize() const {
-  return distorted_half_size_;
+  return m_distorted_half_size;
 }
 
 void camera::CameraParameters::SetDistortedCropSize(Eigen::Vector2i const& crop_size) {
-  distorted_crop_size_ = crop_size;
+  m_distorted_crop_size = crop_size;
 }
 
 const Eigen::Vector2i& camera::CameraParameters::GetDistortedCropSize() const {
-  return distorted_crop_size_;
+  return m_distorted_crop_size;
 }
 
 void camera::CameraParameters::SetUndistortedSize(Eigen::Vector2i const& image_size) {
-  undistorted_image_size_ = image_size;
-  undistorted_half_size_ = image_size.cast<double>() / 2.0;
+  m_undistorted_size = image_size;
+  m_undistorted_half_size = image_size.cast<double>() / 2.0;
 }
 
 const Eigen::Vector2i& camera::CameraParameters::GetUndistortedSize() const {
-  return undistorted_image_size_;
+  return m_undistorted_size;
 }
 
 const Eigen::Vector2d& camera::CameraParameters::GetUndistortedHalfSize() const {
-  return undistorted_half_size_;
+  return m_undistorted_half_size;
 }
 
 void camera::CameraParameters::SetCropOffset(Eigen::Vector2i const& crop) {
-  crop_offset_ = crop;
+  m_crop_offset = crop;
 }
 
 const Eigen::Vector2i& camera::CameraParameters::GetCropOffset() const {
-  return crop_offset_;
+  return m_crop_offset;
 }
 
 void camera::CameraParameters::SetOpticalOffset(Eigen::Vector2d const& offset) {
-  optical_offset_ = offset;
+  m_optical_offset = offset;
 }
 
 const Eigen::Vector2d& camera::CameraParameters::GetOpticalOffset() const {
-  return optical_offset_;
+  return m_optical_offset;
 }
 
 void camera::CameraParameters::SetFocalLength(Eigen::Vector2d const& f) {
-  focal_length_ = f;
+  m_focal_length = f;
 }
 
 double camera::CameraParameters::GetFocalLength() const {
-  return focal_length_.mean();
+  return m_focal_length.mean();
 }
 
 const Eigen::Vector2d& camera::CameraParameters::GetFocalVector() const {
-  return focal_length_;
+  return m_focal_length;
 }
 
 void camera::CameraParameters::SetDistortion(Eigen::VectorXd const& distortion) {
@@ -171,23 +116,23 @@ void camera::CameraParameters::SetDistortion(Eigen::VectorXd const& distortion) 
   // Reset this. Will be needed only with RPC distortion.
   m_rpc = dense_map::RPCLensDistortion(); 
   
-  distortion_coeffs_ = distortion;
+  m_distortion_coeffs = distortion;
 
   // Ensure variables are initialized
-  distortion_precalc1_ = 0;
-  distortion_precalc2_ = 0;
-  distortion_precalc3_ = 0;
+  m_distortion_precalc1 = 0;
+  m_distortion_precalc2 = 0;
+  m_distortion_precalc3 = 0;
 
-  switch (distortion_coeffs_.size()) {
+  switch (m_distortion_coeffs.size()) {
   case 0:
     // No lens distortion!
     break;
   case 1:
     // FOV model
     // inverse alpha
-    distortion_precalc1_ = 1 / distortion[0];
+    m_distortion_precalc1 = 1 / distortion[0];
     // Inside tangent function
-    distortion_precalc2_ = 2 * tan(distortion[0] / 2);
+    m_distortion_precalc2 = 2 * tan(distortion[0] / 2);
     break;
   case 4:
     // Fall through intended.
@@ -198,10 +143,10 @@ void camera::CameraParameters::SetDistortion(Eigen::VectorXd const& distortion) 
   default:
     // Try to do RPC
     try { 
-      m_rpc.set_dist_undist_params(distortion_coeffs_);
+      m_rpc.set_dist_undist_params(m_distortion_coeffs);
     } catch(std::exception const& e) {
       LOG(FATAL) << "Recieved irregular distortion vector size. Size = "
-                 << distortion_coeffs_.size() << "\n"
+                 << m_distortion_coeffs.size() << "\n"
                  << "Additional message: " << e.what() << "\n";
     }
   }
@@ -209,7 +154,7 @@ void camera::CameraParameters::SetDistortion(Eigen::VectorXd const& distortion) 
 
 // This must be called before a model having RPC distortion can be used
 // for undistortion. Here it is assumed that the distortion component
-// of distortion_coeffs_ is up-to-date, and its undistortion component
+// of m_distortion_coeffs is up-to-date, and its undistortion component
 // must be updated.
 void camera::CameraParameters::updateRpcUndistortion(int num_threads) {
   int num_samples = 400; // in each of rows and columns; should be enough
@@ -222,17 +167,17 @@ void camera::CameraParameters::updateRpcUndistortion(int num_threads) {
             << num_iterations << " iterations, and "
             << num_threads << " threads." << std::endl;
   
-  if (distortion_coeffs_.size() % 2 != 0) 
+  if (m_distortion_coeffs.size() % 2 != 0) 
     LOG(FATAL) << "Must have an even number of RPC distortion coefficients.\n";
 
-  // distortion_coeffs_ stores both distortion and undistortion rpc coeffs. Get
+  // m_distortion_coeffs stores both distortion and undistortion rpc coeffs. Get
   // the distortion ones, and update the undistortion ones.
   // This is quite confusing, but an outside user of this class need not know
   // these details
-  int num_dist = distortion_coeffs_.size()/2;
+  int num_dist = m_distortion_coeffs.size()/2;
   Eigen::VectorXd rpc_dist_coeffs(num_dist);
   for (int it = 0; it < num_dist; it++)
-    rpc_dist_coeffs[it] = distortion_coeffs_[it];
+    rpc_dist_coeffs[it] = m_distortion_coeffs[it];
 
   Eigen::VectorXd rpc_undist_coeffs;
   dense_map::fitRpcUndist(rpc_dist_coeffs, num_samples,
@@ -250,11 +195,11 @@ void camera::CameraParameters::updateRpcUndistortion(int num_threads) {
 
   // Copy back the updated values
   for (int it = 0; it < num_dist; it++)
-    distortion_coeffs_[it + num_dist] = rpc_undist_coeffs[it];
+    m_distortion_coeffs[it + num_dist] = rpc_undist_coeffs[it];
 }
 
 const Eigen::VectorXd& camera::CameraParameters::GetDistortion() const {
-  return distortion_coeffs_;
+  return m_distortion_coeffs;
 }
 
 void camera::CameraParameters::DistortCentered(Eigen::Vector2d const& undistorted_c,
@@ -263,35 +208,35 @@ void camera::CameraParameters::DistortCentered(Eigen::Vector2d const& undistorte
   // undistorted_len_x/2.0 and undistorted_len_y/2.0 subtracted from
   // them. The outputs will have distorted_len_x/2.0 and
   // distorted_len_y/2.0 subtracted from them.
-  if (distortion_coeffs_.size() == 0) {
+  if (m_distortion_coeffs.size() == 0) {
     // There is no distortion
-    *distorted_c = undistorted_c + optical_offset_ - distorted_half_size_;
-  } else if (distortion_coeffs_.size() == 1) {
+    *distorted_c = undistorted_c + m_optical_offset - m_distorted_half_size;
+  } else if (m_distortion_coeffs.size() == 1) {
     // This is the FOV model
-    Eigen::Vector2d norm = undistorted_c.cwiseQuotient(focal_length_);
+    Eigen::Vector2d norm = undistorted_c.cwiseQuotient(m_focal_length);
     double ru = norm.norm();
-    double rd = atan(ru * distortion_precalc2_) * distortion_precalc1_;
+    double rd = atan(ru * m_distortion_precalc2) * m_distortion_precalc1;
     double conv;
     if (ru > 1e-5) {
       conv = rd / ru;
     } else {
       conv = 1;
     }
-    *distorted_c = (optical_offset_ - distorted_half_size_) +
-      conv * norm.cwiseProduct(focal_length_);
-  } else if (distortion_coeffs_.size() == 4 ||
-             distortion_coeffs_.size() == 5) {
+    *distorted_c = (m_optical_offset - m_distorted_half_size) +
+      conv * norm.cwiseProduct(m_focal_length);
+  } else if (m_distortion_coeffs.size() == 4 ||
+             m_distortion_coeffs.size() == 5) {
     // Tsai lens distortion
-    double k1 = distortion_coeffs_[0];
-    double k2 = distortion_coeffs_[1];
-    double p1 = distortion_coeffs_[2];
-    double p2 = distortion_coeffs_[3];
+    double k1 = m_distortion_coeffs[0];
+    double k2 = m_distortion_coeffs[1];
+    double p1 = m_distortion_coeffs[2];
+    double p2 = m_distortion_coeffs[3];
     double k3 = 0;
-    if (distortion_coeffs_.size() == 5)
-      k3 = distortion_coeffs_[4];
+    if (m_distortion_coeffs.size() == 5)
+      k3 = m_distortion_coeffs[4];
 
     // To relative coordinates
-    Eigen::Vector2d norm = undistorted_c.cwiseQuotient(focal_length_);
+    Eigen::Vector2d norm = undistorted_c.cwiseQuotient(m_focal_length);
     double r2 = norm.squaredNorm();
 
     // Radial distortion
@@ -304,8 +249,8 @@ void camera::CameraParameters::DistortCentered(Eigen::Vector2d const& undistorte
                       p1 * (r2 + 2 * norm[1] * norm[1]) + 2 * p2 * norm[0] * norm[1]);
 
     // Back to absolute coordinates.
-    *distorted_c = distorted_c->cwiseProduct(focal_length_) +
-      (optical_offset_ - distorted_half_size_);
+    *distorted_c = distorted_c->cwiseProduct(m_focal_length) +
+      (m_optical_offset - m_distorted_half_size);
   } else {
     // If we got so far, we validated that RPC distortion should work
     *distorted_c = m_rpc.distort_centered(undistorted_c);
@@ -319,21 +264,21 @@ void camera::CameraParameters::UndistortCentered(Eigen::Vector2d const& distorte
   // distorted_len_x and distorted_len_y subtracted from them. The
   // outputs will have undistorted_len_x and undistorted_len_y
   // subtracted from them.
-  if (distortion_coeffs_.size() == 0) {
+  if (m_distortion_coeffs.size() == 0) {
     // No lens distortion
-    *undistorted_c = distorted_c - (optical_offset_ - distorted_half_size_);
-  } else if (distortion_coeffs_.size() == 1) {
+    *undistorted_c = distorted_c - (m_optical_offset - m_distorted_half_size);
+  } else if (m_distortion_coeffs.size() == 1) {
     // FOV lens distortion
     Eigen::Vector2d norm =
-      (distorted_c - (optical_offset_ - distorted_half_size_)).cwiseQuotient(focal_length_);
+      (distorted_c - (m_optical_offset - m_distorted_half_size)).cwiseQuotient(m_focal_length);
     double rd = norm.norm();
-    double ru = tan(rd * distortion_coeffs_[0]) / distortion_precalc2_;
+    double ru = tan(rd * m_distortion_coeffs[0]) / m_distortion_precalc2;
     double conv = 1.0;
     if (rd > 1e-5)
       conv = ru / rd;
-    *undistorted_c = conv * norm.cwiseProduct(focal_length_);
-  } else if (distortion_coeffs_.size() == 4 ||
-             distortion_coeffs_.size() == 5) {
+    *undistorted_c = conv * norm.cwiseProduct(m_focal_length);
+  } else if (m_distortion_coeffs.size() == 4 ||
+             m_distortion_coeffs.size() == 5) {
     // Tsai lens distortion
     cv::Mat src(1, 1, CV_64FC2);
     cv::Mat dst(1, 1, CV_64FC2);
@@ -341,12 +286,12 @@ void camera::CameraParameters::UndistortCentered(Eigen::Vector2d const& distorte
     cv::Mat dist_int_mat(3, 3, cv::DataType<double>::type),
       undist_int_mat(3, 3, cv::DataType<double>::type);
     cv::Mat cvdist;
-    cv::eigen2cv(distortion_coeffs_, cvdist);
+    cv::eigen2cv(m_distortion_coeffs, cvdist);
     cv::eigen2cv(GetIntrinsicMatrix<DISTORTED>(), dist_int_mat);
     cv::eigen2cv(GetIntrinsicMatrix<UNDISTORTED>(), undist_int_mat);
-    src_map = distorted_c + distorted_half_size_;
+    src_map = distorted_c + m_distorted_half_size;
     cv::undistortPoints(src, dst, dist_int_mat, cvdist, cv::Mat(), undist_int_mat);
-    *undistorted_c = dst_map - undistorted_half_size_;
+    *undistorted_c = dst_map - m_undistorted_half_size;
   } else {
     // If we got so far, we validated that RPC distortion should work
     *undistorted_c = m_rpc.undistort_centered(distorted_c);
@@ -359,10 +304,10 @@ void camera::CameraParameters::UndistortCentered(Eigen::Vector2d const& distorte
 // with 'scale' being the ratio of the width of the image at different resolution
 // and the one at the resolution at which the distortion model is computed.
 void camera::CameraParameters::GenerateRemapMaps(cv::Mat* remap_map, double scale) {
-  remap_map->create(scale*undistorted_image_size_[1], scale*undistorted_image_size_[0], CV_32FC2);
+  remap_map->create(scale*m_undistorted_size[1], scale*m_undistorted_size[0], CV_32FC2);
   Eigen::Vector2d undistorted, distorted;
-  for (undistorted[1] = 0; undistorted[1] < scale*undistorted_image_size_[1]; undistorted[1]++) {
-    for (undistorted[0] = 0; undistorted[0] < scale*undistorted_image_size_[0]; undistorted[0]++) {
+  for (undistorted[1] = 0; undistorted[1] < scale*m_undistorted_size[1]; undistorted[1]++) {
+    for (undistorted[0] = 0; undistorted[0] < scale*m_undistorted_size[0]; undistorted[0]++) {
       Convert<UNDISTORTED, DISTORTED>(undistorted/scale, &distorted);
       remap_map->at<cv::Vec2f>(undistorted[1], undistorted[0])[0] = scale*distorted[0];
       remap_map->at<cv::Vec2f>(undistorted[1], undistorted[0])[1] = scale*distorted[1];
@@ -379,10 +324,10 @@ namespace camera {
   void camera::CameraParameters::Convert<TYPEA, TYPEB>(Eigen::Vector2d const& input, Eigen::Vector2d *output) const
 
   DEFINE_CONVERSION(RAW, DISTORTED) {
-    *output = input - crop_offset_.cast<double>();
+    *output = input - m_crop_offset.cast<double>();
   }
   DEFINE_CONVERSION(DISTORTED, RAW) {
-    *output = input + crop_offset_.cast<double>();
+    *output = input + m_crop_offset.cast<double>();
   }
   DEFINE_CONVERSION(UNDISTORTED_C, DISTORTED_C) {
     DistortCentered(input, output);
@@ -391,27 +336,27 @@ namespace camera {
     UndistortCentered(input, output);
   }
   DEFINE_CONVERSION(UNDISTORTED, UNDISTORTED_C) {
-    *output = input - undistorted_half_size_;
+    *output = input - m_undistorted_half_size;
   }
   DEFINE_CONVERSION(UNDISTORTED_C, UNDISTORTED) {
-    *output = input + undistorted_half_size_;
+    *output = input + m_undistorted_half_size;
   }
   DEFINE_CONVERSION(DISTORTED, UNDISTORTED) {
-    Convert<DISTORTED_C, UNDISTORTED_C>(input - distorted_half_size_, output);
-    *output += undistorted_half_size_;
+    Convert<DISTORTED_C, UNDISTORTED_C>(input - m_distorted_half_size, output);
+    *output += m_undistorted_half_size;
   }
   DEFINE_CONVERSION(UNDISTORTED, DISTORTED) {
     Eigen::Vector2d centered_output;
     Convert<UNDISTORTED, UNDISTORTED_C>(input, output);
     Convert<UNDISTORTED_C, DISTORTED_C>(*output, &centered_output);
-    *output = centered_output + distorted_half_size_;
+    *output = centered_output + m_distorted_half_size;
   }
   DEFINE_CONVERSION(DISTORTED, UNDISTORTED_C) {
-    Convert<DISTORTED_C, UNDISTORTED_C>(input - distorted_half_size_, output);
+    Convert<DISTORTED_C, UNDISTORTED_C>(input - m_distorted_half_size, output);
   }
   DEFINE_CONVERSION(UNDISTORTED_C, DISTORTED) {
     Convert<UNDISTORTED_C, DISTORTED_C>(input, output);
-    *output += distorted_half_size_;
+    *output += m_distorted_half_size;
   }
 
 #undef DEFINE_CONVERSION
@@ -422,27 +367,27 @@ namespace camera {
   Eigen::Matrix3d camera::CameraParameters::GetIntrinsicMatrix<TYPE>() const
 
   DEFINE_INTRINSIC(RAW) {
-    Eigen::Matrix3d k = focal_length_.homogeneous().asDiagonal();
-    k.block<2, 1>(0, 2) = optical_offset_ + crop_offset_.cast<double>();
+    Eigen::Matrix3d k = m_focal_length.homogeneous().asDiagonal();
+    k.block<2, 1>(0, 2) = m_optical_offset + m_crop_offset.cast<double>();
     return k;
   }
   DEFINE_INTRINSIC(DISTORTED) {
-    Eigen::Matrix3d k = focal_length_.homogeneous().asDiagonal();
-    k.block<2, 1>(0, 2) = optical_offset_;
+    Eigen::Matrix3d k = m_focal_length.homogeneous().asDiagonal();
+    k.block<2, 1>(0, 2) = m_optical_offset;
     return k;
   }
   DEFINE_INTRINSIC(DISTORTED_C) {
-    Eigen::Matrix3d k = focal_length_.homogeneous().asDiagonal();
-    k.block<2, 1>(0, 2) = optical_offset_ - distorted_half_size_;
+    Eigen::Matrix3d k = m_focal_length.homogeneous().asDiagonal();
+    k.block<2, 1>(0, 2) = m_optical_offset - m_distorted_half_size;
     return k;
   }
   DEFINE_INTRINSIC(UNDISTORTED) {
-    Eigen::Matrix3d k = focal_length_.homogeneous().asDiagonal();
-    k.block<2, 1>(0, 2) = undistorted_half_size_;
+    Eigen::Matrix3d k = m_focal_length.homogeneous().asDiagonal();
+    k.block<2, 1>(0, 2) = m_undistorted_half_size;
     return k;
   }
   DEFINE_INTRINSIC(UNDISTORTED_C) {
-    Eigen::Matrix3d k = focal_length_.homogeneous().asDiagonal();
+    Eigen::Matrix3d k = m_focal_length.homogeneous().asDiagonal();
     return k;
   }
 

@@ -205,25 +205,36 @@ def genTheiaInputs(rig_config, args, image_array):
                 fh.write('"principal_point" : [' + \
                          rig_config[sensor_id]["optical_center"][0] + ", " + \
                          rig_config[sensor_id]["optical_center"][1] + "],\n")
-
+                
+                dist_coeffs = rig_config[sensor_id]["distortion_coeffs"]
+                        
                 if rig_config[sensor_id]['distortion_type'] == 'no_distortion':
                     fh.write('"camera_intrinsics_type" : "PINHOLE"\n')
-                elif rig_config[sensor_id]['distortion_type'] == 'fisheye':
+                elif rig_config[sensor_id]['distortion_type'] == 'fov':
                     fh.write('"radial_distortion_1" : ' + \
-                             rig_config[sensor_id]["distortion_coeffs"][0] + ",\n")
+                             dist_coeffs[0] + ",\n")
                     fh.write('"camera_intrinsics_type" : "FOV"\n')
+                elif rig_config[sensor_id]['distortion_type'] == 'fisheye':
+                    # Theia expects the fisheye model to have 4 distortion coefficients.
+                    k1 = dist_coeffs[0]
+                    k2 = dist_coeffs[1]
+                    k3 = dist_coeffs[2]
+                    k4 = dist_coeffs[3]
+                    fh.write('"radial_distortion_coeffs" : [' + \
+                             k1 + ", " + k2 + ", " + k3 + ", " + k4 + "],\n")
+                    fh.write('"camera_intrinsics_type" : "FISHEYE"\n')
                 elif rig_config[sensor_id]['distortion_type'] == 'radtan':
                     
                     # Distortion coeffs convention copied from
                     # camera_params.cc. JSON format from
                     # calibration_test.json in TheiaSFM.
-                    k1 = rig_config[sensor_id]["distortion_coeffs"][0]
-                    k2 = rig_config[sensor_id]["distortion_coeffs"][1]
-                    p1 = rig_config[sensor_id]["distortion_coeffs"][2]
-                    p2 = rig_config[sensor_id]["distortion_coeffs"][3]
+                    k1 = dist_coeffs[0]
+                    k2 = dist_coeffs[1]
+                    p1 = dist_coeffs[2]
+                    p2 = dist_coeffs[3]
                     k3 = '0'
-                    if len(rig_config[sensor_id]["distortion_coeffs"]) == 5:
-                        k3 = rig_config[sensor_id]["distortion_coeffs"][4]
+                    if len(dist_coeffs) == 5:
+                        k3 = dist_coeffs[4]
                     fh.write('"radial_distortion_coeffs" : [' + \
                              k1 + ", " + k2 + ", " + k3 + "],\n")
                     fh.write('"tangential_distortion_coeffs" : [' + \

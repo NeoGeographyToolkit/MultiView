@@ -133,11 +133,6 @@ RigSet RigSet::subRig(int rig_id) const {
   return sub_rig;
 }
   
-const std::string FISHEYE_DISTORTION = "fisheye";
-const std::string RADTAN_DISTORTION  = "radtan";
-const std::string RPC_DISTORTION     = "rpc";
-const std::string NO_DISTORTION       = "no_distortion";
-
 // Save the optimized rig configuration
 void writeRigConfig(std::string const& out_dir, bool model_rig, RigSet const& R) {
 
@@ -177,13 +172,18 @@ void writeRigConfig(std::string const& out_dir, bool model_rig, RigSet const& R)
     }
     f << "\n";
 
-    if (D.size() == 0) f << "distortion_type: " << dense_map::NO_DISTORTION << "\n";
-    else if (D.size() == 1)
-      f << "distortion_type: " << dense_map::FISHEYE_DISTORTION << "\n";
-    else if (D.size() >= 4 && D.size() <= 5)
-      f << "distortion_type: " << dense_map::RADTAN_DISTORTION << "\n";
-    else if (D.size() > 5)
-      f << "distortion_type: " << dense_map::RPC_DISTORTION << "\n";
+    auto dist_type = R.cam_params[cam_type].m_distortion_type;
+    if (D.size() == 0 && dist_type == camera::NO_DISTORTION)
+      f << "distortion_type: " << camera::NO_DISTORTION_STR << "\n";
+    else if (D.size() == 1 && dist_type == camera::FOV_DISTORTION)
+      f << "distortion_type: " << camera::FOV_DISTORTION_STR << "\n";
+    // Both fisheye and radtan distortion can have 4 coefficients  
+    else if (D.size() == 4 && dist_type == camera::FISHEYE_DISTORTION)
+      f << "distortion_type: " << camera::FISHEYE_DISTORTION_STR << "\n";
+    else if (D.size() >= 4 && D.size() <= 5 && dist_type == camera::RADTAN_DISTORTION)
+      f << "distortion_type: " << camera::RADTAN_DISTORTION_STR << "\n";
+    else if (D.size() > 5 && dist_type == camera::RPC_DISTORTION)
+      f << "distortion_type: " << camera::RPC_DISTORTION_STR << "\n";
     else
       LOG(FATAL) << "Expecting 0, 1, 4, 5, or more distortion coefficients. Got: "
                  << D.size() << ".\n";
@@ -362,26 +362,56 @@ void readRigConfig(std::string const& rig_config, bool have_rig_transforms, RigS
       readConfigVals(f, "optical_center:", 2, vals);
       Eigen::Vector2d optical_center(vals[0], vals[1]);
 
+      // Read distortion
+      
+      camera::DistortionType dist_type = camera::NO_DISTORTION;
+      
       readConfigVals(f, "distortion_coeffs:", -1, vals);
       if (vals.size() != 0 && vals.size() != 1 && vals.size() != 4 && vals.size() < 5)
         LOG(FATAL) << "Expecting 0, 1, 4, 5, or more distortion coefficients.\n";
       Eigen::VectorXd distortion = vals;
 
       readConfigVals(f, "distortion_type:", 1, str_vals);
-      if (distortion.size() == 0 && str_vals[0] != dense_map::NO_DISTORTION)
+      if (distortion.size() == 0 && str_vals[0] != camera::NO_DISTORTION_STR)
         LOG(FATAL) << "When there are no distortion coefficients, distortion type must be: "
-                   << dense_map::NO_DISTORTION << "\n";
-      if (distortion.size() == 1 && str_vals[0] != dense_map::FISHEYE_DISTORTION)
-        LOG(FATAL) << "When there is 1 distortion coefficient, distortion type must be: "
-                   << dense_map::FISHEYE_DISTORTION << "\n";
-      if ((distortion.size() == 4 || distortion.size() == 5) &&
-          str_vals[0] != dense_map::RADTAN_DISTORTION)
-        LOG(FATAL) << "When there are 4 or 5 distortion coefficient, distortion type must be: "
-                   << dense_map::RADTAN_DISTORTION << "\n";
+                   << camera::NO_DISTORTION_STR << "\n";
+      
+      // For backward compatibility, accept camera::FISHEYE_DISTORTION_STR with 1 distortion coefficient, but use the FOV model
+      if (distortion.size() == 1 && str_vals[0] == camera::FISHEYE_DISTORTION_STR)
+        str_vals[0] = camera::FOV_DISTORTION_STR;
+      
+      // Validation 
+      if (distortion.size() == 1 && str_vals[0] != camera::FOV_DISTORTION_STR)
+          LOG(FATAL) << "When there is 1 distortion coefficient, distortion type must be: "
+                     << camera::FOV_DISTORTION_STR << "\n";
+      if (distortion.size() == 4 &&
+          str_vals[0] != camera::FISHEYE_DISTORTION_STR &&
+          str_vals[0] != camera::RADTAN_DISTORTION_STR)
+        LOG(FATAL) << "When there are 4 distortion coefficients, distortion type "
+                    << "must be: " << camera::FISHEYE_DISTORTION_STR << " or "
+                    << camera::RADTAN_DISTORTION_STR << "\n";
+      if (distortion.size() == 5 &&
+          str_vals[0] != camera::RADTAN_DISTORTION_STR)
+        LOG(FATAL) << "When there are 5 distortion coefficient, distortion type must be: "
+                   << camera::RADTAN_DISTORTION_STR << "\n";
       if ((distortion.size() > 5) &&
-          str_vals[0] != dense_map::RPC_DISTORTION)
+          str_vals[0] != camera::RPC_DISTORTION_STR)
         LOG(FATAL) << "When there are more than 5 distortion coefficients, distortion "
-                   << "type must be: " << dense_map::RPC_DISTORTION << "\n";
+                   << "type must be: " << camera::RPC_DISTORTION_STR << "\n";
+
+      // Set distortion type based on str_vals[0]
+      if (str_vals[0] == camera::NO_DISTORTION_STR) 
+        dist_type = camera::NO_DISTORTION;
+      else if (str_vals[0] == camera::FOV_DISTORTION_STR) 
+        dist_type = camera::FOV_DISTORTION;
+      else if (str_vals[0] == camera::FISHEYE_DISTORTION_STR) 
+        dist_type = camera::FISHEYE_DISTORTION;
+      else if (str_vals[0] == camera::RADTAN_DISTORTION_STR)
+        dist_type = camera::RADTAN_DISTORTION;
+      else if (str_vals[0] == camera::RPC_DISTORTION_STR)
+        dist_type = camera::RPC_DISTORTION;
+      else
+        LOG(FATAL) << "Unknown distortion type: " << str_vals[0] << "\n";
       
       readConfigVals(f, "image_size:", 2, vals);
       Eigen::Vector2i image_size(vals[0], vals[1]);
@@ -392,7 +422,9 @@ void readRigConfig(std::string const& rig_config, bool have_rig_transforms, RigS
       readConfigVals(f, "undistorted_image_size:", 2, vals);
       Eigen::Vector2i undistorted_image_size(vals[0], vals[1]);
 
-      camera::CameraParameters params(image_size, focal_length, optical_center, distortion);
+      camera::CameraParameters params(image_size, focal_length, optical_center, 
+                                      distortion, dist_type);
+      
       params.SetDistortedCropSize(distorted_crop_size);
       params.SetUndistortedSize(undistorted_image_size);
       R.cam_params.push_back(params);

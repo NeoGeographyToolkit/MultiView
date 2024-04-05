@@ -24,14 +24,6 @@
 namespace camera {
 
 CameraModel::CameraModel(const Eigen::Vector3d & position, const Eigen::Matrix3d & rotation,
-                         double fov_x, int x_res, int y_res) :
-  params_(Eigen::Vector2i(x_res, y_res),
-          Eigen::Vector2d::Constant(1.0 / (tan(fov_x / 2) / (x_res / 2.0))),
-          Eigen::Vector2d(x_res, y_res) / 2) {
-  InitTransform(position, rotation);
-}
-
-CameraModel::CameraModel(const Eigen::Vector3d & position, const Eigen::Matrix3d & rotation,
         const camera::CameraParameters & params) : params_(params) {
   InitTransform(position, rotation);
 }

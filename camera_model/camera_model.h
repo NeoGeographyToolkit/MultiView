@@ -23,9 +23,6 @@
 #include <Eigen/Geometry>
 #include <string>
 
-// Temporary!
-#include <openMVG/tracks/tracks.hpp>
-
 namespace camera {
 
 /**
@@ -34,8 +31,6 @@ namespace camera {
 class CameraModel {
  public:
   EIGEN_MAKE_ALIGNED_OPERATOR_NEW
-  CameraModel(const Eigen::Vector3d & position, const Eigen::Matrix3d & rotation,
-      double fov_x, int x_res, int y_res);
   CameraModel(const Eigen::Vector3d & position, const Eigen::Matrix3d & rotation,
       const camera::CameraParameters & params);
   CameraModel(const Eigen::Affine3d & transform,

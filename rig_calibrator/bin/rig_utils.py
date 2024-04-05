@@ -215,15 +215,23 @@ def parseRigConfig(rig_config_file):
             (vals, handle) = readConfigVals(handle, "distortion_type:", 1)
             
             if len(camera["distortion_coeffs"]) == 0 and vals[0] != "no_distortion":
-                raise Exception("When there are no distortion coefficients, distortion type " + \
-                                "must be: no_distortion")
-            if len(camera["distortion_coeffs"]) == 1 and vals[0] != "fisheye":
-                raise Exception("When there is 1 distortion coefficient, distortion type " + \
-                                "must be: fisheye")
-            if ((len(camera["distortion_coeffs"]) == 4 or len(camera["distortion_coeffs"]) == 5)
-                and (vals[0] != "radtan")):
-                raise Exception("When there are 4 or 5 distortion coefficients, distortion " + \
-                                "type must be: radtan")
+                raise Exception("When there are no distortion coefficients, distortion " + \
+                                "type must be: no_distortion")
+            # For backward compatibility, the fisheye distortion type with one
+            # coefficient is accepted and converted to fov.    
+            if len(camera["distortion_coeffs"]) == 1:
+                if vals[0] == "fisheye":
+                    vals[0] = "fov"
+                if vals[0] != "fov":
+                  raise Exception("When there is 1 distortion coefficient, distortion " + \
+                                  "type must be: fov or fisheye")
+            if len(camera["distortion_coeffs"]) == 4 and \
+                 vals[0] != "radtan" and vals[0] != "fisheye":
+                raise Exception("When there are 4 distortion coefficients, distortion " + \
+                                "type must be: radtan or fisheye")
+            if len(camera["distortion_coeffs"]) == 5 and vals[0] != "radtan":
+                raise Exception("When there are 4 or 5 distortion coefficients, " + \
+                                "distortion type must be: radtan")
             camera["distortion_type"] = vals[0]
 
             (vals, handle) = readConfigVals(handle, "image_size:", 2)

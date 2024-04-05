@@ -35,9 +35,6 @@ namespace cv {
 
 // Functionality for undistorting and re-distorting images
 namespace camera {
-  const char distortion_msg[] = "Tangent distortion constant for this "
-    "camera. Use 0.923169 for ISS imagery, and 0.925417 for images "
-    "from the tango device.";
 
   // Definition of camera frames
   //
@@ -56,21 +53,35 @@ namespace camera {
     UNDISTORTED_C
   };
 
+  enum DistortionType {
+    NO_DISTORTION,      // no distortion params
+    FOV_DISTORTION,     // 1 distortion param
+    FISHEYE_DISTORTION, // 4 distortion params
+    RADTAN_DISTORTION,  // 4 or 5 distortion params
+    RPC_DISTORTION
+  };
+  
+  // These are the names of the distortion models as strings in the config files
+  const std::string NO_DISTORTION_STR      = "no_distortion";
+  const std::string FOV_DISTORTION_STR     = "fov";
+  const std::string FISHEYE_DISTORTION_STR = "fisheye";
+  const std::string RADTAN_DISTORTION_STR  = "radtan";
+  const std::string RPC_DISTORTION_STR     = "rpc";
+
   class CameraParameters {
    public:
     EIGEN_MAKE_ALIGNED_OPERATOR_NEW;
 
     CameraParameters() {} // empty constructor; will create an undefined model
     
-    explicit CameraParameters(std::string const& filename, std::string const& base_dir = "");
-    //explicit CameraParameters(config_reader::ConfigReader* config, const char* name);
     CameraParameters(Eigen::Vector2i const& image_size,
                      Eigen::Vector2d const& focal_length,
                      Eigen::Vector2d const& optical_center,
-                     Eigen::VectorXd const& distortion = Eigen::VectorXd());
+                     Eigen::VectorXd const& distortion,
+                     DistortionType distortion_type);
 
     // Used to create a remap table. This table is the same size as the
-    // UNDISTORTED image, where every pixel's value is the cooresponding pixel
+    // UNDISTORTED image, where every pixel's value is the corresponding pixel
     // location in the DISTORTED image.
     void GenerateRemapMaps(cv::Mat* remap_map, double scale = 1.0);
 
@@ -128,57 +139,65 @@ namespace camera {
 
     // This must be called before a model having RPC distortion can be used
     // for undistortion. Here it is assumed that the distortion component
-    // of distortion_coeffs_ is up-to-date, and its undistortion component
+    // of m_distortion_coeffs is up-to-date, and its undistortion component
     // must be updated.
     void updateRpcUndistortion(int num_threads);
     
+    
     // Comparison operator
     friend bool operator== (CameraParameters const& A, CameraParameters const& B) {
-      return (A.crop_offset_            == B.crop_offset_            &&
-              A.distorted_image_size_   == B.distorted_image_size_   &&
-              A.distorted_crop_size_    == B.distorted_crop_size_   &&
-              A.undistorted_image_size_ == B.undistorted_image_size_ &&
-              A.distorted_half_size_    == B.distorted_half_size_    &&
-              A.focal_length_           == B.focal_length_           &&
-              A.optical_offset_         == B.optical_offset_         &&
-              A.distortion_coeffs_      == B.distortion_coeffs_      &&
-              A.distortion_precalc1_    == B.distortion_precalc1_    &&
-              A.distortion_precalc2_    == B.distortion_precalc2_    &&
-              A.distortion_precalc3_    == B.distortion_precalc3_);
+      return (A.m_crop_offset          == B.m_crop_offset          &&
+              A.m_distorted_image_size == B.m_distorted_image_size &&
+              A.m_distorted_crop_size  == B.m_distorted_crop_size  &&
+              A.m_undistorted_size     == B.m_undistorted_size     &&
+              A.m_distorted_half_size  == B.m_distorted_half_size  &&
+              A.m_focal_length         == B.m_focal_length         &&
+              A.m_optical_offset       == B.m_optical_offset       &&
+              A.m_distortion_coeffs    == B.m_distortion_coeffs    &&
+              A.m_distortion_type      == B.m_distortion_type      &&
+              A.m_distortion_precalc1  == B.m_distortion_precalc1  &&
+              A.m_distortion_precalc2  == B.m_distortion_precalc2  &&
+              A.m_distortion_precalc3  == B.m_distortion_precalc3);
     }
+    
+    // Make this public to not have to use set and get functions
+    DistortionType m_distortion_type;
 
-   private:
+    private:
     // Converts UNDISTORTED_C to DISTORTED_C
     void DistortCentered(Eigen::Vector2d const& undistorted_c,
-                         Eigen::Vector2d* distorted_c) const;
+                          Eigen::Vector2d* distorted_c) const;
     // Converts DISTORTED_C to UNDISTORTED_C
     void UndistortCentered(Eigen::Vector2d const& distorted_c,
-                           Eigen::Vector2d* undistorted_c) const;
+                            Eigen::Vector2d* undistorted_c) const;
 
     // Members
-    Eigen::Vector2i
-       crop_offset_,             // Start of DISTORTED in RAW frame
-      distorted_image_size_,    // Applies to DISTORTED, DISTORTED_C
-      // Domain of validity of distortion model (normally all image).
-      // Centered at the image center.
-      distorted_crop_size_,     
-      undistorted_image_size_;  // Applies to UNDISTORTED, UNDISTORTED_C,
-                                // this is bigger than distorted image size
-                                // because we need to expand the sensor to
-                                // capture the unravelling from lens distortion
-                                // removal.
-    Eigen::Vector2d distorted_half_size_, undistorted_half_size_;
-    Eigen::Vector2d
-      focal_length_,    // In pixels, applies to DISTORTED, UNDISTORTED,
-                        // DISTORTED_C, UNDISTORTED_C
-      optical_offset_;  // Optical offset in DISTORTED frame
+    Eigen::Vector2i m_crop_offset;             // Start of DISTORTED in RAW frame
+    Eigen::Vector2i m_distorted_image_size;    // Applies to DISTORTED, DISTORTED_C
+      
+    // Domain of validity of distortion model (normally all image).
+    // Centered at the image center.
+    Eigen::Vector2i m_distorted_crop_size;
+    
+    // Applies to UNDISTORTED, UNDISTORTED_C, this is bigger than distorted image
+    // size because we need to expand the sensor to capture the unravelling from
+    // lens distortion removal.      
+    Eigen::Vector2i m_undistorted_size;  
+    
+    Eigen::Vector2d m_distorted_half_size, m_undistorted_half_size;
+    
+    // Focal length, in pixels
+    Eigen::Vector2d m_focal_length;
+    
+    // Optical offset in DISTORTED frame
+    Eigen::Vector2d m_optical_offset;
 
     // Distortion coefficients are in an arbitrary sized vector. The length of
     // the vector tells us what lens distortion model we are using. Length 0 =
-    // No lens distortion, ideal camera. Length 1 = FOV/Tangent model, Length 4
-    // or 5 = TSAI/OpenCV model.
-    Eigen::VectorXd distortion_coeffs_;
-    double distortion_precalc1_, distortion_precalc2_, distortion_precalc3_;
+    // No lens distortion, ideal camera. Length 1 = FOV model, Length 4:
+    // fisheye or TSAI/OpenCV model, Length 5 = TSAI/OpenCV model.
+    Eigen::VectorXd m_distortion_coeffs;
+    double m_distortion_precalc1, m_distortion_precalc2, m_distortion_precalc3;
   };
 
 #define DECLARE_CONVERSION(TYPEA, TYPEB) \
