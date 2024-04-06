@@ -202,6 +202,106 @@ const Eigen::VectorXd& camera::CameraParameters::GetDistortion() const {
   return m_distortion_coeffs;
 }
 
+// Apply the fisheye distortion model. Input and output are normalized pixels.
+Eigen::Vector2d fishEyeDistortionNorm(Eigen::Vector2d const& P, Eigen::VectorXd const& dist) {
+  
+  double k1 = dist[0];
+  double k2 = dist[1];
+  double k3 = dist[2];
+  double k4 = dist[3];
+
+  double x = P[0];
+  double y = P[1];  
+  double r2 = x*x + y*y;
+  double r = sqrt(r2);
+  double theta = atan(r);
+
+  double theta1 = theta*theta;   // theta^2
+  double theta2 = theta1*theta1; // theta^4
+  double theta3 = theta2*theta1; // theta^6
+  double theta4 = theta2*theta2; // theta^8
+  double thetad = theta*(1 + k1*theta1 + k2*theta2 + k3*theta3 + k4*theta4);
+  
+  // Careful with the case where r is very small
+  double scale = 1.0;
+  if (r > 1e-8)
+    scale = thetad / r;
+
+  return Eigen::Vector2d(x*scale, y*scale);
+}
+
+// Typedefs for function signatures
+typedef std::function<Eigen::Vector2d(Eigen::Vector2d const&, Eigen::VectorXd const&)> FunT;
+// typedef std::function<void(Eigen::Vector2d const&, Eigen::VectorXd const&, double, FunT, Eigen::VectorXd&)> JacT;
+
+// Find the Jacobian of a function at a given point using numerical differentiation.
+// A good value for the step is 1e-6. Note that above we use a tolerance of 1e-8
+// when dividing floating point values, which is way smaller than this step.
+void numericalJacobian(Eigen::Vector2d const& P,
+                    Eigen::VectorXd const& dist,
+                    double step,
+                    Eigen::VectorXd & jacobian) {
+
+  // The Jacobian has 4 elements.
+  
+  // First column
+  Eigen::Vector2d JX = (fishEyeDistortionNorm(P + Eigen::Vector2d(step, 0), dist) - 
+                        fishEyeDistortionNorm(P - Eigen::Vector2d(step, 0), dist)) / (2*step);
+
+  // Second column
+  Eigen::Vector2d JY = (fishEyeDistortionNorm(P + Eigen::Vector2d(0, step), dist) - 
+                        fishEyeDistortionNorm(P - Eigen::Vector2d(0, step), dist)) / (2*step);
+  
+  // Put in the jacobian matrix
+  jacobian[0] = JX[0];
+  jacobian[1] = JY[0];
+  jacobian[2] = JX[1];
+  jacobian[3] = JY[1];  
+  
+  std::cout << "--result is = " << jacobian.transpose() << std::endl;
+}
+
+// To find X solving func(X) - Y = 0, use the Newton-Raphson method.
+// Update X as X - (func(X) - Y) * J^-1, where J is the Jacobian of func(X).
+Eigen::Vector2d newtonRaphson(Eigen::Vector2d const& Y,
+                    Eigen::VectorXd const& dist,
+                    double step, FunT func) {
+
+  // Initial guess for the root
+  Eigen::Vector2d X = Y;
+
+  int count = 1, maxTries = 20;
+  while (count < maxTries) {
+    
+    Eigen::Vector2d F = func(X, dist) - Y;
+    
+    // Create an eigen vector with 4 elements
+    Eigen::VectorXd J(4);
+    numericalJacobian(X, dist, step, J);
+    
+    // Find the determinant
+    double det = J[0]*J[3] - J[1]*J[2];
+    if (fabs(det) < 1e-6) {
+      // Near-zero determinant. Cannot continue. Return most recent result.
+      return X;
+    } 
+
+    Eigen::Vector2d DX;
+    DX[0] = (J[3]*F[0] - J[1]*F[1]) / det;
+    DX[1] = (J[0]*F[1] - J[2]*F[0]) / det;
+    
+    // Update X
+    X -= DX;
+    
+    // If DX is small enough, we are done
+    if (DX.norm() < 1e-6)
+      return X;
+      
+    count++;
+   }
+  return X;
+}
+
 void camera::CameraParameters::DistortCentered(Eigen::Vector2d const& undistorted_c,
                                                Eigen::Vector2d* distorted_c) const {
   // We assume that input x and y are pixel values that have
@@ -217,13 +317,51 @@ void camera::CameraParameters::DistortCentered(Eigen::Vector2d const& undistorte
     double ru = norm.norm();
     double rd = atan(ru * m_distortion_precalc2) * m_distortion_precalc1;
     double conv;
-    if (ru > 1e-5) {
+    if (ru > 1e-8) {
       conv = rd / ru;
     } else {
       conv = 1;
     }
     *distorted_c = (m_optical_offset - m_distorted_half_size) +
       conv * norm.cwiseProduct(m_focal_length);
+      
+  } else if (m_distortion_coeffs.size() == 4 && m_distortion_type == FISHEYE_DISTORTION) {
+  
+    // Fisheye lens distortion
+    // https://docs.opencv.org/4.x/db/d58/group__calib3d__fisheye.html
+    
+    // Note: If comparing with cv::fisheye::distortPoints(), keep in mind that
+    // that function assumes that the inputs have the optical center subtracted
+    // and are divided by the focal length. While its output has is multiplied
+    // by the focal length and has the optical center added.
+    
+    // Normalize the pixel
+    double a = undistorted_c[0] / m_focal_length[0];
+    double b = undistorted_c[1] / m_focal_length[1];
+
+    // Apply the distortion to the normalized pixel
+    *distorted_c = fishEyeDistortionNorm(Eigen::Vector2d(a, b), m_distortion_coeffs);
+   
+   // Find the inverse using:
+  //  Eigen::Vector2d newtonRaphson(Eigen::Vector2d const& Y,
+  //                   Eigen::VectorXd const& dist,
+  //                   double step, FunT func, JacT jac);
+   
+   Eigen::Vector2d X(a, b);
+   Eigen::Vector2d Y = fishEyeDistortionNorm(X, m_distortion_coeffs);
+   std::cout << "--Y diff is = " << (Y -  *distorted_c).norm() << std::endl;
+   
+   // The step for differentiating the function (1e-6) should be larger
+   // than the tolerance for finding the function value (1e-8).
+   double step = 1e-6;
+   Eigen::Vector2d U = newtonRaphson(Y, m_distortion_coeffs, step,
+                                     fishEyeDistortionNorm);
+   std::cout << "--X diff is = " << (X -  U).norm() << std::endl;
+
+   // Scale by the focal length and add the optical offset
+   *distorted_c = distorted_c->cwiseProduct(m_focal_length) +
+     (m_optical_offset - m_distorted_half_size);
+    
   } else if (m_distortion_coeffs.size() == 4 ||
              m_distortion_coeffs.size() == 5) {
     // Tsai lens distortion
@@ -248,7 +386,7 @@ void camera::CameraParameters::DistortCentered(Eigen::Vector2d const& undistorte
       Eigen::Vector2d(2 * p1 * norm[0] * norm[1] + p2 * (r2 + 2 * norm[0] * norm[0]),
                       p1 * (r2 + 2 * norm[1] * norm[1]) + 2 * p2 * norm[0] * norm[1]);
 
-    // Back to absolute coordinates.
+    // Back to absolute coordinates
     *distorted_c = distorted_c->cwiseProduct(m_focal_length) +
       (m_optical_offset - m_distorted_half_size);
   } else {
@@ -274,9 +412,16 @@ void camera::CameraParameters::UndistortCentered(Eigen::Vector2d const& distorte
     double rd = norm.norm();
     double ru = tan(rd * m_distortion_coeffs[0]) / m_distortion_precalc2;
     double conv = 1.0;
-    if (rd > 1e-5)
+    if (rd > 1e-8)
       conv = ru / rd;
     *undistorted_c = conv * norm.cwiseProduct(m_focal_length);
+    
+  } else if (m_distortion_coeffs.size() == 4 && m_distortion_type == FISHEYE_DISTORTION) {
+  
+      // Center and normalize
+      Eigen::Vector2d norm =
+      (distorted_c - (m_optical_offset - m_distorted_half_size)).cwiseQuotient(m_focal_length);
+
   } else if (m_distortion_coeffs.size() == 4 ||
              m_distortion_coeffs.size() == 5) {
     // Tsai lens distortion
@@ -290,6 +435,9 @@ void camera::CameraParameters::UndistortCentered(Eigen::Vector2d const& distorte
     cv::eigen2cv(GetIntrinsicMatrix<DISTORTED>(), dist_int_mat);
     cv::eigen2cv(GetIntrinsicMatrix<UNDISTORTED>(), undist_int_mat);
     src_map = distorted_c + m_distorted_half_size;
+    // Note: cv::undistortPoints() has an error of about half a pixel
+    // TODO(oalexan1): Need to investigate this further, and maybe
+    // change the implementation.
     cv::undistortPoints(src, dst, dist_int_mat, cvdist, cv::Mat(), undist_int_mat);
     *undistorted_c = dst_map - m_undistorted_half_size;
   } else {

@@ -319,8 +319,14 @@ void writePinholeCamera(camera::CameraParameters const& cam_params,
   if (dist.size() == 0) {
     ofs << "NULL\n";
   } else if (dist.size() == 1) {
-    std::cout << "ASP does not support fisheye distortion. Writing no distortion.\n";
-    ofs << "NULL\n";
+    ofs << "FOV\n";
+    ofs << "k1 = " << dist[0] << "\n";
+  } else if (dist.size() == 4 && cam_params.m_distortion_type == camera::FISHEYE_DISTORTION) {
+    ofs << "FISHEYE\n";
+    ofs << "k1 = " << dist[0] << "\n";
+    ofs << "k2 = " << dist[1] << "\n";
+    ofs << "k3 = " << dist[2] << "\n";
+    ofs << "k4 = " << dist[3] << "\n";
   } else if (dist.size() == 4 || dist.size() == 5) {
     ofs << "TSAI\n";
     ofs << "k1 = " << dist[0] << "\n";
