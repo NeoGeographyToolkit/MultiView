@@ -25,6 +25,8 @@
 #include <fstream>
 #include <iomanip>
 
+#include <opencv2/calib3d.hpp>
+
 namespace dense_map {
 
 void RigSet::validate() const {
@@ -435,7 +437,7 @@ void readRigConfig(std::string const& rig_config, bool have_rig_transforms, RigS
       // Sanity check
       if (have_rig_transforms &&
           R.ref_to_cam_trans.back().matrix() == 0 * R.ref_to_cam_trans.back().matrix()) {
-        LOG(FATAL) << "Failed to read valid transforms among the sensors on the rig\n";
+        LOG(FATAL) << "Failed to read valid transforms between the sensors on the rig\n";
       }
 
       readConfigVals(f, "depth_to_image_transform:", 12, vals);
