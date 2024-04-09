@@ -494,6 +494,12 @@ namespace camera {
     Convert<UNDISTORTED_C, DISTORTED_C>(input, output);
     *output += m_distorted_half_size;
   }
+  DEFINE_CONVERSION(UNDISTORTED, DISTORTED_C) {
+    Eigen::Vector2d centered_output;
+    Convert<UNDISTORTED, UNDISTORTED_C>(input, output);
+    Convert<UNDISTORTED_C, DISTORTED_C>(*output, &centered_output);
+    *output = centered_output;
+  }
 
 #undef DEFINE_CONVERSION
 

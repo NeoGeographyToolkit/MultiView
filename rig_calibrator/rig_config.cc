@@ -447,7 +447,7 @@ void readRigConfig(std::string const& rig_config, bool have_rig_transforms, RigS
       double timestamp_offset = vals[0];
       R.ref_to_cam_timestamp_offsets.push_back(timestamp_offset);
     }
-
+    
     // Sanity check
     if (have_rig_transforms) {
       for (size_t cam_it = 0; cam_it < R.cam_names.size(); cam_it++) {
