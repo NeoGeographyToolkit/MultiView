@@ -328,10 +328,7 @@ void readRigConfig(std::string const& rig_config, bool have_rig_transforms, RigS
     std::vector<std::string> str_vals;
 
     // Read each sensor
-    int sensor_it = -1;
     while (1) {
-      sensor_it++;
-
       std::string ref_sensor_name;
       int curr_pos = f.tellg(); // where we are in the file
       // Read the reference sensor
@@ -344,6 +341,10 @@ void readRigConfig(std::string const& rig_config, bool have_rig_transforms, RigS
         // No luck, go back to the line we tried to read, and continue reading other fields
         f.seekg(curr_pos, std::ios::beg);
       }
+      
+      // TODO(oalexan1): Must test that ref_sensor_name is unique.
+      // Also that the first sensor in each rig is the reference sensor.
+      // This must be tested with one and several rigs.
       
       try {
         readConfigVals(f, "sensor_name:", 1, str_vals);
