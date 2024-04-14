@@ -243,7 +243,7 @@ void WriteNvm(std::vector<Eigen::Matrix2Xd> const& cid_to_keypoint_map,
     Eigen::Vector3d camera_center =
       - cid_to_cam_t_global[cid].rotation().inverse() * t;
 
-    f << cid_to_filename[cid] << " " << 0 // focal length is set to 0, not used
+    f << cid_to_filename[cid] << " " << 1 // focal length is set to 1, not used
       << " " << q.w() << " " << q.x() << " " << q.y() << " " << q.z() << " "
       << camera_center[0] << " " << camera_center[1] << " "
       << camera_center[2] << " " << "0 0\n"; // zero distortion, not used
