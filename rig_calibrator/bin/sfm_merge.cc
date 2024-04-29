@@ -110,6 +110,27 @@ void parameterValidation(int argc, char** argv) {
     LOG(FATAL) << "Keeping the first map fixed works only when there are two input maps.";
 }
 
+// Merge offsets read from different nvm files. Any duplicate offsets must be the same.
+void mergeOffsets(std::vector<std::map<std::string, Eigen::Vector2d>> const& offsets,
+                  std::map<std::string, Eigen::Vector2d> & combined_offsets) {
+
+  // Wipe the output
+  combined_offsets.clear();
+  
+  for (size_t i = 0; i < offsets.size(); i++) {
+    for (auto const& it: offsets[i]) {
+      auto pos = combined_offsets.find(it.first);
+      if (pos == combined_offsets.end()) {
+        combined_offsets[it.first] = it.second;
+      } else {
+        if (pos->second != it.second) {
+          LOG(FATAL) << "The same image has different offsets in different maps.";
+        }
+      }
+    }
+  }
+}
+
 int main(int argc, char** argv) {
   google::InitGoogleLogging(argv[0]);
   google::ParseCommandLineFlags(&argc, &argv, true);
@@ -118,6 +139,9 @@ int main(int argc, char** argv) {
   dense_map::RigSet R;
   bool use_initial_rig_transforms = false; // not used, part of the API
   dense_map::readRigConfig(FLAGS_rig_config, use_initial_rig_transforms, R);
+
+  // Store the offsets for all maps that we will merge
+  std::vector<std::map<std::string, Eigen::Vector2d>> offsets(argc - 1);
 
   dense_map::nvmData in0;
   dense_map::ReadNvm(argv[1],
@@ -128,6 +152,10 @@ int main(int argc, char** argv) {
                      in0.cid_to_cam_t_global);
   if (!FLAGS_no_shift) {
     bool undo_shift = true; // remove the shift relative to the optical center
+    std::string offsets_file = dense_map::offsetsFilename(argv[1]);
+    dense_map::readNvmOffsets(offsets_file, in0.optical_centers);
+    offsets[0] = in0.optical_centers;
+    // TODO(oalexan1): Undoing shift of keypoints should happen on reading the nvm
     dense_map::shiftKeypoints(undo_shift, R, in0);
   }
   
@@ -144,6 +172,10 @@ int main(int argc, char** argv) {
                        in1.cid_to_cam_t_global);
     if (!FLAGS_no_shift) {
       bool undo_shift = true; // remove the shift relative to the optical center
+      std::string offsets_file = dense_map::offsetsFilename(argv[i]);
+      dense_map::readNvmOffsets(offsets_file, in1.optical_centers); 
+      offsets[i - 1] = in1.optical_centers;
+      // TODO(oalexan1): Undoing shift of keypoints should happen on reading the nvm
       dense_map::shiftKeypoints(undo_shift, R, in1);
     }
     
@@ -184,6 +216,9 @@ int main(int argc, char** argv) {
 
   if (!FLAGS_no_shift) {
     bool undo_shift = false; // put back the shift
+    // TODO(oalexan1): This must happen in MergeMaps
+    mergeOffsets(offsets, out_map.optical_centers);
+    // TODO(oalexan1): Shifting the keypoints should happen on writing the nvm
     dense_map::shiftKeypoints(undo_shift, R, out_map);
   }
   
@@ -196,9 +231,11 @@ int main(int argc, char** argv) {
                       FLAGS_output_map);
 
   // Save the optical offsets
-  if (!FLAGS_no_shift)
-    dense_map::writeOpticalCenters(FLAGS_output_map, out_map.cid_to_filename,
-                                   R.cam_names, R.cam_params);
+  if (!FLAGS_no_shift) {
+    // Write the optical center offsets to a file
+    std::string offsets_file = dense_map::offsetsFilename(FLAGS_output_map);
+    dense_map::writeNvmOffsets(offsets_file, out_map.optical_centers);
+  }
   
   return 0;
 }

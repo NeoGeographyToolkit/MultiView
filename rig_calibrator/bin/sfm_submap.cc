@@ -34,6 +34,9 @@
 #include <algorithm>
 #include <thread>
 
+#include <boost/filesystem.hpp>
+namespace fs = boost::filesystem;
+
 // Given a map, extract a submap with only specified images. Works
 // with nvm files where features are either shifted relative
 // to the optical center or not, and saves the submap in the same format.
@@ -96,6 +99,13 @@ int main(int argc, char** argv) {
                      nvm.pid_to_xyz,  
                      nvm.cid_to_cam_t_global);
  
+  std::string offsets_file = dense_map::offsetsFilename(FLAGS_input_map);
+  if (!fs::exists(offsets_file))
+    std::cout << "WARNING: No offsets file found. Will not write offsets for the submap.\n";
+  else 
+    dense_map::readNvmOffsets(offsets_file, nvm.optical_centers);
+
+  // Extract the submap. Will also extract a subset of the optical centers.
   sparse_mapping::ExtractSubmap(images_to_keep, nvm);
 
   dense_map::WriteNvm(nvm.cid_to_keypoint_map,
@@ -104,6 +114,11 @@ int main(int argc, char** argv) {
                       nvm.pid_to_xyz,
                       nvm.cid_to_cam_t_global,
                       FLAGS_output_map);
+
+  if (std::ifstream(offsets_file)) {
+    std::string output_offsets_file = dense_map::offsetsFilename(FLAGS_output_map);
+    dense_map::writeNvmOffsets(output_offsets_file, nvm.optical_centers);
+  }
 
   return 0;
 }

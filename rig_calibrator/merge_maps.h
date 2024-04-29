@@ -9,10 +9,6 @@ namespace dense_map {
 
 class nvmData;
   
-void writeOpticalCenters(const std::string& output_map_path,
-                         const std::vector<std::string>& cid_to_filename,
-                         const std::vector<std::string>& cam_names,
-                         const std::vector<camera::CameraParameters>& cam_params);
 // Merge two maps
 void MergeMaps(dense_map::nvmData const& A_in,
                dense_map::nvmData const& B_in,

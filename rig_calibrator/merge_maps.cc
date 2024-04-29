@@ -520,30 +520,6 @@ void findCidToCid(std::vector<std::string> const& cid_to_filename,
     LOG(FATAL) << "Book-keeping error in findCidToCid().\n";
 }
 
-void writeOpticalCenters(const std::string& output_map_path,
-                         const std::vector<std::string>& cid_to_filename,
-                         const std::vector<std::string>& cam_names,
-                         const std::vector<camera::CameraParameters>& cam_params) {
-  
-  std::string offset_path = dense_map::changeFileSuffix(output_map_path, "_offsets.txt");
-  
-  std::cout << "Writing optical center per image: " << offset_path << std::endl;
-  std::ofstream offset_fh(offset_path.c_str());
-  
-  for (size_t cid = 0; cid < cid_to_filename.size(); cid++) {
-    // Infer cam type from cam name
-    std::string cam_name = dense_map::camName(cid_to_filename[cid]);
-    int cam_type = 0;
-    dense_map::camTypeFromName(cam_name, cam_names, cam_type);
-    
-    auto const& optical_center = cam_params[cam_type].GetOpticalOffset();
-    
-    offset_fh << cid_to_filename[cid] << " "
-              << optical_center[0] << " " << optical_center[1] << "\n";
-  }
-  offset_fh.close();
-}  
-
 // Merge the camera names using cid2cid, which remaps the cid to remove repetitions
 // and sort the images by time.
 void mergeCameraNames(std::vector<std::string> & cid_to_filename,
@@ -659,7 +635,7 @@ void MergeMaps(dense_map::nvmData const& A,
     C.cid_to_cam_t_global.resize(C.cid_to_filename.size()); // won't be used
     std::cout << "Number of image pairs to match: " << image_pairs.size() << std::endl;
     dense_map::detectMatchFeatures(// Inputs
-                                   C_cams, R.cam_params,  out_dir, save_matches,  
+                                   C_cams, R.cam_params, out_dir, save_matches,  
                                    filter_matches_using_cams,  
                                    C.cid_to_cam_t_global,
                                    num_overlaps, image_pairs,

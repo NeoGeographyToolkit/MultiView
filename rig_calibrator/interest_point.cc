@@ -214,7 +214,8 @@ void matchFeatures(std::mutex* match_mutex,
 // Match features while assuming that the input cameras can be used to filter out
 // outliers by reprojection error.
 // TODO(oalexan1): This can be fragile. What if input cameras have poor pointing info?
-void matchFeaturesWithCams(std::mutex* match_mutex, int left_image_index, int right_image_index,
+void matchFeaturesWithCams(std::mutex* match_mutex, 
+                           int left_image_index, int right_image_index,
                            camera::CameraParameters const& left_params,
                            camera::CameraParameters const& right_params,
                            bool filter_matches_using_cams,
@@ -584,13 +585,12 @@ void shiftKeypoints(bool undo_shift, dense_map::RigSet const& R,
   for (size_t cid = 0; cid < nvm.cid_to_filename.size(); cid++) {
     std::string const& image_name = nvm.cid_to_filename[cid]; // alias
 
-    int cam_type = -1;
-    double timestamp = -1.0;
-    dense_map::findCamTypeAndTimestamp(image_name, R.cam_names,   
-                                       cam_type, timestamp); // output
-
+    auto it = nvm.optical_centers.find(image_name);
+    if (it == nvm.optical_centers.end()) 
+      LOG(FATAL) << "Could not find optical center for image: " << image_name << ".\n";
+    Eigen::Vector2d keypoint_offset = it->second;
+    
     int num_fid = nvm.cid_to_keypoint_map[cid].cols();
-    Eigen::Vector2d keypoint_offset = R.cam_params[cam_type].GetOpticalOffset();
     for (int fid = 0; fid < num_fid; fid++) {
       if (undo_shift) 
         nvm.cid_to_keypoint_map.at(cid).col(fid) += keypoint_offset;

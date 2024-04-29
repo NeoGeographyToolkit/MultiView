@@ -939,6 +939,18 @@ void ExtractSubmap(std::vector<std::string> const& images_to_keep,
   nvm.pid_to_cid_fid = pid_to_cid_fid;
   nvm.pid_to_xyz = pid_to_xyz;
 
+  // If the input nvm has optical centers, keep the subset for the submap.
+  if (!nvm.optical_centers.empty()) {
+    std::map<std::string, Eigen::Vector2d> optical_centers;
+    for (size_t cid = 0; cid < images_to_keep.size(); cid++) {
+      auto it = nvm.optical_centers.find(images_to_keep[cid]);
+      if (it == nvm.optical_centers.end()) 
+        LOG(FATAL) << "Cannot find the optical centers for the images in the submap.";
+      optical_centers[images_to_keep[cid]] = it->second;
+    }
+    nvm.optical_centers = optical_centers; // overwrite in place
+  }
+   
   std::cout << "Number of images in the extracted map: " << nvm.cid_to_filename.size() << "\n";
   std::cout << "Number of tracks in the extracted map: " << nvm.pid_to_cid_fid.size() << "\n";
 

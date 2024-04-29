@@ -47,6 +47,8 @@ struct nvmData {
   std::vector<std::map<int, int>>  pid_to_cid_fid;
   std::vector<Eigen::Vector3d>     pid_to_xyz;
   std::vector<Eigen::Affine3d>     cid_to_cam_t_global;
+  // Interest points in the nvm file are shifted relative to optical centers
+  std::map<std::string, Eigen::Vector2d> optical_centers;
 };
 
 // Read cameras and interest points from an nvm file  
@@ -69,6 +71,21 @@ void writeInliersToNvm
  std::vector<std::map<int, int>>                   const& pid_to_cid_fid,
  std::vector<std::map<int, std::map<int, int>>>    const& pid_cid_fid_inlier,
  std::vector<Eigen::Vector3d>                      const& xyz_vec);
+
+// A function to create the offsets filename from the nvm filename
+std::string offsetsFilename(std::string const& nvm_filename);
+
+// A function to read nvm offsets (optical center per image). On each line there
+// must be the image name, then the optical center column, then row. Read into
+// an std::map, with the key being the image name, and the value being vector2
+// of the optical center. Interest point matches are shifted relative to this.
+void readNvmOffsets(std::string const& offset_path,
+                    std::map<std::string, Eigen::Vector2d> & offsets);
+  
+// Write the optical center offsets to a file. The format is the image name,
+// then the optical center column, then row. 
+void writeNvmOffsets(std::string const& offset_path,
+                     std::map<std::string, Eigen::Vector2d> const& offsets);
   
 // Write an nvm file. Keypoints may or may not be shifted relative to the optical center.
 void WriteNvm(std::vector<Eigen::Matrix2Xd> const& cid_to_keypoint_map,

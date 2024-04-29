@@ -119,6 +119,56 @@ void ReadNvm(std::string               const & input_filename,
   }
 }
 
+// A function to create the offsets filename from the nvm filename
+std::string offsetsFilename(std::string const& nvm_filename) {
+  int file_len = nvm_filename.size(); // cast to int to make subtraction safe
+  // The length must be at least 5, as it must end with .nvm
+  if (file_len < 5) 
+    LOG(FATAL) << "Invalid nvm filename: " << nvm_filename << ".\n";
+  return nvm_filename.substr(0, std::max(file_len - 4, 0)) + "_offsets.txt";
+}
+
+// A function to read nvm offsets (optical center per image). On each line there
+// must be the image name, then the optical center column, then row. Read into
+// an std::map, with the key being the image name, and the value being vector2
+// of the optical center. Interest point matches are shifted relative to this.
+void readNvmOffsets(std::string const& offset_path,
+                    std::map<std::string, Eigen::Vector2d> & offsets) {
+
+  // Wipe the output
+  offsets.clear();
+  
+  std::ifstream offset_fh(offset_path.c_str());
+  if (!offset_fh.good())
+    LOG(FATAL) << "Cannot find optical offsets file: " << offset_path << ".\n";
+  
+  std::cout << "Reading optical centers (offsets): " << offset_path << std::endl;
+  std::string name;
+  double x, y;
+  while (offset_fh >> name >> x >> y) {
+    // Check for repeated entries
+    if (offsets.find(name) != offsets.end())
+      LOG(FATAL) << "Repeated optical center entry for image: " << name << ".\n";
+    offsets[name] = Eigen::Vector2d(x, y);
+  }
+}
+
+// Write the optical center offsets to a file. The format is the image name,
+// then the optical center column, then row. 
+void writeNvmOffsets(std::string const& offset_path,
+                     std::map<std::string, Eigen::Vector2d> const& offsets) {
+
+  std::ofstream offset_fh(offset_path.c_str());
+  offset_fh.precision(17); // double precision
+  
+  if (!offset_fh.good())
+    LOG(FATAL) << "Cannot write optical offsets file: " << offset_path << ".\n";
+  
+  std::cout << "Writing optical centers (offsets): " << offset_path << std::endl;
+  for (auto it = offsets.begin(); it != offsets.end(); it++)
+    offset_fh << it->first << ' ' << it->second[0] << ' ' << it->second[1] << std::endl;
+}
+
 // Write the inliers in nvm format. The keypoints are shifted relative to the optical
 // center, as written by Theia if shift_keypoints is specified.
 // We handle properly the case when a (cid, fid) shows up in many tracks
@@ -373,7 +423,7 @@ void writePinholeCameras(std::vector<camera::CameraParameters> const& cam_params
     std::string base_name = fs::path(cam_names[it]).filename().string();
     if (base_names.find(base_name) != base_names.end())
       LOG(FATAL) << "Non-unique camera name (without directory): " << base_name 
-                 << ". It will not be possible to use these cameras with bundle_adjust.";
+                 << ". It will not be possible to use these cameras with bundle_adjust.\n";
     base_names.insert(base_name);
   }
   
