@@ -144,7 +144,7 @@ namespace fs = boost::filesystem;
 DEFINE_double(robust_threshold, 0.5,
               "Residual pixel errors and 3D point residuals (the latter multiplied "
               "by corresponding weight) much larger than this will be "
-              "logarithmically attenuated to affect less the cost function.\n");
+              "logarithmically attenuated to affect less the cost function.");
 
 DEFINE_int32(num_iterations, 100, "How many solver iterations to perform in calibration.");
 
@@ -160,14 +160,20 @@ DEFINE_string(intrinsics_to_float, "", "Specify which intrinsics to float for ea
               "Example: 'cam1:focal_length,optical_center,distortion cam2:focal_length'.");
 
 DEFINE_string(camera_poses_to_float, "",
-              "Specify the cameras of which sensor types can have their poses "
-              "floated. Example: 'cam1 cam3'. With this example, the rig transform "
-              "from cam1 to cam3 will be floated with the rig constraint, and the "
-              "cam3 poses will be floated without the rig constraint.");
+              "Specify the cameras for which sensors can have their poses "
+              "floated. Example: 'cam1 cam3'. The documentation has more details.");
 
 DEFINE_string(depth_to_image_transforms_to_float, "",
               "Specify for which sensors to float the depth-to-image transform "
               "(if depth data exists). Example: 'cam1 cam3'.");
+
+DEFINE_bool(fix_rig_translations, false,
+            "Fix the translation component of the transforms between the sensors on the "
+            "rig. Works only when --no-rig is not set.");
+
+DEFINE_bool(fix_rig_rotations, false,
+            "Fix the rotation component of the transforms between the sensors on the "
+            "rig. Works only when --no-rig is not set.");
 
 DEFINE_bool(float_scale, false,
             "If to optimize the scale of the clouds, part of depth-to-image transform. "
@@ -193,8 +199,8 @@ DEFINE_string(mesh, "",
               "Must use a positive --mesh_tri_weight.");
 
 DEFINE_double(mesh_tri_weight, 0.0,
-              "A larger value will give more weight to the constraint that triangulated points "
-              "stay close to a preexisting mesh. Not suggested by default.");
+              "A larger value will give more weight to the constraint that triangulated "
+              "points stay close to the mesh. Not suggested by default.");
 
 DEFINE_double(depth_mesh_weight, 0.0,
               "A larger value will give more weight to the constraint that the depth clouds "
@@ -213,20 +219,21 @@ DEFINE_bool(affine_depth_to_image, false, "Assume that the depth-to-image transf
             "for each depth + image camera is an arbitrary affine transform rather than "
             "scale * rotation + translation.");
 
-DEFINE_int32(calibrator_num_passes, 2, "How many passes of optimization to do. Outliers will be "
-             "removed after every pass. Each pass will start with the previously optimized "
-             "solution as an initial guess. Mesh intersections (if applicable) and ray "
-             "triangulation will be recomputed before each pass.");
+DEFINE_int32(calibrator_num_passes, 2, "How many passes of optimization to do. Outliers "
+              "will be removed after every pass. Each pass will start with the previously "
+              "optimized solution as an initial guess. Mesh intersections (if applicable) "
+              "and ray triangulation will be recomputed before each pass.");
 
 DEFINE_double(initial_max_reprojection_error, 300.0, "If filtering outliers, remove interest "
               "points for which the reprojection error, in pixels, is larger than this. This "
               "filtering happens when matches are created, before cameras are optimized, and "
               "a big value should be used if the initial cameras are not trusted.");
 
-DEFINE_double(max_reprojection_error, 25.0, "If filtering outliers, remove interest points for "
-              "which the reprojection error, in pixels, is larger than this. This filtering "
-              "happens after each optimization pass finishes, unless disabled. It is better to not "
-              "filter too aggressively unless confident of the solution.");
+DEFINE_double(max_reprojection_error, 25.0, "If filtering outliers, remove interest "
+              "points for which the reprojection error, in pixels, is larger than this. "
+              "This filtering happens after each optimization pass finishes, unless "
+              "disabled. It is better to not filter too aggressively unless confident "
+              "of the solution.");
 
 DECLARE_double(min_triangulation_angle); // declared externally 
 
@@ -234,18 +241,21 @@ DEFINE_string(out_texture_dir, "", "If non-empty and if an input mesh was provid
               "project the camera images using the optimized poses onto the mesh "
               "and write the obtained .obj files in the given directory.");
 
-DEFINE_double(min_ray_dist, 0.0, "The minimum search distance from a starting point along a ray "
-              "when intersecting the ray with a mesh, in meters (if applicable).");
+DEFINE_double(min_ray_dist, 0.0, "The minimum search distance from a starting point "
+              "along a ray when intersecting the ray with a mesh, in meters (if "
+              "applicable).");
 
-DEFINE_double(max_ray_dist, 100.0, "The maximum search distance from a starting point along a ray "
-              "when intersecting the ray with a mesh, in meters (if applicable).");
+DEFINE_double(max_ray_dist, 100.0, "The maximum search distance from a starting point "
+              "along a ray when intersecting the ray with a mesh, in meters (if "
+              "applicable).");
 
 DEFINE_bool(registration, false,
-            "If true, and registration control points for the sparse map exist and are specified "
-            "by --hugin_file and --xyz_file, register all camera poses and the rig transforms "
-            "before starting the optimization. For now, the depth-to-image transforms do not "
-            "change as result of this, which may be a problem. To apply the registration only, "
-            "use zero iterations.");
+            "If true, and registration control points for the sparse map exist and "
+            "are specified by --hugin_file and --xyz_file, register all camera poses "
+            "and the rig transforms before starting the optimization. For now, the "
+            "depth-to-image transforms do not change as result of this, which may be a "
+            "problem. To apply the registration only, use zero iterations.");
+
 
 DEFINE_string(hugin_file, "", "The path to the hugin .pto file used for registration.");
 
@@ -957,7 +967,6 @@ void writeResiduals(std::string                           const& out_dir,
   return;
 }
   
-} // end namespace dense_map
 // TODO(oalexan1): Test this with multiple rigs. It should work.
 // TODO(oalexan1): Need to fix ref_cam_type.
 // Apply registration to each camera, rig (if present), and depth-to-image, if desired
@@ -1016,6 +1025,36 @@ void applyRegistration(bool no_rig, bool scale_depth,
   
   return;
 }
+
+// If applicable, set up the parameters block to fix the rig translations and/or rotations
+void setUpFixRigOptions(bool no_rig, bool fix_rig_translations, bool fix_rig_rotations,
+                        ceres::SubsetManifold*& constant_transform_manifold) {
+  
+  constant_transform_manifold = NULL;
+  
+  int beg = 0, end = 0;
+  if (!no_rig && fix_rig_translations) {
+    beg = 0; 
+    end = 3;
+  }
+  
+  if (!no_rig && fix_rig_rotations) {
+    if (!fix_rig_translations)
+      beg = 3; // only fix rotation
+    end = dense_map::NUM_RIGID_PARAMS;
+  }
+  
+  // Make a vector that goes from beg to end with increment 1
+  std::vector<int> fixed_indices;
+  for (int it = beg; it < end; it++)
+    fixed_indices.push_back(it);
+  
+  if (!fixed_indices.empty())
+    constant_transform_manifold = new ceres::SubsetManifold(dense_map::NUM_RIGID_PARAMS,
+                                                            fixed_indices);
+}
+
+} // end namespace dense_map
                              
 int main(int argc, char** argv) {
   google::InitGoogleLogging(argv[0]);
@@ -1321,11 +1360,9 @@ int main(int argc, char** argv) {
       dense_map::meshTriangulations(// Inputs
                                     R.cam_params, cams, world_to_cam, pid_to_cid_fid,
                                     pid_cid_fid_inlier, keypoint_vec, bad_xyz,
-                                    FLAGS_min_ray_dist,
-                                    FLAGS_max_ray_dist, mesh,
-        bvh_tree,
-        // Outputs
-        pid_cid_fid_mesh_xyz, pid_mesh_xyz);
+                                    FLAGS_min_ray_dist, FLAGS_max_ray_dist, mesh, bvh_tree,
+                                    // Outputs
+                                    pid_cid_fid_mesh_xyz, pid_mesh_xyz);
 
     // For a given fid = pid_to_cid_fid[pid][cid], the value
     // pid_cid_fid_to_residual_index[pid][cid][fid] will be the index
@@ -1353,6 +1390,14 @@ int main(int argc, char** argv) {
     ceres::Problem problem;
     std::vector<std::string> residual_names;
     std::vector<double> residual_scales;
+
+    // Prepare for the case of fixed rig translations and/or rotations    
+    std::set<double*> fixed_parameters; // to avoid double fixing
+    ceres::SubsetManifold* constant_transform_manifold = nullptr;
+    dense_map::setUpFixRigOptions(FLAGS_no_rig, FLAGS_fix_rig_translations, 
+                                  FLAGS_fix_rig_rotations,
+                                  constant_transform_manifold);
+    
     for (size_t pid = 0; pid < pid_to_cid_fid.size(); pid++) {
       for (auto cid_fid = pid_to_cid_fid[pid].begin();
            cid_fid != pid_to_cid_fid[pid].end(); cid_fid++) {
@@ -1376,7 +1421,7 @@ int main(int argc, char** argv) {
                       beg_cam_ptr, end_cam_ptr, ref_to_cam_ptr,
                       beg_ref_timestamp, end_ref_timestamp,
                       cam_timestamp);
-
+ 
         Eigen::Vector2d dist_ip(keypoint_vec[cid][fid].first,
                                 keypoint_vec[cid][fid].second);
 
@@ -1435,7 +1480,7 @@ int main(int argc, char** argv) {
         }
 
         // The end cam floats only if the ref cam can float and end cam brackets
-        // a non-ref cam and we have a rig.
+        // a non-ref cam and we have a rig. 
         if (camera_poses_to_float.find(R.refSensor(cam_type))
             == camera_poses_to_float.end() ||
             R.isRefSensor(R.cam_names[cam_type]) || FLAGS_no_rig) 
@@ -1445,9 +1490,16 @@ int main(int argc, char** argv) {
         // no rig
         if (camera_poses_to_float.find(R.cam_names[cam_type])
             == camera_poses_to_float.end() ||
-            R.isRefSensor(R.cam_names[cam_type]) || FLAGS_no_rig) 
+            R.isRefSensor(R.cam_names[cam_type]) || FLAGS_no_rig) {
           problem.SetParameterBlockConstant(ref_to_cam_ptr);
+          fixed_parameters.insert(ref_to_cam_ptr);
+        }
 
+        // See if to fix the rig translation or rotation components
+        if ((FLAGS_fix_rig_translations || FLAGS_fix_rig_rotations) &&
+            fixed_parameters.find(ref_to_cam_ptr) == fixed_parameters.end())
+           problem.SetManifold(ref_to_cam_ptr, constant_transform_manifold);
+        
         // See if to fix some images. For that, an image must be in the list,
         // and its camera must be either of ref type or there must be no rig.
         if (!fixed_images.empty() &&

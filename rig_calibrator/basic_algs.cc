@@ -19,9 +19,11 @@
 
 #include <rig_calibrator/basic_algs.h>
 
-#include <boost/filesystem.hpp>
 #include <glog/logging.h>
 #include <fstream>
+#include <iostream>
+
+#include <boost/filesystem.hpp>
 
 namespace fs = boost::filesystem;
 
@@ -106,22 +108,21 @@ void findCamTypeAndTimestamp(std::string const& image_file,
     
   std::string basename = fs::path(image_file).filename().string();
 
-  // Remove anything which is not a digit out of the basename, and keep only the first
-  // period.
+  // Remove anything after <digits>.<digits> 
   bool have_dot = false;
   std::string timestamp_str;
   for (size_t it = 0; it < basename.size(); it++) {
 
     if (basename[it] == '.') {
       if (have_dot) 
-        continue;
+        break; // We have seen a dot already, ignore the rest
       have_dot = true;
       timestamp_str += basename[it];
       continue;
     }
 
     if (basename[it] < '0' || basename[it] > '9') 
-      continue;
+      break; // Not a digit, ignore the rest
     
     timestamp_str += basename[it];
   }
@@ -131,8 +132,8 @@ void findCamTypeAndTimestamp(std::string const& image_file,
                << "their name, which will be converted to a timestamp. Got: "
                << basename << "\n";
 
-  // TODO(oalexan1): There is a chance the timestamp will become non-unique.
-  // Extracting the timestamp from image name may not be the best idea.
+  // Having the timestamp extracted from the image name is convenient though it
+  // requires some care. This is well-documented.
   timestamp = atof(timestamp_str.c_str());
   
   // Infer cam type from cam name
@@ -141,16 +142,16 @@ void findCamTypeAndTimestamp(std::string const& image_file,
 
 // Replace .<extension> with <suffix>  
 std::string changeFileSuffix(std::string filename, std::string new_suffix) {
-    // Find the last '.' character in the filename
-    size_t last_dot = filename.find_last_of(".");
-    if (last_dot == std::string::npos) {
-        // No dot found, return original filename
-        return filename;
-    } else {
-        // Replace extension with new suffix
-        std::string new_filename = filename.substr(0, last_dot) + new_suffix;
-        return new_filename;
-    }
+  // Find the last '.' character in the filename
+  size_t last_dot = filename.find_last_of(".");
+  if (last_dot == std::string::npos) {
+    // No dot found, return original filename
+    return filename;
+  } else {
+    // Replace extension with new suffix
+    std::string new_filename = filename.substr(0, last_dot) + new_suffix;
+    return new_filename;
+  }
 }  
   
 }  // end namespace dense_map

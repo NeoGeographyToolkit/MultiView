@@ -564,12 +564,12 @@ void findCidReorderMap(nvmData const& nvm,
   // This is an important sanity check. Warn the user when not all images
   // from the NVM file are among the ones being used.
   if (cams.size() < nvm.cid_to_filename.size()) {
-    std::cout << "Warning: Some images from the nvm file read from disk are "
-              << "not present among the images being used. Perhaps they "
-              << "were removed during bracketing (if applicable).\n";
+    std::cout << "Warning: Some input images are not present among the images being used. "
+              << "Perhaps they were removed during bracketing. Only images bracketed in time "
+              << "by reference sensor images can be used. Excluded images:\n";
     for (size_t nvm_it = 0; nvm_it < nvm.cid_to_filename.size(); nvm_it++) {
       if (cam_set.find(nvm.cid_to_filename[nvm_it]) == cam_set.end()) 
-        std::cout << "\t" << nvm.cid_to_filename[nvm_it] << std::endl;
+        std::cout << nvm.cid_to_filename[nvm_it] << std::endl;
     }
   }
   
