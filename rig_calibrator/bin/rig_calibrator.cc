@@ -215,6 +215,13 @@ DEFINE_double(tri_weight, 0.1,
 DEFINE_double(tri_robust_threshold, 0.1,
               "The robust threshold to use with the triangulation weight. Must be positive.");
 
+DEFINE_bool(use_initial_triangulated_points, false, "Use the triangulated "
+            "points from the input nvm file. Together with --tri-weight, this ensures "
+            "the cameras do not move too far from the initial solution. This will fail "
+            "if additional interest point matches are created with --num_overlaps."
+            "If registration is used, the initial triangulated points are transformed "
+            "appropriately.");
+
 DEFINE_bool(affine_depth_to_image, false, "Assume that the depth-to-image transform "
             "for each depth + image camera is an arbitrary affine transform rather than "
             "scale * rotation + translation.");
@@ -825,6 +832,9 @@ void parameterValidation() {
   if (FLAGS_camera_poses == "" && FLAGS_nvm == "")
     LOG(FATAL) << "Must specify the cameras via --nvm or --camera_poses.\n";
 
+  if (FLAGS_num_overlaps > 0 && FLAGS_use_initial_triangulated_points)
+    LOG(FATAL) << "Cannot use the initial triangulated points if new matches are created.\n";
+    
   return;
 }
 
@@ -1162,11 +1172,14 @@ int main(int argc, char** argv) {
   }
 
   // Transform to world coordinates if control points were provided
+  Eigen::Affine3d registration_trans;
+  registration_trans.matrix() = Eigen::Matrix4d::Identity(); // default
+  bool registration_applied = false;
   if (FLAGS_registration && FLAGS_hugin_file != "" && FLAGS_xyz_file != "") {
     // Keep user's R.depth_to_image transforms, and only transform only the image
     // cameras from Theia's abstract coordinate system to world coordinates.
     bool scale_depth = false;
-    Eigen::Affine3d registration_trans;
+    registration_applied = true;
     applyRegistration(FLAGS_no_rig, scale_depth, FLAGS_hugin_file, FLAGS_xyz_file,
                       has_depth, cams,
                       // Outputs
@@ -1277,6 +1290,7 @@ int main(int argc, char** argv) {
   std::vector<std::pair<int, int>> input_image_pairs; // will use num_overlaps instead
   // Do not save these matches. Only inlier matches will be saved later.
   bool local_save_matches = false;
+  std::vector<Eigen::Vector3d> xyz_vec; // triangulated points go here
   dense_map::detectMatchFeatures(// Inputs
                                  cams, R.cam_params, FLAGS_out_dir, local_save_matches,
                                  filter_matches_using_cams, world_to_cam,
@@ -1286,7 +1300,7 @@ int main(int argc, char** argv) {
                                  FLAGS_read_nvm_no_shift, FLAGS_no_nvm_matches,
                                  FLAGS_verbose,
                                  // Outputs
-                                 keypoint_vec, pid_to_cid_fid, nvm);
+                                 keypoint_vec, pid_to_cid_fid, xyz_vec, nvm);
   if (pid_to_cid_fid.empty())
     LOG(FATAL) << "No interest points were found. Must specify either "
                << "--nvm or positive --num_overlaps.\n";
@@ -1305,7 +1319,6 @@ int main(int argc, char** argv) {
   // pixel is an inlier. Originally all pixels are inliers. Once an
   // inlier becomes an outlier, it never becomes an inlier again.
   std::vector<std::map<int, std::map<int, int>>> pid_cid_fid_inlier;
-  std::vector<Eigen::Vector3d> xyz_vec; // triangulated points go here
   
   // TODO(oalexan1): Must initialize all points as inliers outside this function,
   // as now this function resets those.
@@ -1315,6 +1328,11 @@ int main(int argc, char** argv) {
                                         // Outputs
                                         pid_cid_fid_inlier);
 
+  // Ensure that the triangulated points are kept in sync with the cameras
+  if (FLAGS_use_initial_triangulated_points && registration_applied)
+    dense_map::transformInlierTriPoints(registration_trans, pid_to_cid_fid, 
+                                          pid_cid_fid_inlier, xyz_vec);
+  
   // Structures needed to intersect rays with the mesh
   std::vector<std::map<int, std::map<int, Eigen::Vector3d>>> pid_cid_fid_mesh_xyz;
   std::vector<Eigen::Vector3d> pid_mesh_xyz;
@@ -1331,17 +1349,19 @@ int main(int argc, char** argv) {
     // TODO(oalexan1): The call below is likely not necessary since this function
     // is already called earlier, and also whenever a pass finishes, see below.
     dense_map::calc_world_to_cam_rig_or_not
-      (  // Inputs
+      (// Inputs
        FLAGS_no_rig, cams, world_to_ref_vec, ref_timestamps, ref_to_cam_vec,
        world_to_cam_vec, R.ref_to_cam_timestamp_offsets,
-      // Output
-      world_to_cam);
+       // Output
+       world_to_cam);
 
-    dense_map::multiViewTriangulation(// Inputs
-                                      R.cam_params, cams, world_to_cam, pid_to_cid_fid,
-                                      keypoint_vec,
-                                      // Outputs
-                                      pid_cid_fid_inlier, xyz_vec);
+    // Triangulate, unless desired to reuse the initial points
+    if (!FLAGS_use_initial_triangulated_points)
+      dense_map::multiViewTriangulation(// Inputs
+                                        R.cam_params, cams, world_to_cam, pid_to_cid_fid,
+                                        keypoint_vec,
+                                        // Outputs
+                                        pid_cid_fid_inlier, xyz_vec);
 
     // This is a copy which won't change
     std::vector<Eigen::Vector3d> xyz_vec_orig;

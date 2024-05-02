@@ -250,6 +250,7 @@ void detectMatchFeatures(// Inputs
                          // Outputs
                          std::vector<std::vector<std::pair<float, float>>>& keypoint_vec,
                          std::vector<std::map<int, int>>& pid_to_cid_fid,
+                         std::vector<Eigen::Vector3d> & xyz_vec,
                          dense_map::nvmData & nvm);
 
 void multiViewTriangulation(// Inputs

@@ -607,14 +607,15 @@ void shiftKeypoints(bool undo_shift, dense_map::RigSet const& R,
 // vector, and may have more such images, as later we may have used
 // bracketing to thin them out. Also many need to add a keypoint
 // offset.
-// TODO(oalexan1): Wipe this function. Use transformAppendNvm().
+// TODO(oalexan1): Integrate this with transformAppendNvm().
 void transformNvm(// Inputs
                   std::vector<dense_map::cameraImage>   const& cams,
                   std::vector<Eigen::Vector2d>          const& keypoint_offsets,
                   nvmData                               const& nvm,
                   // Outputs
                   std::vector<std::map<int, int>> & pid_to_cid_fid,
-                  std::vector<std::vector<std::pair<float, float>>> & keypoint_vec) {
+                  std::vector<std::vector<std::pair<float, float>>> & keypoint_vec,
+                  std::vector<Eigen::Vector3d> & xyz_vec) {
 
   // Sanity checks
   if (!keypoint_vec.empty() && keypoint_vec.size() != cams.size()) 
@@ -626,6 +627,7 @@ void transformNvm(// Inputs
   pid_to_cid_fid.clear();
   keypoint_vec.clear();
   keypoint_vec.resize(cams.size());
+  xyz_vec.clear();
 
   // Find how to map each cid from nvm to cid in 'cams'.
   std::map<int, int> nvm_cid_to_cams_cid;
@@ -663,10 +665,12 @@ void transformNvm(// Inputs
       keypoint_vec[cid].push_back(std::make_pair(keypoint[0], keypoint[1])); 
     }
 
-    // Keep only the tracks with at least two matches
-    if (out_cid_fid.size() > 1) 
+    // Keep only the tracks with at least two matches, and corresponding xyz
+    if (out_cid_fid.size() > 1) {
       pid_to_cid_fid.push_back(out_cid_fid);
-      
+      xyz_vec.push_back(nvm.pid_to_xyz[pid]);
+    }
+    
   } // end iterating over nvm pid
 }
 
@@ -961,10 +965,12 @@ void detectMatchFeatures(// Inputs
                          // Outputs
                          std::vector<std::vector<std::pair<float, float>>>& keypoint_vec,
                          std::vector<std::map<int, int>>& pid_to_cid_fid,
+                         std::vector<Eigen::Vector3d> & xyz_vec,
                          dense_map::nvmData & nvm) {
   // Wipe the outputs
   keypoint_vec.clear();
   pid_to_cid_fid.clear();
+  xyz_vec.clear();
 
   if (!no_nvm_matches) 
     std::cout << "Tracks read from disk: " << nvm.pid_to_cid_fid.size() << std::endl;
@@ -987,7 +993,7 @@ void detectMatchFeatures(// Inputs
     dense_map::transformNvm(// Inputs
                             cams, keypoint_offsets, nvm,  
                             // Outputs
-                            pid_to_cid_fid, keypoint_vec);
+                            pid_to_cid_fid, keypoint_vec, xyz_vec);
     nvm = dense_map::nvmData(); // no longer needed
     return;
   }
@@ -1136,7 +1142,6 @@ void detectMatchFeatures(// Inputs
     std::map<int, int> nvm_cid_to_cams_cid;
     dense_map::findCidReorderMap(nvm, cams,
                                  nvm_cid_to_cams_cid); // output
-
 
     // Add the optical center shift, if needed.
     std::vector<Eigen::Vector2d> keypoint_offsets(nvm.cid_to_filename.size());
