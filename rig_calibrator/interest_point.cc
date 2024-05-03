@@ -2072,28 +2072,29 @@ void flagOutliersByTriAngleAndReprojErr(// Inputs
   double min_triangulation_angle, double max_reprojection_error,
   std::vector<std::map<int, int>> const& pid_to_cid_fid,
   std::vector<std::vector<std::pair<float, float>>> const& keypoint_vec,
-  std::vector<Eigen::Affine3d> const& world_to_cam, std::vector<Eigen::Vector3d> const& xyz_vec,
+  std::vector<Eigen::Affine3d> const& world_to_cam, 
+  std::vector<Eigen::Vector3d> const& xyz_vec,
   std::vector<std::map<int, std::map<int, int>>> const& pid_cid_fid_to_residual_index,
   std::vector<double> const& residuals,
   // Outputs
   std::vector<std::map<int, std::map<int, int>>>& pid_cid_fid_inlier) {
+
   // Must deal with outliers by triangulation angle before
   // removing outliers by reprojection error, as the latter will
   // exclude some rays which form the given triangulated points.
-  int num_outliers_by_angle = 0, num_total_features = 0;
+  int num_outliers_small_angle = 0;
   for (size_t pid = 0; pid < pid_to_cid_fid.size(); pid++) {
     // Find the largest angle among any two intersecting rays
     double max_rays_angle = 0.0;
-
+    bool point_checked = false;
     for (auto cid_fid1 = pid_to_cid_fid[pid].begin();
          cid_fid1 != pid_to_cid_fid[pid].end(); cid_fid1++) {
       int cid1 = cid_fid1->first;
       int fid1 = cid_fid1->second;
 
       // Deal with inliers only
-      if (!dense_map::getMapValue(pid_cid_fid_inlier, pid, cid1, fid1)) continue;
-
-      num_total_features++;
+      if (!dense_map::getMapValue(pid_cid_fid_inlier, pid, cid1, fid1)) 
+        continue;
 
       Eigen::Vector3d cam_ctr1 = (world_to_cam[cid1].inverse()) * Eigen::Vector3d(0, 0, 0);
       Eigen::Vector3d ray1 = xyz_vec[pid] - cam_ctr1;
@@ -2109,43 +2110,44 @@ void flagOutliersByTriAngleAndReprojErr(// Inputs
           continue;
 
         // Deal with inliers only
-        if (!dense_map::getMapValue(pid_cid_fid_inlier, pid, cid2, fid2)) continue;
+        if (!dense_map::getMapValue(pid_cid_fid_inlier, pid, cid2, fid2))
+           continue;
+        point_checked = true;
 
         Eigen::Vector3d cam_ctr2 = (world_to_cam[cid2].inverse()) * Eigen::Vector3d(0, 0, 0);
         Eigen::Vector3d ray2 = xyz_vec[pid] - cam_ctr2;
         ray2.normalize();
 
         double curr_angle = (180.0 / M_PI) * acos(ray1.dot(ray2));
-
         if (std::isnan(curr_angle) || std::isinf(curr_angle)) continue;
-
         max_rays_angle = std::max(max_rays_angle, curr_angle);
       }
     }
 
     if (max_rays_angle >= min_triangulation_angle)
       continue;  // This is a good triangulated point, with large angle of convergence
-
-    // Flag as outliers all the features for this cid
+     
+    if (!point_checked)
+      continue; // this point was an outlier to start with 
+       
+    // Flag as outliers all the features for this cid and increment the counter
+    num_outliers_small_angle++;
     for (auto cid_fid = pid_to_cid_fid[pid].begin();
          cid_fid != pid_to_cid_fid[pid].end(); cid_fid++) {
       int cid = cid_fid->first;
       int fid = cid_fid->second;
-
-      // Deal with inliers only
-      if (!dense_map::getMapValue(pid_cid_fid_inlier, pid, cid, fid)) continue;
-
-      num_outliers_by_angle++;
       dense_map::setMapValue(pid_cid_fid_inlier, pid, cid, fid, 0);
     }
   }
-  std::cout << std::setprecision(4) << "Removed " << num_outliers_by_angle
-            << " outlier features with small angle of convergence, out of "
-            << num_total_features << " ("
-            << (100.0 * num_outliers_by_angle) / num_total_features << "%)\n";
 
+  std::cout << std::setprecision(4) 
+            << "Removed " << num_outliers_small_angle 
+            << " triangulated points out of " << pid_to_cid_fid.size() 
+            << " (" << (100.0 * num_outliers_small_angle) / pid_to_cid_fid.size() << "%)"
+            << " by ray convergence angle.\n";
+  
   int num_outliers_reproj = 0;
-  num_total_features = 0;  // reusing this variable
+  int num_total_features = 0;
   for (size_t pid = 0; pid < pid_to_cid_fid.size(); pid++) {
     for (auto cid_fid = pid_to_cid_fid[pid].begin();
          cid_fid != pid_to_cid_fid[pid].end(); cid_fid++) {
@@ -2153,7 +2155,8 @@ void flagOutliersByTriAngleAndReprojErr(// Inputs
       int fid = cid_fid->second;
 
       // Deal with inliers only
-      if (!dense_map::getMapValue(pid_cid_fid_inlier, pid, cid, fid)) continue;
+      if (!dense_map::getMapValue(pid_cid_fid_inlier, pid, cid, fid)) 
+        continue;
 
       num_total_features++;
 
