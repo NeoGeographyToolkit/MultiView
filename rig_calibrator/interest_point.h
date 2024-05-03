@@ -303,6 +303,7 @@ void readListOrNvm(// Inputs
                    std::string const& extra_list,
                    bool use_initial_rig_transforms,
                    double bracket_len, bool nearest_neighbor_interp,
+                   bool read_nvm_no_shift,
                    dense_map::RigSet const& R,
                    // Outputs
                    nvmData & nvm,

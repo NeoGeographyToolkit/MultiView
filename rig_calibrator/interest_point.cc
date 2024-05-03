@@ -975,6 +975,23 @@ void detectMatchFeatures(// Inputs
   if (!no_nvm_matches) 
     std::cout << "Tracks read from disk: " << nvm.pid_to_cid_fid.size() << std::endl;
   
+  // Sanity check: the offsets from the nvm must agree with the optical centers
+  // The offsets may be empty if the cameras were read from a list
+  if (!read_nvm_no_shift && !no_nvm_matches && !nvm.optical_centers.empty()) {
+    for (size_t cid = 0; cid < cams.size(); cid++) {
+      Eigen::Vector2d offset = cam_params[cams[cid].camera_type].GetOpticalOffset();
+      auto it = nvm.optical_centers.find(cams[cid].image_name);
+      if (it == nvm.optical_centers.end())
+        LOG(FATAL) << "Could not find optical center for image: " 
+                   << cams[cid].image_name << ".\n";
+      Eigen::Vector2d nvm_offset = it->second;
+      if ((offset - nvm_offset).norm() > 1e-8)
+        LOG(FATAL) << "Optical centers read from the nvm file do not agree with the "
+                   << "ones from the rig configuration for image:  " 
+                   << cams[cid].image_name << ".\n";
+    }
+  }
+  
   size_t num_images = cams.size();
   if (num_overlaps == 0 && !no_nvm_matches) {
     // Add the optical center shift, if needed
@@ -1163,7 +1180,6 @@ void detectMatchFeatures(// Inputs
       }
       
       int cams_cid = it->second;
-      
       if (read_nvm_no_shift)
         keypoint_offsets[nvm_cid] = Eigen::Vector2d(0, 0);
       else
@@ -1946,6 +1962,7 @@ void readListOrNvm(// Inputs
                    std::string const& extra_list,
                    bool use_initial_rig_transforms,
                    double bracket_len, bool nearest_neighbor_interp,
+                   bool read_nvm_no_shift,
                    dense_map::RigSet const& R,
                    // Outputs
                    nvmData & nvm,
@@ -1961,19 +1978,27 @@ void readListOrNvm(// Inputs
   if (int(camera_poses_list.empty()) + int(nvm_file.empty()) != 1)
     LOG(FATAL) << "Must specify precisely one of --camera-poses or --nvm.\n";
 
-  if (camera_poses_list != "") 
+  if (camera_poses_list != "") {
     dense_map::readCameraPoses(// Inputs
                                camera_poses_list,  
                                // Outputs
                                nvm);
-  else
+  } else {
     dense_map::ReadNvm(nvm_file, 
                        nvm.cid_to_keypoint_map,  
                        nvm.cid_to_filename,  
                        nvm.pid_to_cid_fid,  
                        nvm.pid_to_xyz,  
                        nvm.cid_to_cam_t_global);
-
+    if (!read_nvm_no_shift) {
+      std::string offsets_file = dense_map::offsetsFilename(nvm_file);
+      dense_map::readNvmOffsets(offsets_file, nvm.optical_centers); 
+      // Must have as many offsets as images
+      if (nvm.optical_centers.size() != nvm.cid_to_filename.size())
+        LOG(FATAL) << "Expecting as many optical centers as images.\n";
+    }
+  }
+  
   // Extra poses need be be added right after reading the original ones,
   // to ensure the same book-keeping is done for all of them. The extra
   // entries do not mess up the bookkeeping of pid_to_cid_fid, etc,
@@ -2034,8 +2059,7 @@ void flagOutlierByExclusionDist(// Inputs
     }
   }
 
-  std::cout << "Removed " << num_excl
-            << " features based on distorted_crop_size region.\n";
+  std::cout << "Removed " << num_excl << " features based on distorted_crop_size region.\n";
   
   return;
 }

@@ -189,6 +189,22 @@ DEFINE_double(timestamp_offsets_max_change, 1.0,
               "(measured in seconds). Existing image bracketing acts as an additional "
               "constraint.");
 
+DEFINE_double(tri_weight, 0.1,
+              "The weight to give to the constraint that optimized triangulated "
+              "points stay close to original triangulated points. A positive value will "
+              "help ensure the cameras do not move too far, but a large value may prevent "
+              "convergence.");
+
+DEFINE_double(tri_robust_threshold, 0.1,
+              "The robust threshold to use with the triangulation weight. Must be positive.");
+
+DEFINE_bool(use_initial_triangulated_points, false, "Use the triangulated "
+            "points from the input nvm file. Together with --tri-weight, this ensures "
+            "the cameras do not move too far from the initial solution. This will fail "
+            "if additional interest point matches are created with --num_overlaps."
+            "If registration is used, the initial triangulated points are transformed "
+            "appropriately.");
+
 DEFINE_double(depth_tri_weight, 1000.0,
               "The weight to give to the constraint that depth measurements agree with "
               "triangulated points. Use a bigger number as depth errors are usually on the "
@@ -205,22 +221,6 @@ DEFINE_double(mesh_tri_weight, 0.0,
 DEFINE_double(depth_mesh_weight, 0.0,
               "A larger value will give more weight to the constraint that the depth clouds "
               "stay close to the mesh. Not suggested by default.");
-
-DEFINE_double(tri_weight, 0.1,
-              "The weight to give to the constraint that optimized triangulated "
-              "points stay close to original triangulated points. A positive value will "
-              "help ensure the cameras do not move too far, but a large value may prevent "
-              "convergence.");
-
-DEFINE_double(tri_robust_threshold, 0.1,
-              "The robust threshold to use with the triangulation weight. Must be positive.");
-
-DEFINE_bool(use_initial_triangulated_points, false, "Use the triangulated "
-            "points from the input nvm file. Together with --tri-weight, this ensures "
-            "the cameras do not move too far from the initial solution. This will fail "
-            "if additional interest point matches are created with --num_overlaps."
-            "If registration is used, the initial triangulated points are transformed "
-            "appropriately.");
 
 DEFINE_bool(affine_depth_to_image, false, "Assume that the depth-to-image transform "
             "for each depth + image camera is an arbitrary affine transform rather than "
@@ -1081,10 +1081,10 @@ int main(int argc, char** argv) {
   for (size_t rig_it = 0; rig_it < R.cam_set.size(); rig_it++) 
     max_num_sensors_per_rig = std::max(max_num_sensors_per_rig, R.cam_set[rig_it].size()); 
   if (FLAGS_extra_list != "" && FLAGS_num_overlaps < max_num_sensors_per_rig)
-    LOG(FATAL) << "If inserting extra images, must have --num_overlaps be at least the number "
-               << "of sensors in the rig, and ideally more, to be able to tie well the "
-               << "new images with the existing ones.\n";
-  
+    LOG(FATAL) << "If inserting extra images, must have --num_overlaps be at least "
+                << "the number of sensors in the rig, and ideally more, to be able "
+                << "to tie well the new images with the existing ones.\n";
+                 
   // Optionally load the mesh
   mve::TriangleMesh::Ptr mesh;
   std::shared_ptr<mve::MeshInfo> mesh_info;
@@ -1113,7 +1113,8 @@ int main(int argc, char** argv) {
   dense_map::nvmData nvm;
   dense_map::readListOrNvm(FLAGS_camera_poses, FLAGS_nvm, FLAGS_extra_list,
                            FLAGS_use_initial_rig_transforms,
-                           FLAGS_bracket_len, FLAGS_nearest_neighbor_interp, R,
+                           FLAGS_bracket_len, FLAGS_nearest_neighbor_interp, 
+                           FLAGS_read_nvm_no_shift, R,
                            // outputs
                            nvm, image_maps, depth_maps); // out
   
