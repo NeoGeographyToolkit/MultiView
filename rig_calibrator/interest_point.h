@@ -300,6 +300,7 @@ void shiftKeypoints(bool undo_shift, dense_map::RigSet const& R,
 void readListOrNvm(// Inputs
                    std::string const& camera_poses_list,
                    std::string const& nvm_file,
+                   std::string const& image_sensor_list, 
                    std::string const& extra_list,
                    bool use_initial_rig_transforms,
                    double bracket_len, bool nearest_neighbor_interp,

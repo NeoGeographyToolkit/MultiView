@@ -141,6 +141,16 @@
 
 namespace fs = boost::filesystem;
 
+DEFINE_string(rig_config, "",
+              "Read the rig configuration from this file.");
+
+DEFINE_string(nvm, "",
+              "Read images and camera poses from this nvm file, as exported by Theia.");
+
+DEFINE_string(image_sensor_list, "",
+              "Read image name, sensor name, and timestamp, from each line in this list. "
+              "Alternatively, a directory structure can be used.");
+
 DEFINE_double(robust_threshold, 0.5,
               "Residual pixel errors and 3D point residuals (the latter multiplied "
               "by corresponding weight) much larger than this will be "
@@ -293,17 +303,10 @@ DEFINE_string(out_dir, "",
               "See also --save-images_and_depth_clouds, --save_matches, --verbose, "
               "and --in_dir.");
 
-DEFINE_string(rig_config, "",
-              "Read the rig configuration from this file.");
-
-DEFINE_string(nvm, "",
-              "Read images and camera poses from this nvm file, as exported by Theia.");
-
 DEFINE_bool(no_nvm_matches, false,
             "Do not read interest point matches from the nvm file. So read only "
             "camera poses. This implies --num_overlaps is positive, to be able to "
             "find new matches.");
-
 DEFINE_string(camera_poses, "",
               "Read the images and world-to-camera poses from this list. "
               "The same format is used when this tool saves the updated "
@@ -1111,7 +1114,8 @@ int main(int argc, char** argv) {
   std::vector<dense_map::MsgMap> image_maps;
   std::vector<dense_map::MsgMap> depth_maps;
   dense_map::nvmData nvm;
-  dense_map::readListOrNvm(FLAGS_camera_poses, FLAGS_nvm, FLAGS_extra_list,
+  dense_map::readListOrNvm(FLAGS_camera_poses, FLAGS_nvm, 
+                           FLAGS_image_sensor_list, FLAGS_extra_list,
                            FLAGS_use_initial_rig_transforms,
                            FLAGS_bracket_len, FLAGS_nearest_neighbor_interp, 
                            FLAGS_read_nvm_no_shift, R,
