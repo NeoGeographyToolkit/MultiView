@@ -17,6 +17,7 @@ void MergeMaps(dense_map::nvmData const& A_in,
                bool fast_merge,
                bool no_transform,
                double close_dist,
+               std::string const& image_sensor_list, 
                dense_map::nvmData & C_out);
 
 }  // namespace dense_map

@@ -88,7 +88,7 @@ void camTypeFromName(std::string const& cam_name,
     }
   }
 
-  LOG(FATAL) << "Could not determine the sensor type for: " << cam_name << "\n";
+  throw std::string("Could not determine the sensor type for: " + cam_name);
 }
   
 // Given a file with name <path to>/<cam name>/<digits>.<digits>.jpg,
@@ -128,9 +128,8 @@ void findCamTypeAndTimestamp(std::string const& image_file,
   }
 
   if (timestamp_str.empty())
-    LOG(FATAL) << "Image name (without directory) must have digits as part of "
-               << "their name, which will be converted to a timestamp. Got: "
-               << basename << "\n";
+    	throw (std::string("Image name (without directory) must have digits as part of ")
+              + std::string("their name, which will be converted to a timestamp."));
 
   // Having the timestamp extracted from the image name is convenient though it
   // requires some care. This is well-documented.

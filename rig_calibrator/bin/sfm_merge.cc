@@ -86,6 +86,10 @@ DEFINE_double(close_dist, -1.0,
               "a tight subset of the triangulated points and printed on screen if "
               "not set. This is an advanced option. ");
 
+DEFINE_string(image_sensor_list, "",
+              "Read image name, sensor name, and timestamp, from each line in this list. "
+              "Alternatively, a directory structure can be used.");
+
 void parameterValidation(int argc, char** argv) {
 
   if (argc < 3)
@@ -186,6 +190,7 @@ int main(int argc, char** argv) {
                          FLAGS_fast_merge,
                          FLAGS_no_transform,
                          FLAGS_close_dist,
+                         FLAGS_image_sensor_list,
                          out_map);
     
     if (i + 1 < argc) {

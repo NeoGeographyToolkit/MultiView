@@ -285,6 +285,7 @@ void MergePoses(std::map<int, int> & cid2cid,
 // we have the images from the first and then he second maps to merge.
 void setupLoadMatchingImages(std::vector<std::string> const& image_files,
                              dense_map::RigSet const& R,
+                             std::string const& image_sensor_list, 
                              int map1_len, int map2_len,
                              int num_image_overlaps_at_endpoints,
                              // Outputs
@@ -333,14 +334,21 @@ void setupLoadMatchingImages(std::vector<std::string> const& image_files,
   if (!map1_search.empty() && !map2_search.empty()) 
     std::cout << "Loading images to match." << std::endl;
   
+  // Infer the sensor type (and timestamp, which is not used)
+  std::vector<int> cam_types;
+  std::vector<double> timestamps;
+  bool flexible_strategy = true; // can handle with and without separate attributes
+  dense_map::readImageSensorTimestamp(image_sensor_list, image_files, R.cam_names, 
+                                      flexible_strategy,
+                                      // Outputs
+                                      cam_types, timestamps);
+  
   for (size_t cid = 0; cid < image_files.size(); cid++) {
     auto & c = cams[cid]; // alias
     // Populate most fields. All we need is the image data and camera type.
     c.image_name = image_files[cid];
-    dense_map::findCamTypeAndTimestamp(c.image_name,  
-                                       R.cam_names,  
-                                       // Outputs 
-                                       c.camera_type, c.timestamp);
+    c.camera_type = cam_types[cid];
+    c.timestamp = timestamps[cid];
     if (map1_search.find(cid) != map1_search.end() ||
         map2_search.find(cid) != map2_search.end()) {
       c.image = cv::imread(c.image_name, cv::IMREAD_GRAYSCALE);
@@ -573,6 +581,7 @@ void MergeMaps(dense_map::nvmData const& A,
                bool fast_merge,
                bool no_transform,
                double close_dist,
+               std::string const& image_sensor_list, 
                dense_map::nvmData & C) { // output merged map
 
   // Wipe the output
@@ -599,7 +608,7 @@ void MergeMaps(dense_map::nvmData const& A,
 
   std::vector<dense_map::cameraImage> C_cams;
   std::vector<std::pair<int, int>> image_pairs;
-  setupLoadMatchingImages(C.cid_to_filename, R,  
+  setupLoadMatchingImages(C.cid_to_filename, R, image_sensor_list, 
                           num_acid, num_bcid,  
                           num_image_overlaps_at_endpoints,  
                           image_pairs, C_cams); // Outputs

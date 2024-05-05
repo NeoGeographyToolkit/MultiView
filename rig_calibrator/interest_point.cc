@@ -1749,10 +1749,15 @@ bool parseImageSensorList(std::string const& image_sensor_list,
   timestamps.clear(); timestamps.resize(image_files.size());
      
   // Open the file
-  std::cout << "Reading: " << image_sensor_list << std::endl;
   std::ifstream f(image_sensor_list.c_str());
-  if (!f.is_open())
-    LOG(FATAL) << "Cannot open file for reading: " << image_sensor_list << "\n";
+  if (!f.is_open()) {
+    if (flexible_strategy)
+      return false;
+    else
+      LOG(FATAL) << "Cannot open file for reading: " << image_sensor_list << "\n";
+  }
+
+  std::cout << "Reading: " << image_sensor_list << std::endl;
   
   // Go from cam name to cam type
   std::map<std::string, int> cam_name_to_type;
@@ -1765,8 +1770,11 @@ bool parseImageSensorList(std::string const& image_sensor_list,
   std::map<std::string, double> image_to_timestamp;
   std::string line;
   while (getline(f, line)) {
-    if (line.empty() || line[0] == '#') continue;
     
+    // if line starts with comment or has only white spaces, skip it
+    if (line.empty() || line[0] == '#') continue;
+    if (line.find_first_not_of(" \t\n\v\f\r") == std::string::npos) continue;
+     
     std::string image_file;
     double timestamp = 0.0;
     std::string cam_name;
@@ -1791,7 +1799,7 @@ bool parseImageSensorList(std::string const& image_sensor_list,
     if (it == cam_name_to_type.end())
       LOG(FATAL) << "Cannot find sensor name: " << cam_name << "\n";
     image_to_cam_type[image_file] = it->second;
-    image_to_timestamp[image_file] = timestamp;    
+    image_to_timestamp[image_file] = timestamp;
   }
   
   // Must now add them in the order of image_files
@@ -1801,7 +1809,6 @@ bool parseImageSensorList(std::string const& image_sensor_list,
     if (type_it == image_to_cam_type.end() || time_it == image_to_timestamp.end())
       LOG(FATAL) << "Cannot find image file: " << image_files[img_it] 
                  << " in list: " << image_sensor_list << "\n";
-                 
     cam_types[img_it] = type_it->second;
     timestamps[img_it] = time_it->second;
   }
@@ -1841,8 +1848,14 @@ void readImageSensorTimestamp(std::string const& image_sensor_list,
   for (size_t it = 0; it < image_files.size(); it++) {
     int cam_type = 0;
     double timestamp = 0.0;
-    findCamTypeAndTimestamp(image_files[it], cam_names,  
-                            cam_type, timestamp); // outputs
+    try {
+      findCamTypeAndTimestamp(image_files[it], cam_names,  
+                              cam_type, timestamp); // outputs
+    } catch (std::exception const& e) {
+        LOG(FATAL) << "Could not infer sensor type and image timestamp. See the naming "
+                   << "convention, and check your images. Detailed message:\n" << e.what();
+    }
+    
     cam_types[it] = cam_type;
     timestamps[it] = timestamp;
   }

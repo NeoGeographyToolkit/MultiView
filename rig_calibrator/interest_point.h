@@ -232,6 +232,17 @@ Eigen::Affine3d registrationTransform(std::string                  const& hugin_
 // The registration images must all be acquired with the same sensor.  
 std::string registrationCamName(std::string const& hugin_file);
   
+// For each image, find its sensor name and timestamp. The info can be in a list or
+// from the directory structure. If flexible_strategy is true, then 
+// can try from list first, and if that fails, then from directory structure.
+void readImageSensorTimestamp(std::string const& image_sensor_list, 
+                              std::vector<std::string> const& image_files,
+                              std::vector<std::string> const& cam_names,
+                              bool flexible_strategy,
+                              // Outputs
+                              std::vector<int> & cam_types,
+                              std::vector<double> & timestamps);
+  
 struct cameraImage;
 
 void buildTracks(openMVG::matching::PairWiseMatches const& match_map,
