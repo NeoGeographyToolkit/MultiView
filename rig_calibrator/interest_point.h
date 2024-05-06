@@ -230,7 +230,9 @@ Eigen::Affine3d registrationTransform(std::string                  const& hugin_
 // TODO(oalexan1): Move to transform_utils
 // Find the name of the camera of the images used in registration.
 // The registration images must all be acquired with the same sensor.  
-std::string registrationCamName(std::string const& hugin_file);
+std::string registrationCamName(std::string const& hugin_file,
+                                std::vector<std::string> const& cam_names,
+                                std::vector<dense_map::cameraImage> const & cams);
   
 // For each image, find its sensor name and timestamp. The info can be in a list or
 // from the directory structure. If flexible_strategy is true, then 

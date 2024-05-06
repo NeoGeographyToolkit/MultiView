@@ -63,7 +63,12 @@ def processArgs(args, base_dir):
     parser.add_argument("--image_list",  dest="image_list", default="",
                         help = "Use the images from this list, instead of setting " + \
                         "--images. Images must be separated by a newline.")
-    
+   
+    parser.add_argument("--image_sensor_list",  dest="image_sensor_list", default="",
+                        help = "An alternative way of listing the input images, " + \
+                        "when the sensor name is specified separately in the same " + \
+                        "file. See the naming convention in the documentation.")
+        
     parser.add_argument("--theia_flags", dest="theia_flags",
                         default="", help="The flags to pass to Theia. By default, " + \
                         "the file ``share/theia_flags.txt`` in the software "       + \
@@ -84,14 +89,16 @@ def processArgs(args, base_dir):
         parser.print_help()
         sys.exit(1)
 
-    # Remove cont,inuation lines in the string (those are convenient
+    # Remove continuation lines in the string (those are convenient
     # for readability in docs)
     args.images = args.images.replace('\\', '')
     args.images = args.images.replace('\n', ' ')
 
-    if int(args.images != "") + int(args.image_list != "") + int(len(other) > 0) != 1:
-        raise Exception("Must set the input images using --images or " + \
-                        "--image_list, or individual images, but only mixing these.")
+    if int(args.images != "") + int(args.image_list != "") + int(len(other) > 0) + \
+         int(args.image_sensor_list != "") != 1:
+        raise Exception("Must set the input images using --images " + \
+                        "--image_list, --image_sensor_list, or individual images, " + \
+                        "but using just one approach.")
     
     # The inputs can be given as wildcards, file having an image list,
     # or individually specified images
@@ -105,7 +112,9 @@ def processArgs(args, base_dir):
     # Use images specified on the command line with no quotes
     if len(other) > 0:
         image_array = other[:]
-        
+
+    # Error checking    
+    rig_utils.check_for_sub_images(image_array)
     sanityChecks(args)
     
     return (args, image_array)
@@ -114,9 +123,13 @@ def genTheiaInputs(rig_config, args, image_array):
     '''
     Create the inputs as Theia wants them.
     '''
-
-    # Initialize the datastructure
-    images = {}
+    
+    # Find the sensor name for each image    
+    (image_array, img_sensor_dict) \
+        = rig_utils.findSensorNames(image_array, rig_config, args.image_sensor_list)
+    
+    # Initialize the data structure
+    images_by_sensor = {}
     extensions = set()
 
     # Parse the images for all cameras
@@ -124,11 +137,16 @@ def genTheiaInputs(rig_config, args, image_array):
     image_array = sorted(image_array)
     for image in image_array:
         image_set.add(image)
-        sensor_name = os.path.basename(os.path.dirname(image))
-        if sensor_name not in images:
-            images[sensor_name] = []
-        images[sensor_name].append(image)
-        ext = rig_utils.imageExtension(images[sensor_name])
+
+        if image in img_sensor_dict:
+            sensor_name = img_sensor_dict[image]
+        else:
+            raise Exception("Could not find sensor name for image: " + image)
+        
+        if sensor_name not in images_by_sensor:
+            images_by_sensor[sensor_name] = []
+        images_by_sensor[sensor_name].append(image)
+        ext = rig_utils.imageExtension(images_by_sensor[sensor_name])
         extensions.add(ext)
 
     if len(image_set) != len(image_array):
@@ -144,7 +162,7 @@ def genTheiaInputs(rig_config, args, image_array):
     rig_utils.mkdir_p(args.out_dir)
 
     # Remove old images in sym_image_dir
-    sym_image_dir = args.out_dir + "/images"
+    sym_image_dir = args.out_dir + "/sym_images"
     old_images = glob.glob(sym_image_dir + "/*")
     if len(old_images) > 0:
         print("Removing old images from " + sym_image_dir)
@@ -159,24 +177,32 @@ def genTheiaInputs(rig_config, args, image_array):
     for sensor_id in range(len(rig_config)):
         sensor_name = rig_config[sensor_id]['sensor_name']
         sym_images[sensor_name] = []
-        if sensor_name not in images:
+        if sensor_name not in images_by_sensor:
             print("Found a sensor name with no images: " + sensor_name)
             continue
         
         nonempty_rig.append(rig_config[sensor_id])
-        num_images = len(images[sensor_name])
+        num_images = len(images_by_sensor[sensor_name])
         
         for it in range(num_images):
-            image = images[sensor_name][it]
+            image = images_by_sensor[sensor_name][it]
 
             # Sanity check. Each image file name must be /path/to/<timestamp>.extension.
             # Also check if the timestamp is unique.
             src_file = os.path.relpath(image, sym_image_dir)
             base_file = os.path.basename(image)
+           
+            if image in img_sensor_dict:
+              sensor_name = img_sensor_dict[image]
+            else:
+              raise Exception("Could not find sensor name for image: " + image)
             
-            cam_type = os.path.basename(os.path.dirname(image))
-            dst_file = sym_image_dir + "/" + cam_type + "_" + os.path.basename(image)
-            
+            # If the sensor name is not part of the image name, add it, to ensure
+            # uniqueness.
+            dst_file = os.path.basename(image)
+            if sensor_name not in dst_file:
+                dst_file = sensor_name + "_" + dst_file
+            dst_file = sym_image_dir + "/" + dst_file
             sym_images[sensor_name].append(dst_file)
             os.symlink(src_file, dst_file)
             
@@ -184,75 +210,9 @@ def genTheiaInputs(rig_config, args, image_array):
     # later is incorrect.
     rig_config = nonempty_rig[:]
     
-    calib_file = args.out_dir + "/" + "theia_calibration.json"
-    print("Writing Theia calibration file: " + calib_file)
-    with open(calib_file, "w") as fh:
-        fh.write("{\n")
-        fh.write('"priors" : [\n')
+    calib_file = rig_utils.genCalibrationFile(args, rig_config, sym_images)
 
-        for sensor_id in range(len(rig_config)):
-            sensor_name = rig_config[sensor_id]['sensor_name']
-            num_images = len(sym_images[sensor_name])
-            if num_images == 0:
-                continue
-            for it in range(num_images):
-                image = os.path.basename(sym_images[sensor_name][it])
-                fh.write('{"CameraIntrinsicsPrior" : {\n')
-                fh.write('"image_name" : "' + image + '",\n')
-                fh.write('"width" : '  + rig_config[sensor_id]['image_size'][0] + ",\n")
-                fh.write('"height" : ' + rig_config[sensor_id]['image_size'][1] + ",\n")
-                fh.write('"focal_length" : ' + rig_config[sensor_id]["focal_length"] + ",\n")
-                fh.write('"principal_point" : [' + \
-                         rig_config[sensor_id]["optical_center"][0] + ", " + \
-                         rig_config[sensor_id]["optical_center"][1] + "],\n")
-                
-                dist_coeffs = rig_config[sensor_id]["distortion_coeffs"]
-                        
-                if rig_config[sensor_id]['distortion_type'] == 'no_distortion':
-                    fh.write('"camera_intrinsics_type" : "PINHOLE"\n')
-                elif rig_config[sensor_id]['distortion_type'] == 'fov':
-                    fh.write('"radial_distortion_1" : ' + \
-                             dist_coeffs[0] + ",\n")
-                    fh.write('"camera_intrinsics_type" : "FOV"\n')
-                elif rig_config[sensor_id]['distortion_type'] == 'fisheye':
-                    # Theia expects the fisheye model to have 4 distortion coefficients.
-                    k1 = dist_coeffs[0]
-                    k2 = dist_coeffs[1]
-                    k3 = dist_coeffs[2]
-                    k4 = dist_coeffs[3]
-                    fh.write('"radial_distortion_coeffs" : [' + \
-                             k1 + ", " + k2 + ", " + k3 + ", " + k4 + "],\n")
-                    fh.write('"camera_intrinsics_type" : "FISHEYE"\n')
-                elif rig_config[sensor_id]['distortion_type'] == 'radtan':
-                    
-                    # Distortion coeffs convention copied from
-                    # camera_params.cc. JSON format from
-                    # calibration_test.json in TheiaSFM.
-                    k1 = dist_coeffs[0]
-                    k2 = dist_coeffs[1]
-                    p1 = dist_coeffs[2]
-                    p2 = dist_coeffs[3]
-                    k3 = '0'
-                    if len(dist_coeffs) == 5:
-                        k3 = dist_coeffs[4]
-                    fh.write('"radial_distortion_coeffs" : [' + \
-                             k1 + ", " + k2 + ", " + k3 + "],\n")
-                    fh.write('"tangential_distortion_coeffs" : [' + \
-                             p1 + ", " + p2 + "],\n")
-                    fh.write('"camera_intrinsics_type" : "PINHOLE_RADIAL_TANGENTIAL"\n')
-                else:
-                    raise Exception("Unknown distortion type: " + \
-                                    rig_config[sensor_id]['distortion_type'])
-
-                if it < num_images - 1 or sensor_id < len(rig_config)  - 1:
-                    fh.write("}},\n")
-                else:
-                    fh.write("}}\n")
-
-        fh.write("]\n")
-        fh.write("}\n")
-
-    return (calib_file, sym_image_dir, images, sym_images, extension)
+    return (calib_file, sym_image_dir, images_by_sensor, sym_images, extension)
 
 def write_with_full_path(nvm_file, final_nvm_file,
                     offset_file, final_offset_file,

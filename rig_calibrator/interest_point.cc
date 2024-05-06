@@ -1861,18 +1861,33 @@ void readImageSensorTimestamp(std::string const& image_sensor_list,
   }
 }
 
-// Find the name of the camera of the images used in registration.
+// Find the name of the camera type of the images used in registration.
 // The registration images must all be acquired with the same sensor.  
-std::string registrationCamName(std::string const& hugin_file) {
+std::string registrationCamName(std::string const& hugin_file,
+                                std::vector<std::string> const& cam_names,
+                                std::vector<dense_map::cameraImage> const & cams) {
+
   std::vector<std::string> images;
   Eigen::MatrixXd user_ip;
   Eigen::MatrixXd user_xyz;
   ParseHuginControlPoints(hugin_file, &images, &user_ip);
 
+  // Must create a map from the image name in cams to sensor type
+  std::map<std::string, int> image_to_cam_type;
+  for (size_t cid = 0; cid < cams.size(); cid++)
+    image_to_cam_type[cams[cid].image_name] = cams[cid].camera_type;
+  
   std::set<std::string> sensors;
-  for (size_t cid = 0; cid < images.size(); cid++) 
-    sensors.insert(camName(images[cid]));
-
+  for (size_t cid = 0; cid < images.size(); cid++) {
+    // Find the image in the map
+    auto it = image_to_cam_type.find(images[cid]);
+    if (it == image_to_cam_type.end())
+      LOG(FATAL) << "Cannot find image: " << images[cid] 
+        << " from the Hugin file having control points in the input SfM map.\n";
+      
+     sensors.insert(cam_names.at(it->second));
+  }
+  
   if (sensors.size() != 1) 
     LOG(FATAL) << "All images used in registration must be for the same sensor. "
                << "Check the registration file: " << hugin_file << ".\n";

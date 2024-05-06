@@ -7,6 +7,31 @@ if sys.version_info < (3, 0, 0):
     print('\nERROR: Must use Python 3.0 or greater.')
     sys.exit(1)
 
+def check_for_sub_images(images):
+    """
+    If a an image like img.png is present, and also img_sub2.tif, the latter are
+    likely unintended, and the tool must refuse to run.
+    """
+    
+    # Put them all in a set without the extension
+    base_names = dict()
+    for image in images:
+        base_name = os.path.splitext(image)[0]
+        base_names[base_name] = image
+   
+    # For any _sub images, check if the base image is present.
+    # A sub image matches _sub[0-9]+
+    for base_name in base_names:
+        m = re.match(r"^(.*)_sub[0-9]+$", base_name)
+        if m:
+            full_base_name = m.group(1)
+            if full_base_name in base_names:
+                full_img = base_names[full_base_name]
+                img = base_names[base_name]
+                raise Exception("Found images:\n\t" + full_img + "\n\t" + img + \
+                  "\nThis is likely not intended and the sub-images were "
+                  "likely created with stereo_gui. Remove the sub-images.")
+
 def create_index_dict(lst):
     """
     Create a dictionary mapping each element in the input list to its index in the list.
@@ -453,3 +478,139 @@ def write_cam_to_world_matrix(cam_to_world_file, cam_to_world):
                  M[1][0], M[1][1], M[1][2], M[1][3],
                  M[2][0], M[2][1], M[2][2], M[2][3],
                  M[3][0], M[3][1], M[3][2], M[3][3]))
+
+def findSensorNames(images, rig_config, image_sensor_list):
+
+    """
+    Find the sensor name for each image. Either must have a list that specifies 
+    the sensor name, or the sensor name must be in the image name or directory name.
+    """
+
+    # Will return a dictionary called img_sensor_dict
+    img_sensor_dict = {}
+    
+    # Put the sensor names in a set
+    sensor_names = set()
+    for sensor_id in range(len(rig_config)):
+        sensor_name = rig_config[sensor_id]['sensor_name']
+        print("Sensor name: " + sensor_name)
+        sensor_names.add(sensor_name)
+    
+    # First check if image_sensor_list exists, then first entry 
+    # is image name, and second is sensor name. Read
+    # both the images and corresponding sensor names.
+    if image_sensor_list != "":
+        with open(image_sensor_list, 'r') as fh:
+            images = [] 
+            for line in fh:
+                vals = line.split()
+                if len(vals) < 2:
+                    raise Exception("Each line in the image sensor list must have " + \
+                                    "at least two entries: image name and sensor name.")
+                img_sensor_dict[vals[0]] = vals[1]
+                images.append(vals[0])
+    
+    else:
+      # Infer based on image / directory names
+      for image in images:
+        cam_type = ""
+        try:
+          cam_type = os.path.basename(os.path.dirname(image))
+        except:
+          pass
+        # See if the directory name is sensor name 
+        if cam_type in sensor_names:
+            img_sensor_dict[image] = cam_type
+            continue
+            
+        # See if the image name has the sensor name
+        success = False
+        for cam_type in sensor_names:
+            if cam_type in image:
+                img_sensor_dict[image] = cam_type
+                success = True
+                break
+       
+        if not success:
+          raise Exception("Could not find the sensor name for image: " + image + \
+                          "\nCheck your images and the naming conventions.") 
+      
+    return (images, img_sensor_dict)
+    
+    
+def genCalibrationFile(args, rig_config, sym_images):
+    """
+    Generate the calibration file for the rig.
+    """
+    
+    calib_file = args.out_dir + "/" + "theia_calibration.json"
+
+    print("Writing Theia calibration file: " + calib_file)
+    with open(calib_file, "w") as fh:
+        fh.write("{\n")
+        fh.write('"priors" : [\n')
+
+        for sensor_id in range(len(rig_config)):
+            sensor_name = rig_config[sensor_id]['sensor_name']
+            num_images = len(sym_images[sensor_name])
+            if num_images == 0:
+                continue
+            for it in range(num_images):
+                image = os.path.basename(sym_images[sensor_name][it])
+                fh.write('{"CameraIntrinsicsPrior" : {\n')
+                fh.write('"image_name" : "' + image + '",\n')
+                fh.write('"width" : '  + rig_config[sensor_id]['image_size'][0] + ",\n")
+                fh.write('"height" : ' + rig_config[sensor_id]['image_size'][1] + ",\n")
+                fh.write('"focal_length" : ' + rig_config[sensor_id]["focal_length"] + ",\n")
+                fh.write('"principal_point" : [' + \
+                         rig_config[sensor_id]["optical_center"][0] + ", " + \
+                         rig_config[sensor_id]["optical_center"][1] + "],\n")
+                
+                dist_coeffs = rig_config[sensor_id]["distortion_coeffs"]
+                        
+                if rig_config[sensor_id]['distortion_type'] == 'no_distortion':
+                    fh.write('"camera_intrinsics_type" : "PINHOLE"\n')
+                elif rig_config[sensor_id]['distortion_type'] == 'fov':
+                    fh.write('"radial_distortion_1" : ' + \
+                             dist_coeffs[0] + ",\n")
+                    fh.write('"camera_intrinsics_type" : "FOV"\n')
+                elif rig_config[sensor_id]['distortion_type'] == 'fisheye':
+                    # Theia expects the fisheye model to have 4 distortion coefficients.
+                    k1 = dist_coeffs[0]
+                    k2 = dist_coeffs[1]
+                    k3 = dist_coeffs[2]
+                    k4 = dist_coeffs[3]
+                    fh.write('"radial_distortion_coeffs" : [' + \
+                             k1 + ", " + k2 + ", " + k3 + ", " + k4 + "],\n")
+                    fh.write('"camera_intrinsics_type" : "FISHEYE"\n')
+                elif rig_config[sensor_id]['distortion_type'] == 'radtan':
+                    
+                    # Distortion coeffs convention copied from
+                    # camera_params.cc. JSON format from
+                    # calibration_test.json in TheiaSFM.
+                    k1 = dist_coeffs[0]
+                    k2 = dist_coeffs[1]
+                    p1 = dist_coeffs[2]
+                    p2 = dist_coeffs[3]
+                    k3 = '0'
+                    if len(dist_coeffs) == 5:
+                        k3 = dist_coeffs[4]
+                    fh.write('"radial_distortion_coeffs" : [' + \
+                             k1 + ", " + k2 + ", " + k3 + "],\n")
+                    fh.write('"tangential_distortion_coeffs" : [' + \
+                             p1 + ", " + p2 + "],\n")
+                    fh.write('"camera_intrinsics_type" : "PINHOLE_RADIAL_TANGENTIAL"\n')
+                else:
+                    raise Exception("Unknown distortion type: " + \
+                                    rig_config[sensor_id]['distortion_type'])
+
+                if it < num_images - 1 or sensor_id < len(rig_config)  - 1:
+                    fh.write("}},\n")
+                else:
+                    fh.write("}}\n")
+
+        fh.write("]\n")
+        fh.write("}\n")
+    
+    return calib_file
+      

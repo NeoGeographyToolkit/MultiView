@@ -98,12 +98,13 @@ void WriteNvm(std::vector<Eigen::Matrix2Xd> const& cid_to_keypoint_map,
 // A utility for saving a camera in a format ASP understands. For now do not save
 // the distortion.
 void writePinholeCamera(camera::CameraParameters const& cam_params,
-                        Eigen::Affine3d const& world_to_cam,
-                        std::string const& filename);
+                        Eigen::Affine3d          const& world_to_cam,
+                        std::string              const& filename);
   
 // Save the optimized cameras in ASP's Pinhole format. For now do not save
 // the distortion model.
-void writePinholeCameras(std::vector<camera::CameraParameters> const& cam_params,
+void writePinholeCameras(std::vector<std::string>              const& cam_names,
+                         std::vector<camera::CameraParameters> const& cam_params,
                          std::vector<dense_map::cameraImage>   const& cams,
                          std::vector<Eigen::Affine3d>          const& world_to_cam,
                          std::string                           const& out_dir);

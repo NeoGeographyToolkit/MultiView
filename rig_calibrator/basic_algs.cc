@@ -22,6 +22,7 @@
 #include <glog/logging.h>
 #include <fstream>
 #include <iostream>
+#include <iomanip>
 
 #include <boost/filesystem.hpp>
 
@@ -70,9 +71,9 @@ void readList(std::string const& file, std::set<std::string> & list) {
   fh.close();
 }
 
-// The cam name is the subdir having the images.
-// Example: mydir/nav_cam/file.jpg has nav_cam as the cam name.
-std::string camName(std::string const& image_file) {
+// The parent subdirectory. Example: mydir/nav_cam/file.jpg will return
+// 'nav_cam'.
+std::string parentSubdir(std::string const& image_file) {
   return fs::path(image_file).parent_path().filename().string();
 }
 
@@ -91,8 +92,7 @@ void camTypeFromName(std::string const& cam_name,
   throw std::string("Could not determine the sensor type for: " + cam_name);
 }
   
-// Given a file with name <path to>/<cam name>/<digits>.<digits>.jpg,
-// find the cam name, then look up the cam type. Also find the timestamp.
+// Given a file with name <dir>/<cam name>/<digits>.<digits>.jpg, or <dir><text><digits>.<digits><text>ref_cam<text>.jpg, find the cam name and the timestamp. 
 void findCamTypeAndTimestamp(std::string const& image_file,
                              std::vector<std::string> const& cam_names,
                              // Outputs
@@ -103,16 +103,49 @@ void findCamTypeAndTimestamp(std::string const& image_file,
   cam_type = 0;
   timestamp = 0.0;
   
-  // The cam name is the subdir having the images
-  std::string cam_name = camName(image_file);
-    
   std::string basename = fs::path(image_file).filename().string();
 
-  // Remove anything after <digits>.<digits> 
+  // The cam name is the subdir having the images
+  std::string cam_name = parentSubdir(image_file);
+
+  // Infer cam type from cam name. This can fail if the naming convention is
+  // my_images/<timestamp><cam_name>.jpg.
+  bool found_cam_name = false;
+  try {
+    camTypeFromName(cam_name, cam_names, cam_type);
+    found_cam_name = true;
+  } catch (std::string const& e) {}
+
+  // If did not find it, try to find the cam name from the basename
+  if (!found_cam_name) {
+    for (size_t cam_it = 0; cam_it < cam_names.size(); cam_it++) {
+      if (basename.find(cam_names[cam_it]) != std::string::npos) {
+        cam_type = cam_it;
+        cam_name = cam_names[cam_it];
+        found_cam_name = true;
+        break;
+      }
+    }
+  }
+  
+  // If no luck, cannot continue. In this case the user is supposed to provide
+  // --image_sensor_list.
+  if (!found_cam_name)
+    LOG(FATAL) << "Could not determine the sensor type for: " << image_file
+               << ". Check your rig configuration, or provide --image_sensor_list.\n"; 
+    
+  // Read the first sequence of digits, followed potentially by a dot and more 
+  // digits. Remove anything after <digits>.<digits>.
   bool have_dot = false;
   std::string timestamp_str;
+  bool found_digits = false;
   for (size_t it = 0; it < basename.size(); it++) {
 
+    if (!found_digits && (basename[it] < '0' || basename[it] > '9')) 
+      continue; // Not a digit yet, keep going
+    
+    found_digits = true;
+      
     if (basename[it] == '.') {
       if (have_dot) 
         break; // We have seen a dot already, ignore the rest
@@ -134,9 +167,6 @@ void findCamTypeAndTimestamp(std::string const& image_file,
   // Having the timestamp extracted from the image name is convenient though it
   // requires some care. This is well-documented.
   timestamp = atof(timestamp_str.c_str());
-  
-  // Infer cam type from cam name
-  camTypeFromName(cam_name, cam_names, cam_type);
 }
 
 // Replace .<extension> with <suffix>  

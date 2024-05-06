@@ -999,7 +999,7 @@ void applyRegistration(bool no_rig, bool scale_depth,
 
   // All cameras used in registration must be from the same sensor.
   // That is enforced in registrationCamName().
-  std::string reg_cam_name = dense_map::registrationCamName(hugin_file);
+  std::string reg_cam_name = dense_map::registrationCamName(hugin_file, R.cam_names, cams);
   int reg_cam_index = R.sensorIndex(reg_cam_name);
   
   // Find the image files. These are one-to-one with world_to_cam.
@@ -1863,7 +1863,8 @@ int main(int argc, char** argv) {
   dense_map::saveImageList(cams, image_list); 
 
   if (FLAGS_save_pinhole_cameras)
-    dense_map::writePinholeCameras(R.cam_params, cams, world_to_cam, FLAGS_out_dir);
+    dense_map::writePinholeCameras(R.cam_names, R.cam_params, cams, 
+                                   world_to_cam, FLAGS_out_dir);
   
   std::string conv_angles_file = FLAGS_out_dir + "/convergence_angles.txt";
   dense_map::savePairwiseConvergenceAngles(pid_to_cid_fid, keypoint_vec,

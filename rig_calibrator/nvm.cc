@@ -326,12 +326,18 @@ void WriteNvm(std::vector<Eigen::Matrix2Xd> const& cid_to_keypoint_map,
 
 // For an image like image_dir/my_cam/image.png, create the file
 // out_dir/image.tsai.
-std::string pinholeFile(std::string const& out_dir, std::string const& image_file) {
+std::string pinholeFile(std::string const& out_dir, 
+                        std::string const& sensor_name, 
+                        std::string const& image_file) {
 
-  std::string cam_name = camName(image_file);
-  std::string prefix = fs::path(image_file).stem().string();
+  std::string base = fs::path(image_file).stem().string();
+  
+  // Ensure that the sensor name is part of the pinhole file name,
+  // to ensure uniqueness.
+  if (base.find(sensor_name) == std::string::npos)
+    base = base + "_" + sensor_name;
 
-  return out_dir + "/" + cam_name + "/" + prefix + ".tsai";
+  return out_dir + "/" + sensor_name + "/" + base + ".tsai";
 }
   
 // A utility for saving a camera in a format ASP understands. For now do not save
@@ -395,7 +401,8 @@ void writePinholeCamera(camera::CameraParameters const& cam_params,
   
 // Save the optimized cameras in ASP's Pinhole format. For now do not save
 // the distortion model.
-void writePinholeCameras(std::vector<camera::CameraParameters> const& cam_params,
+void writePinholeCameras(std::vector<std::string>              const& cam_names,
+                         std::vector<camera::CameraParameters> const& cam_params,
                          std::vector<dense_map::cameraImage>   const& cams,
                          std::vector<Eigen::Affine3d>          const& world_to_cam,
                          std::string                           const& out_dir) {
@@ -407,20 +414,21 @@ void writePinholeCameras(std::vector<camera::CameraParameters> const& cam_params
   std::string pinhole_dir = out_dir + "/pinhole";
   std::cout << "Writing pinhole cameras to: " << pinhole_dir << std::endl;
 
-  std::vector<std::string> cam_names; 
+  std::vector<std::string> pinholeCamFiles; 
   for (size_t cid = 0; cid < cams.size(); cid++) {
     std::string const& image_file = cams[cid].image_name;
     int cam_type = cams[cid].camera_type;
-    std::string camFile = dense_map::pinholeFile(pinhole_dir, image_file);
+    std::string sensor_name = cam_names[cam_type]; 
+    std::string camFile = dense_map::pinholeFile(pinhole_dir, sensor_name, image_file);
     dense_map::writePinholeCamera(cam_params[cam_type],  
                                   world_to_cam[cid], camFile);
-    cam_names.push_back(camFile);
+    pinholeCamFiles.push_back(camFile);
   }
 
   // Must ensure that all camera names without directory are unique
   std::set<std::string> base_names;
-  for (size_t it = 0; it < cam_names.size(); it++) {
-    std::string base_name = fs::path(cam_names[it]).filename().string();
+  for (size_t it = 0; it < pinholeCamFiles.size(); it++) {
+    std::string base_name = fs::path(pinholeCamFiles[it]).filename().string();
     if (base_names.find(base_name) != base_names.end())
       LOG(FATAL) << "Non-unique camera name (without directory): " << base_name 
                  << ". It will not be possible to use these cameras with bundle_adjust.\n";
@@ -434,8 +442,8 @@ void writePinholeCameras(std::vector<camera::CameraParameters> const& cam_params
   
   std::cout << "Writing: " << camera_list << std::endl;
   std::ofstream ofs(camera_list.c_str());
-  for (size_t it = 0; it < cam_names.size(); it++)
-    ofs << cam_names[it] << "\n";
+  for (size_t it = 0; it < pinholeCamFiles.size(); it++)
+    ofs << pinholeCamFiles[it] << "\n";
   ofs.close();
   
   return;

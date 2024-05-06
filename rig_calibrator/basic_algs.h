@@ -104,17 +104,14 @@ void eigen2vec(Eigen::Matrix2Xd const& mat,
 // acting as separators.  Store them in a set.
 void readList(std::string const& file, std::set<std::string> & list);
 
-// The cam name is the subdir having the images.
-// Example: mydir/nav_cam/file.jpg has nav_cam as the cam name.
-std::string camName(std::string const& image_file);
-
 // Find cam type based on cam name
 void camTypeFromName(std::string const& cam_name,
                      std::vector<std::string> const& cam_names,
                      int& cam_type);
   
-// Given a file with name <path to>/<cam name>/<digits>.<digits>.jpg,
-// find the cam name, then look up the cam type. Also find the timestamp.
+// Given a file with name <path to>/<cam name>/<digits>.<digits>.jpg, or <path
+// to>/file.png, where file has both digits (with potentially a dot and more
+// digits), and also <cam name>, find the cam name and the timestamp. 
 void findCamTypeAndTimestamp(std::string const& image_file,
                              std::vector<std::string> const& cam_names,
                              // Outputs
