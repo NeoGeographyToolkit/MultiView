@@ -207,6 +207,7 @@ void lookupFilesPoses(// Inputs
 void lookupImagesAndBrackets(// Inputs
                              double bracket_len,
                              double timestamp_offsets_max_change,
+                             bool bracket_single_image,
                              dense_map::RigSet   const& R,
                              std::vector<double> const& ref_timestamps,
                              std::vector<MsgMap> const& image_data,
@@ -313,12 +314,14 @@ void lookupImagesAndBrackets(// Inputs
         // search for.
         MsgMapIter start_pos = image_start_positions[cam_type]; // care here
         double curr_timestamp = beg_timestamp;                  // start here
-        cv::Mat best_image;
-        std::string best_image_name;
-        double best_dist = 1.0e+100;
-        double best_time = -1.0, found_time = -1.0;
+        double found_time = -1.0;
+        std::vector<double> found_times;
+        std::vector<cv::Mat> found_images;
+        std::vector<std::string> found_image_names;
         while (1) {
-          if (found_time > end_timestamp) break;  // out of range
+          
+          // Stop when we are past the end of the bracket
+          if (found_time > end_timestamp) break;
 
           cv::Mat image;
           std::string image_name;
@@ -340,26 +343,46 @@ void lookupImagesAndBrackets(// Inputs
           bool is_in_bracket = (beg_timestamp <= found_time && found_time < end_timestamp);
           double curr_dist = std::abs(found_time - mid_timestamp);
 
-          if (curr_dist < best_dist && is_in_bracket) {
-            best_dist = curr_dist;
-            best_time = found_time;
+          if (is_in_bracket) {
             // Update the start position for the future only if this is a good
             // solution. Otherwise we may have moved too far.
             image_start_positions[cam_type] = start_pos;
-            image.copyTo(best_image);
-            best_image_name = image_name;
+            
+            // Record the found image
+            found_images.push_back(cv::Mat());
+            image.copyTo(found_images.back());
+            found_times.push_back(found_time);
+            found_image_names.push_back(image_name);
           }
 
           // Go forward in time. We count on the fact that
           // lookupImage() looks forward from given guess.
           // Careful here with the api of std::nextafter().
           curr_timestamp = std::nextafter(found_time, big);
+        } // end while loop
+
+        cv::Mat best_image;
+        std::string best_image_name;
+        double best_dist = 1.0e+100;
+        double best_time = -1.0;
+        best_dist = 1.0e+100;
+        // loop over found images to find the closest one to the midpoint. Save 
+        // that as best image, and update best_time and best_image_name, and best_dist.
+        for (size_t i = 0; i < found_times.size(); i++) {
+          double curr_dist = std::abs(found_times[i] - mid_timestamp);
+          if (curr_dist < best_dist) {
+            best_dist = curr_dist;
+            best_time = found_times[i];
+            found_images[i].copyTo(best_image);
+            best_image_name = found_image_names[i];
+          }
         }
 
         if (best_time < 0.0) continue;  // bracketing failed
 
+        // Must respect the bracket length, unless best time equals beg time
         if (best_time > beg_timestamp && end_timestamp - beg_timestamp > bracket_len)
-          continue;  // Must respect the bracket length, unless best time equals beg time
+          continue;  
         
         // Note how we allow best_time == beg_timestamp if there's no other choice
         if (best_time < beg_timestamp || best_time >= end_timestamp)
@@ -529,6 +552,7 @@ void lookupImagesNoBrackets(// Inputs
 void lookupImagesOneRig(// Inputs
                         bool no_rig, double bracket_len,
                         double timestamp_offsets_max_change,
+                        bool bracket_single_image,
                         dense_map::RigSet const& R,
                         std::vector<MsgMap> const& image_maps,
                         std::vector<MsgMap> const& depth_maps,
@@ -549,6 +573,7 @@ void lookupImagesOneRig(// Inputs
     lookupImagesAndBrackets(// Inputs
                             bracket_len,  
                             timestamp_offsets_max_change,  
+                            bracket_single_image,
                             R, ref_timestamps,  image_maps, depth_maps,  
                             // Outputs
                             cams, min_timestamp_offset, max_timestamp_offset);
@@ -626,6 +651,7 @@ void lookupImagesOneRig(// Inputs
 void lookupImages(// Inputs
                   bool no_rig, double bracket_len,
                   double timestamp_offsets_max_change,
+                  bool bracket_single_image,
                   dense_map::RigSet const& R,
                   std::vector<MsgMap> const& image_maps,
                   std::vector<MsgMap> const& depth_maps,
@@ -669,7 +695,9 @@ void lookupImages(// Inputs
 
     // Do the work for the subrig
     lookupImagesOneRig(// Inputs
-                       no_rig, bracket_len, timestamp_offsets_max_change, sub_rig,  
+                       no_rig, bracket_len, timestamp_offsets_max_change, 
+                       bracket_single_image,
+                       sub_rig,  
                        sub_image_maps, sub_depth_maps,  
                        // Outputs
                        sub_ref_timestamps, sub_world_to_ref, sub_cams,  
