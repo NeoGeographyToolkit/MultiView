@@ -55,6 +55,7 @@ typedef MsgMap::const_iterator MsgMapIter;
 void lookupImages(// Inputs
                   bool no_rig, double bracket_len,
                   double timestamp_offsets_max_change,
+                  bool bracket_single_image,
                   dense_map::RigSet const& R,
                   std::vector<MsgMap> const& image_maps,
                   std::vector<MsgMap> const& depth_maps,

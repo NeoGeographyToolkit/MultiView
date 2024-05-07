@@ -152,6 +152,8 @@ void camera::CameraParameters::SetDistortion(Eigen::VectorXd const& distortion) 
   }
 }
 
+// TODO(oalexan1): Use numerical undistortion as in VW!
+// Test that results agree.
 // This must be called before a model having RPC distortion can be used
 // for undistortion. Here it is assumed that the distortion component
 // of m_distortion_coeffs is up-to-date, and its undistortion component

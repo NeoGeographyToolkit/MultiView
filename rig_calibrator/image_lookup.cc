@@ -196,14 +196,18 @@ void lookupFilesPoses(// Inputs
   }
 }
   
-// Look up each ref cam image by timestamp, with the rig
-// assumption. In between any two ref cam timestamps, which are no
-// further from each other than the bracket length, look up an image
-// of each of the other camera types in the rig. If more than one choice, try to
-// stay as close as possible to the midpoint of the two bracketing ref
-// cam timestamps. This way there's more wiggle room later if one
-// attempts to modify the timestamp offset. If there is no rig, keep
-// all the images.
+// Look up each ref cam image by timestamp, with the rig assumption. In between
+// any two ref cam timestamps, which are no further from each other than the
+// bracket length, look up one or more images of each of the other camera types
+// in the rig. If more than one choice, and bracket_single_image is true, choose
+// the one closest to the midpoint of the two bracketing ref cam timestamps.
+// This way there's more wiggle room later if one attempts to modify the
+// timestamp offset.
+// TODO(oalexan1): This is messy code but was developed with much testing,
+// and it works. If it is to be cleaned up, it should be done with care.
+// Especially the cases when the other cameras have exactly the same timestamp
+// as the ref cam are tricky, and it gets even trickier at the last timestamp.
+// Also need to consider the case when timestamp_offsets_max_change is true.
 void lookupImagesAndBrackets(// Inputs
                              double bracket_len,
                              double timestamp_offsets_max_change,
@@ -254,13 +258,15 @@ void lookupImagesAndBrackets(// Inputs
     if (last_timestamp) end_ref_it = beg_ref_it;
 
     for (int cam_type = 0; cam_type < num_cam_types; cam_type++) {
-      dense_map::cameraImage cam;
+      std::vector<dense_map::cameraImage> local_cams;
       bool success = false;
 
       // The ref cam does not need bracketing, but the others need to be bracketed
       // by ref cam, so there are two cases to consider.
 
       if (R.isRefSensor(R.cam_names[cam_type])) {
+        // Case of ref sensor
+        dense_map::cameraImage cam;
         cam.camera_type   = cam_type;
         cam.timestamp     = ref_timestamps[beg_ref_it];
         cam.ref_timestamp = cam.timestamp;  // the time offset is 0 between ref and itself
@@ -288,8 +294,10 @@ void lookupImagesAndBrackets(// Inputs
                      << "Cannot look up camera at time " << cam.timestamp << ".\n";
 
         success = true;
+        local_cams.push_back(cam);
 
       } else {
+        // Case of not ref sensor
         // Need care here since sometimes ref_cam and current cam can have
         // exactly the same timestamp, so then bracketing should succeed.
 
@@ -339,11 +347,17 @@ void lookupImagesAndBrackets(// Inputs
           if (!have_lookup)
             break; 
 
-          // Check if the found time is in the bracket
+          // Check if the found time is in the bracket. Note how we allow
+          // found_time == beg_timestamp if there's no other choice.
           bool is_in_bracket = (beg_timestamp <= found_time && found_time < end_timestamp);
           double curr_dist = std::abs(found_time - mid_timestamp);
 
-          if (is_in_bracket) {
+          // Must respect the bracket length, unless best time equals beg time,
+          // as then the bracketing is not going to be used.
+          bool fail_bracket_len = ((found_time > beg_timestamp && 
+                                    end_timestamp - beg_timestamp > bracket_len));
+
+          if (is_in_bracket && !fail_bracket_len) {
             // Update the start position for the future only if this is a good
             // solution. Otherwise we may have moved too far.
             image_start_positions[cam_type] = start_pos;
@@ -360,76 +374,90 @@ void lookupImagesAndBrackets(// Inputs
           // Careful here with the api of std::nextafter().
           curr_timestamp = std::nextafter(found_time, big);
         } // end while loop
-
-        cv::Mat best_image;
-        std::string best_image_name;
-        double best_dist = 1.0e+100;
-        double best_time = -1.0;
-        best_dist = 1.0e+100;
-        // loop over found images to find the closest one to the midpoint. Save 
-        // that as best image, and update best_time and best_image_name, and best_dist.
-        for (size_t i = 0; i < found_times.size(); i++) {
-          double curr_dist = std::abs(found_times[i] - mid_timestamp);
-          if (curr_dist < best_dist) {
-            best_dist = curr_dist;
-            best_time = found_times[i];
-            found_images[i].copyTo(best_image);
-            best_image_name = found_image_names[i];
+        
+        if (bracket_single_image) {
+          // Must pick only one image, which is closest to the midpoint 
+          cv::Mat best_image;
+          std::string best_image_name;
+          double best_dist = 1.0e+100;
+          double best_time = -1.0;
+          best_dist = 1.0e+100;
+          // loop over found images to find the closest one to the midpoint. Save 
+          // that as best image, and update best_time and best_image_name, and best_dist.
+          for (size_t i = 0; i < found_times.size(); i++) {
+            double curr_dist = std::abs(found_times[i] - mid_timestamp);
+            if (curr_dist < best_dist) {
+              best_dist = curr_dist;
+              best_time = found_times[i];
+              found_images[i].copyTo(best_image);
+              best_image_name = found_image_names[i];
+            }
           }
+
+          if (best_time < 0.0) continue;  // bracketing failed
+          
+          // Make the vector of found images contain only the best image
+          found_images.resize(1);
+          found_times.resize(1);
+          found_image_names.resize(1);
+          best_image.copyTo(found_images[0]);
+          found_times[0] = best_time;
+          found_image_names[0] = best_image_name;
         }
 
-        if (best_time < 0.0) continue;  // bracketing failed
-
-        // Must respect the bracket length, unless best time equals beg time
-        if (best_time > beg_timestamp && end_timestamp - beg_timestamp > bracket_len)
-          continue;  
-        
-        // Note how we allow best_time == beg_timestamp if there's no other choice
-        if (best_time < beg_timestamp || best_time >= end_timestamp)
-          continue;  // no luck
-
-        cam.camera_type   = cam_type;
-        cam.timestamp     = best_time;
-        cam.ref_timestamp = best_time - ref_to_cam_offset;
-        cam.beg_ref_index = beg_ref_it;
-        cam.end_ref_index = end_ref_it;
-        cam.image         = best_image;
-        cam.image_name    = best_image_name;
-
-        success = true;
-      }
+        // Iterate ove found_times and add to local_cams
+        for (size_t i = 0; i < found_times.size(); i++) {
+          dense_map::cameraImage cam;
+          cam.camera_type   = cam_type;
+          cam.timestamp     = found_times[i];
+          cam.ref_timestamp = found_times[i] - ref_to_cam_offset;
+          cam.beg_ref_index = beg_ref_it;
+          cam.end_ref_index = end_ref_it;
+          found_images[i].copyTo(cam.image);
+          cam.image_name = found_image_names[i];
+          local_cams.push_back(cam);
+        }
+          
+        success = (local_cams.size() > 0);
+      } // end case of not ref sensor
 
       if (!success) continue;
-
-      if (!R.isRefSensor(R.cam_names[cam_type])) { // Not a ref sensor
-        double ref_to_cam_offset = R.ref_to_cam_timestamp_offsets[cam_type];
-
-        // cam.timestamp was chosen as centrally as possible so that
-        // ref_timestamps[beg_ref_it] + ref_to_cam_offset <= cam.timestamp
-        // and
-        // cam.timestamp <= ref_timestamps[end_ref_it] + ref_to_cam_offset
-        // Find the range of potential future values of ref_to_cam_offset so that
-        // cam.timestamp still respects these bounds.
-        min_timestamp_offset[cam_type]
-          = std::max(min_timestamp_offset[cam_type],
-                     cam.timestamp - ref_timestamps[end_ref_it]);
-        max_timestamp_offset[cam_type]
-          = std::min(max_timestamp_offset[cam_type],
-                     cam.timestamp - ref_timestamps[beg_ref_it]);
-      }
-
-      // Look up the closest depth in time (either before or after cam.timestamp)
-      // This need not succeed.
-      cam.cloud_timestamp = -1.0;  // will change
-      if (!depth_data.empty()) 
-        dense_map::lookupImage(cam.timestamp,  // start looking from this time forward
-                               depth_data[cam_type],
-                               // Outputs
-                               cam.depth_cloud, cam.depth_name, 
-                               depth_start_positions[cam_type],  // this will move forward
-                               cam.cloud_timestamp);             // found time
       
-      cams.push_back(cam);
+      // Iterate over the local_cams and update the timestamp offset bounds
+      for (size_t i = 0; i < local_cams.size(); i++) {
+        auto & cam = local_cams[i];
+
+        if (!R.isRefSensor(R.cam_names[cam_type])) { // Not a ref sensor
+          double ref_to_cam_offset = R.ref_to_cam_timestamp_offsets[cam_type];
+
+          // Assuming the option --bracket_single_image is used, 
+          // cam.timestamp was chosen as centrally as possible so that
+          // ref_timestamps[beg_ref_it] + ref_to_cam_offset <= cam.timestamp
+          // and
+          // cam.timestamp <= ref_timestamps[end_ref_it] + ref_to_cam_offset
+          // Find the range of potential future values of ref_to_cam_offset so that
+          // cam.timestamp still respects these bounds.
+          min_timestamp_offset[cam_type]
+            = std::max(min_timestamp_offset[cam_type],
+                      cam.timestamp - ref_timestamps[end_ref_it]);
+          max_timestamp_offset[cam_type]
+            = std::min(max_timestamp_offset[cam_type],
+                      cam.timestamp - ref_timestamps[beg_ref_it]);
+        }
+
+        // Look up the closest depth in time (either before or after cam.timestamp)
+        // This need not succeed.
+        cam.cloud_timestamp = -1.0;  // will change
+        if (!depth_data.empty()) 
+          dense_map::lookupImage(cam.timestamp,  // start looking from this time forward
+                                depth_data[cam_type],
+                                // Outputs
+                                cam.depth_cloud, cam.depth_name, 
+                                depth_start_positions[cam_type],  // this will move forward
+                                cam.cloud_timestamp);             // found time
+        
+        cams.push_back(cam);
+      } // end loop over local_cams
     }  // end loop over camera types
   }    // end loop over ref images
 

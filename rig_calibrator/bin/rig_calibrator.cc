@@ -164,7 +164,7 @@ DEFINE_double(bracket_len, 0.6,
               "for the timestamp offset between these cameras. It is assumed the rig "
               "moves slowly and uniformly during this time. A large value here will "
               "make the calibrator compute a poor solution but a small value may prevent "
-              "enough images being bracketed.");
+              "enough images being bracketed. See also --bracket_single_image.");
 
 DEFINE_string(intrinsics_to_float, "", "Specify which intrinsics to float for each sensor. "
               "Example: 'cam1:focal_length,optical_center,distortion cam2:focal_length'.");
@@ -325,6 +325,13 @@ DEFINE_bool(use_initial_rig_transforms, false,
             "specified via --rig_config to initialize all non-reference camera poses based "
             "on the reference camera poses and the rig transforms. If this option is not "
             "set, derive the rig transforms from the poses of individual cameras.");
+
+DEFINE_bool(bracket_single_image, false,
+            "If more than one image from a given sensor is acquired between two "
+            "two consecutive reference sensor images, as measured by timestamps, "
+            "keep only one, choosing the image that is closest to the midpoint "
+            "of the interval formed by reference sensor timestamps. Only applicable "
+            "without --no_rig.");
 
 DEFINE_string(extra_list, "",
               "Add to the SfM solution the camera poses for the additional images/depth "
@@ -1133,6 +1140,7 @@ int main(int argc, char** argv) {
   dense_map::lookupImages(// Inputs
                           FLAGS_no_rig, FLAGS_bracket_len,
                           FLAGS_timestamp_offsets_max_change,
+                          FLAGS_bracket_single_image, 
                           R, image_maps, depth_maps,
                           // Outputs
                           ref_timestamps, world_to_ref,
