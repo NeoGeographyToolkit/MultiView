@@ -1405,16 +1405,6 @@ int main(int argc, char** argv) {
     std::vector<std::map<int, std::map<int, int>>> pid_cid_fid_to_residual_index;
     pid_cid_fid_to_residual_index.resize(pid_to_cid_fid.size());
 
-    // If distortion can be floated, and the RPC distortion model is
-    // used, must forbid undistortion until its updated value is
-    // computed later.
-    // TODO(oalexan1): Need to have an actual flag for when we use RPC.
-    for (int cam_type = 0; cam_type < num_cam_types; cam_type++) {
-      if (intrinsics_to_float[cam_type].find("distortion")
-          != intrinsics_to_float[cam_type].end() && distortions[cam_type].size() > 5)
-        R.cam_params[cam_type].m_rpc.set_can_undistort(false);
-    }
-    
     // For when we don't have distortion but must get a pointer to
     // distortion for the interface
     double distortion_placeholder = 0.0;
@@ -1750,12 +1740,6 @@ int main(int argc, char** argv) {
                                                           focal_lengths[cam_type]));
       R.cam_params[cam_type].SetOpticalOffset(optical_centers[cam_type]);
       R.cam_params[cam_type].SetDistortion(distortions[cam_type]);
-
-      // This is needed for RPC, as that one has undistortion coeffs
-      // which must be synced up with new distortion coeffs.
-      if (intrinsics_to_float[cam_type].find("distortion")
-          != intrinsics_to_float[cam_type].end() && distortions[cam_type].size() > 5)
-        R.cam_params[cam_type].updateRpcUndistortion(FLAGS_num_threads);
     }
 
     // Copy back the optimized extrinsics, whether they were optimized or fixed
