@@ -32,28 +32,18 @@ namespace camera {
 namespace dense_map {
 class RPCLensDistortion {
   int m_rpc_degree;
-  Eigen::VectorXd m_distortion, m_undistortion;
-
-  // This variable signals that the coefficients needed to perform undistortion
-  // have been computed.
-  bool m_can_undistort;
+  Eigen::VectorXd m_distortion;
 
  public:
   explicit RPCLensDistortion(); // NOLINT
   explicit RPCLensDistortion(Eigen::VectorXd const& params);
   void reset(int rpc_degree);  // Form the identity transform
   Eigen::VectorXd distortion_parameters() const;
-  Eigen::VectorXd undistortion_parameters() const;
   void set_image_size(Eigen::Vector2i const& image_size);
   void set_distortion_parameters(Eigen::VectorXd const& params);
-  void set_undistortion_parameters(Eigen::VectorXd const& params);
   int num_dist_params() const { return m_distortion.size(); }
 
   Eigen::Vector2d distorted_coordinates(Eigen::Vector2d const& p) const;
-  Eigen::Vector2d undistorted_coordinates(Eigen::Vector2d const& p) const;
-
-  bool has_fast_distort  () const {return true;}
-  bool has_fast_undistort() const {return true;}
 
   void write(std::ostream& os) const;
   void read(std::istream& os);
@@ -61,21 +51,17 @@ class RPCLensDistortion {
   static  std::string class_name()       { return "RPC"; }
   std::string name      () const { return class_name();  }
 
-  void scale(double scale);
-
-  void set_can_undistort(bool flag) { m_can_undistort = flag; }
-  bool can_undistort() const { return m_can_undistort; }
   static void init_as_identity(Eigen::VectorXd & params);
   static void increment_degree(Eigen::VectorXd & params);
 
   Eigen::VectorXd dist_undist_params();
 
-  void set_dist_undist_params(Eigen::VectorXd const& dist_undist);
-
-  Eigen::Vector2d distort_centered(Eigen::Vector2d const& p) const;
-  Eigen::Vector2d undistort_centered(Eigen::Vector2d const& p) const;
-  
+  //Eigen::Vector2d distort_centered(Eigen::Vector2d const& p) const;
 };
+
+void unpack_params(Eigen::VectorXd const& params, 
+                   Eigen::VectorXd& num_x, Eigen::VectorXd& den_x,
+                   Eigen::VectorXd& num_y, Eigen::VectorXd& den_y);
 
 void fitRpcDist(int rpc_degree, int num_samples, camera::CameraParameters const& cam_params,
                 int num_opt_threads, int num_iterations, double parameter_tolerance,
@@ -83,15 +69,16 @@ void fitRpcDist(int rpc_degree, int num_samples, camera::CameraParameters const&
                 // Output
                 Eigen::VectorXd & rpc_dist_coeffs);
 
-void fitRpcUndist(Eigen::VectorXd const & rpc_dist_coeffs,
-                  int num_samples, camera::CameraParameters const& cam_params,
-                  int num_opt_threads, int num_iterations, double parameter_tolerance,
-                  bool verbose,
-                  // output
-                  Eigen::VectorXd & rpc_undist_coeffs);
-
 void evalRpcDistUndist(int num_samples, camera::CameraParameters const& cam_params,
                        RPCLensDistortion const& rpc);
+  
+// Compute the RPC model with given coefficients at the given point. Recall that
+// RPC is ratio of two polynomials in x and y. This assumes centered pixels that
+// are normalized by the focal length.
+Eigen::Vector2d compute_rpc(Eigen::Vector2d const& p, Eigen::VectorXd const& coeffs);
+  
+// Prepend a 1 to a vector
+void prepend_1(Eigen::VectorXd & vec);
   
 }
   

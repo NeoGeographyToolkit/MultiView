@@ -111,8 +111,9 @@ void set_subvector(Eigen::VectorXd & vec, int start, int len, Eigen::VectorXd co
   for (int it = 0; it < len; it++) vec[start + it] = subvec[it];
 }
 
-// Compute the RPC model with given coefficients at the given point.
-// Recall that RPC is ratio of two polynomials in x and y.
+// Compute the RPC model with given coefficients at the given point. Recall that
+// RPC is ratio of two polynomials in x and y. This assumes centered pixels that
+// are normalized by the focal length.
 Eigen::Vector2d compute_rpc(Eigen::Vector2d const& p, Eigen::VectorXd const& coeffs)  {
   validate_distortion_params(coeffs.size());
 
@@ -181,7 +182,8 @@ void pack_params(Eigen::VectorXd& params, Eigen::VectorXd const& num_x,
   validate_distortion_params(params.size());
 }
 
-void unpack_params(Eigen::VectorXd const& params, Eigen::VectorXd& num_x, Eigen::VectorXd& den_x,
+void unpack_params(Eigen::VectorXd const& params, 
+                   Eigen::VectorXd& num_x, Eigen::VectorXd& den_x,
                    Eigen::VectorXd& num_y, Eigen::VectorXd& den_y) {
   validate_distortion_params(params.size());
 
@@ -199,104 +201,26 @@ void unpack_params(Eigen::VectorXd const& params, Eigen::VectorXd& num_x, Eigen:
 // (P1num(x, y)/P1den(x, y), P2num(x, y)/P2den(x, y))
 // where these polynomials are of at most given degree,
 // and P1den(0, 0) = P2den(0, 0) = 1.
-
-// Undistortion is done analogously using a second set of
-// coefficients.
-
-// TODO(oalexan1): Make undistortion computation a member of this class.
-
-// ======== RPCLensDistortion ========
-// This class is not fully formed until both distortion and
-// undistortion parameters are computed.
-// One must always call set_undistortion_parameters()
-// only after set_distortion_parameters().
+// Undistortion is computed numerically. 
 
 RPCLensDistortion::RPCLensDistortion() {
   m_rpc_degree = 0;
-  m_can_undistort = false;
 }
 
 RPCLensDistortion::RPCLensDistortion(Eigen::VectorXd const& params): m_distortion(params) {
   validate_distortion_params(params.size());
   m_rpc_degree = rpc_degree(params.size());
-  m_can_undistort = false;
 }
-
-Eigen::VectorXd RPCLensDistortion::distortion_parameters() const { return m_distortion; }
-
-Eigen::VectorXd RPCLensDistortion::undistortion_parameters() const { return m_undistortion; }
 
 void RPCLensDistortion::set_distortion_parameters(Eigen::VectorXd const& params) {
   validate_distortion_params(params.size());
-
-  // If the distortion parameters changed, one cannot undistort until the undistortion
-  // coefficients are computed.
-  if (params.size() != m_distortion.size()) {
-    m_can_undistort = false;
-  } else {
-    for (size_t it = 0; it < params.size(); it++) {
-      if (m_distortion[it] != params[it]) {
-        m_can_undistort = false;
-        break;
-      }
-    }
-  }
   m_distortion = params;
   m_rpc_degree = rpc_degree(params.size());
 }
 
-void RPCLensDistortion::set_undistortion_parameters(Eigen::VectorXd const& params) {
-  if (params.size() != num_dist_params())
-    throw "The number of distortion and undistortion parameters must agree.";
-  m_undistortion = params;
-  m_can_undistort = true;
+Eigen::VectorXd RPCLensDistortion::distortion_parameters() const {
+  return m_distortion;
 }
-
-Eigen::VectorXd RPCLensDistortion::dist_undist_params() {
-  int num_dist = m_distortion.size();
-  int num_undist = m_undistortion.size();
-  if (num_dist != num_undist) 
-    throw "There must be as many distortion as undistortion params.";
-  
-  Eigen::VectorXd dist_undist_params(num_dist + num_undist);
-
-  for (int it = 0; it < num_dist; it++)
-    dist_undist_params[it] = m_distortion[it];
-
-  for (int it = 0; it < num_undist; it++)
-    dist_undist_params[it + num_dist] = m_undistortion[it];
-  
-  return dist_undist_params;
-}
-
-void RPCLensDistortion::set_dist_undist_params(Eigen::VectorXd const& dist_undist) {
-
-  int num = dist_undist.size();
-  if (num % 2 != 0) 
-    throw "The total number of distortion and undistortion params must be even.";
-
-  int num_dist = num / 2;
-  int num_undist = num / 2;
-  
-  Eigen::VectorXd dist_params(num_dist);
-  Eigen::VectorXd undist_params(num_undist);
-
-  for (int it = 0; it < num_dist; it++)
-    dist_params[it] = dist_undist[it];
-
-  for (int it = 0; it < num_undist; it++)
-    undist_params[it] = dist_undist[it + num_dist];
-
-  // These two functions will do further sanity checks
-  set_distortion_parameters(dist_params);
-  set_undistortion_parameters(undist_params);
-}
-  
-void RPCLensDistortion::scale(double scale) {
-  m_distortion *= scale;
-  m_undistortion *= scale;
-}
-
 
 // Make RPC coefficients so that the RPC transform is the identity.
 // The vector params must already have the right size.
@@ -324,10 +248,7 @@ void RPCLensDistortion::reset(int rpc_degree) {
   m_rpc_degree = rpc_degree;
   int num_params = dense_map::num_dist_params(rpc_degree);
   m_distortion.resize(num_params);
-  m_undistortion.resize(num_params);
   init_as_identity(m_distortion);
-  init_as_identity(m_undistortion);
-  m_can_undistort = true;
 }
 
 // Given the RPC coefficients corresponding to the four polynomials,
@@ -355,16 +276,6 @@ void RPCLensDistortion::increment_degree(Eigen::VectorXd& params) {
   pack_params(params, num_x, den_x, num_y, den_y);
 }
 
-Eigen::Vector2d RPCLensDistortion::distort_centered(Eigen::Vector2d const& p) const {
-  return compute_rpc(p, m_distortion);
-}
-
-Eigen::Vector2d RPCLensDistortion::undistort_centered(Eigen::Vector2d const& p) const {
-  if (!m_can_undistort)
-    throw "The RPC model is not ready for undistortion";
-  return compute_rpc(p, m_undistortion);
-}
-
 // An error function minimizing the fit of an RPC model, that is,
 // minimizing norm of dist_pix - RPC_model(undist_pix).
 struct RpcFitError {
@@ -385,9 +296,11 @@ struct RpcFitError {
     for (int it = 0; it < num_coeffs; it++) coeffs[it] = parameters[0][it];
 
     // distort
+    // this is wrong!
     Eigen::Vector2d rpc_dist = compute_rpc(m_undist_pix, coeffs);
 
-    for (int it = 0; it < PIXEL_SIZE; it++) residuals[it] = rpc_dist[it] - m_dist_pix[it];
+    for (int it = 0; it < PIXEL_SIZE; it++) 
+      residuals[it] = rpc_dist[it] - m_dist_pix[it];
 
     return true;
   }
@@ -492,67 +405,70 @@ struct BBox {
   }
 };
   
-// Collect a set of pairs of centered distorted and undistorted pixels. Keep
-// only the distorted pixels within image domain, and as far from image
-// boundary as desired.
-// Note that: dist_pix - dist_half_size = distortion_function(undist_pix - undist_size/2)
-void genUndistDistPairs(int num_samples, camera::CameraParameters const& cam_params,
+// Collect a set of pairs of centered and normalized distorted and undistorted
+// pixels. Sample uniformly the distorted pixels within the image box.
+void genDistUndistPairs(int num_samples, camera::CameraParameters const& cam_params,
                         std::vector<Eigen::Vector2d>& undist_centered_pixels,
                         std::vector<Eigen::Vector2d>& dist_centered_pixels) {
-  undist_centered_pixels.clear();
   dist_centered_pixels.clear();
+  undist_centered_pixels.clear();
 
   Eigen::Vector2i dist_size        = cam_params.GetDistortedSize();
   Eigen::Vector2i dist_crop_size   = cam_params.GetDistortedCropSize();
   Eigen::Vector2i undist_size      = cam_params.GetUndistortedSize();
   Eigen::Vector2d dist_half_size   = cam_params.GetDistortedHalfSize();
   Eigen::Vector2d undist_half_size = cam_params.GetUndistortedHalfSize();
-
+  Eigen::Vector2d optical_offset   = cam_params.GetOpticalOffset();
+  Eigen::Vector2d focal_length     = cam_params.GetFocalVector();
+  
+  std::cout << "dist size is " << dist_size.transpose() << std::endl;
+  std::cout << "dist crop size is " << dist_crop_size.transpose() << std::endl;
+  std::cout << "undist size is " << undist_size.transpose() << std::endl;
+  std::cout << "dist half size is " << dist_half_size.transpose() << std::endl;
+  std::cout << "undist half size is " << undist_half_size.transpose() << std::endl;
+  std::cout << "--num samples is " << num_samples << std::endl;
   for (int ix = 0; ix < num_samples; ix++) {
-    // Sample uniformly the undistorted width. Ensure values
-    // are converted to double before division.
-    double x = (undist_size[0] - 1.0) * ix / (num_samples - 1.0);
+    double x = (dist_size[0] - 1.0) * double(ix) / (num_samples - 1.0);
     for (int iy = 0; iy < num_samples; iy++) {
-      // Sample uniformly the undistorted height
-      double y = (undist_size[1] - 1.0) * iy / (num_samples - 1.0);
+      double y = (dist_size[1] - 1.0) * double(iy) / (num_samples - 1.0);
 
-      // Generate an undistorted/distorted point pair using the input model.
-      Eigen::Vector2d undist_pix(x, y);
+      Eigen::Vector2d dist_pix(x, y);
 
-      Eigen::Vector2d dist_pix;
-      cam_params.Convert<camera::UNDISTORTED, camera::DISTORTED>
-        (undist_pix, &dist_pix);
+      // Find the centered distorted pixel
+      Eigen::Vector2d dist_ctr_pix;
+      cam_params.Convert<camera::DISTORTED, camera::DISTORTED_C>
+        (dist_pix, &dist_ctr_pix);
 
-      // Exclude points based on dist_crop_size. 
-      // Note that if dist_crop_size equals dist_size, which is image
-      // size, no points are excluded.
-      if (std::abs(dist_pix[0] - dist_size[0] / 2.0) > dist_crop_size[0] / 2.0  ||
-          std::abs(dist_pix[1] - dist_size[1] / 2.0) > dist_crop_size[1] / 2.0) 
-        continue;
+      // Find the centered undistorted pixel
+      Eigen::Vector2d undist_ctr_pix;
+      cam_params.Convert<camera::DISTORTED_C, camera::UNDISTORTED_C>
+        (dist_ctr_pix, &undist_ctr_pix);
+      
+      // TODO(oalexan1): Dist back with OpenCV and compare with undist_pix!
+       
+      // // Exclude points based on dist_crop_size. 
+      // // Note that if dist_crop_size equals dist_size, which is image
+      // // size, no points are excluded.
+      // if (std::abs(dist_pix[0] - dist_size[0] / 2.0) > dist_crop_size[0] / 2.0  ||
+      //     std::abs(dist_pix[1] - dist_size[1] / 2.0) > dist_crop_size[1] / 2.0) 
+      //   continue;
       
       // Ensure that these pixels are centered. Here we use the same
       // convention as in camera_params.cc.
-      undist_pix -= undist_half_size;
-      dist_pix   -= dist_half_size;
-
-      undist_centered_pixels.push_back(undist_pix);
-      dist_centered_pixels.push_back(dist_pix);
+      //undist_pix -= undist_half_size;
+      //dist_pix   -= dist_half_size;
+   
+      // Normalize the undistorted and distorted pixels. Use the logic from
+      // DistortCentered() in camera_params.cc.
+      undist_ctr_pix = undist_ctr_pix.cwiseQuotient(focal_length);
+      dist_ctr_pix = dist_ctr_pix - (optical_offset - dist_half_size);
+      dist_ctr_pix = dist_ctr_pix.cwiseQuotient(focal_length);
+      
+      dist_centered_pixels.push_back(dist_ctr_pix);
+      undist_centered_pixels.push_back(undist_ctr_pix);
     }
   }
 
-  // Determine the bounding boxes of the obtained sets of pixels.
-  BBox undist, dist;
-  for (size_t it = 0; it < undist_centered_pixels.size(); it++) {
-    undist.grow(undist_centered_pixels[it]);
-    dist.grow(dist_centered_pixels[it]);
-  }
-
-  std::cout << "Original centered undistortion pixel box: "
-            << undist.m_min[0] << ' ' << undist.m_min[1] << ' '
-            << undist.m_max[0] << ' ' << undist.m_max[1] << std::endl;
-  std::cout << "Original centered distortion pixel box: "
-            << dist.m_min[0] << ' ' << dist.m_min[1] << ' '
-            << dist.m_max[0] << ' ' << dist.m_max[1] << std::endl;
   return;
 }
 
@@ -574,8 +490,8 @@ void fitCurrDegRPC(std::vector<Eigen::Vector2d> const& undist_centered_pixels,
     // to work on the entire domain.
     ceres::LossFunction* rpc_loss_fun = NULL;
 
-    residual_names.push_back("pix_x");
-    residual_names.push_back("pix_y");
+    residual_names.push_back("normalized_pix_x");
+    residual_names.push_back("normalized_pix_y");
     problem.AddResidualBlock(rpc_cost_fun, rpc_loss_fun, &rpc_coeffs[0]);
   }
 
@@ -626,12 +542,12 @@ void fitRpcDist(int rpc_degree, int num_samples, camera::CameraParameters const&
                 Eigen::VectorXd & rpc_dist_coeffs) {
 
   std::vector<Eigen::Vector2d> undist_centered_pixels, dist_centered_pixels;
-  genUndistDistPairs(num_samples, cam_params,
+  genDistUndistPairs(num_samples, cam_params,
                      // Outputs
                      undist_centered_pixels, dist_centered_pixels);
 
   std::cout << "Found " << dist_centered_pixels.size() << " pixel correspondences "
-            << "between undistorted and distorted images within set bounds." << std::endl;
+            << "between undistorted and distorted images." << std::endl;
 
   // First fit RPC of degree 1. Then refine to degree 2, etc, till desired rpc_degree.
   // That is more likely to be successful than aiming right way for the full solution.
@@ -650,89 +566,25 @@ void fitRpcDist(int rpc_degree, int num_samples, camera::CameraParameters const&
       RPCLensDistortion::increment_degree(rpc_dist_coeffs);
     }
     std::cout << "Fitting RPC distortion of degree " << deg << std::endl;
-    fitCurrDegRPC(undist_centered_pixels, dist_centered_pixels, num_opt_threads, num_iterations,
-                  parameter_tolerance, verbose, rpc_dist_coeffs);
+    fitCurrDegRPC(undist_centered_pixels, dist_centered_pixels, num_opt_threads, 
+                  num_iterations, parameter_tolerance, verbose, rpc_dist_coeffs);
   }
-}
-
-void fitRpcUndist(Eigen::VectorXd const & rpc_dist_coeffs,
-                  int num_samples, camera::CameraParameters const& cam_params,
-                  int num_opt_threads, int num_iterations, double parameter_tolerance,
-                  bool verbose,
-                  // output
-                  Eigen::VectorXd & rpc_undist_coeffs) {
-
-  int rpc_deg = rpc_degree(rpc_dist_coeffs.size());
-
-  // Also, samples are from all over the undist
-  // region. Need to find a good value for that one.
-  
-  // Also need to ensure we never use points outside the restricted
-  // undist region in the calibrator!
-  
-  // Now that we can model distortion with RPC, find another RPC model
-  // which can do undistortion. Ideally,
-  // undistort_rpc(distort_rpc(pix)) = pix.
-  std::vector<Eigen::Vector2d> undist_centered_pixels, dist_centered_pixels;
-  genUndistDistPairs(num_samples, cam_params,
-                     // Outputs
-                     undist_centered_pixels, dist_centered_pixels);
-
-  // Create correspondences. Note that we overwrite
-  // dist_centered_pixels which are no longer needed.
-  for (size_t it = 0; it < undist_centered_pixels.size(); it++)
-    dist_centered_pixels[it] = compute_rpc(undist_centered_pixels[it], rpc_dist_coeffs);
-
-  BBox undist, dist;
-  for (size_t it = 0; it < undist_centered_pixels.size(); it++) {
-    undist.grow(undist_centered_pixels[it]);
-    dist.grow(dist_centered_pixels[it]);
-  }
-  
-  std::cout << "Final centered undistortion box: "
-            << undist.m_min[0] << ' ' << undist.m_min[1]
-            << ' ' << undist.m_max[0] << ' ' << undist.m_max[1] << std::endl;
-  std::cout << "Final centered distortion pixel box: "
-            << dist.m_min[0] << ' ' << dist.m_min[1] << ' '
-            << dist.m_max[0] << ' ' << dist.m_max[1] << std::endl;
-  
-  int initial_rpc_degree = 1;
-  int init_num_params = num_dist_params(initial_rpc_degree);
-
-  // Set up the initial guess for the variable of optimization
-  rpc_undist_coeffs = Eigen::VectorXd::Zero(init_num_params);
-  RPCLensDistortion::init_as_identity(rpc_undist_coeffs);  // this changes rpc_undist_coeffs
-
-  // We repeat the code above, but with the order being in reverse:
-  // dist pixels being mapped to undist pixels.
-  std::cout << "\nComputing RPC distortion." << std::endl;
-  for (int deg = 1; deg <= rpc_deg; deg++) {
-    if (deg >= 2) {
-      // Use the previously solved model as an initial guess. Increment its degree by adding
-      // to the polynomials new powers of given degree with zero coefficient in front.
-      RPCLensDistortion::increment_degree(rpc_undist_coeffs);
-    }
-    std::cout << "Fitting RPC undistortion of degree " << deg << std::endl;
-    // Note how dist_centered_pixels and undist_centered_pixels are swapped
-    fitCurrDegRPC(dist_centered_pixels, undist_centered_pixels, num_opt_threads, num_iterations,
-                  parameter_tolerance, verbose, rpc_undist_coeffs);
-  }
-
 }
 
 void evalRpcDistUndist(int num_samples, camera::CameraParameters const& cam_params,
                        RPCLensDistortion const& rpc) {
 
   std::vector<Eigen::Vector2d> undist_centered_pixels, dist_centered_pixels;
-  genUndistDistPairs(num_samples, cam_params,
+  genDistUndistPairs(num_samples, cam_params,
                      // Outputs
                      undist_centered_pixels, dist_centered_pixels);
 
   double max_err = 0.0;
   for (size_t it = 0; it < undist_centered_pixels.size(); it++) {
-    Eigen::Vector2d pix = rpc.distort_centered(undist_centered_pixels[it]);
-    Eigen::Vector2d pix2 = rpc.undistort_centered(pix);
-    max_err = std::max(max_err, (undist_centered_pixels[it] - pix2).norm());
+    std::cout << "--broken!" << std::endl;
+    // Eigen::Vector2d pix = rpc.distort_centered(undist_centered_pixels[it]);
+    // Eigen::Vector2d pix2 = rpc.undistort_centered(pix);
+    // max_err = std::max(max_err, (undist_centered_pixels[it] - pix2).norm());
   }
 
   std::cout << "Max distort_undistort error: " << max_err << std::endl;

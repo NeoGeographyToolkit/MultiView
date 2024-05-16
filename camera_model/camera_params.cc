@@ -141,63 +141,8 @@ void camera::CameraParameters::SetDistortion(Eigen::VectorXd const& distortion) 
     // There doesn't seem like there are any precalculations we can use.
     break;
   default:
-    // Try to do RPC
-    try { 
-      m_rpc.set_dist_undist_params(m_distortion_coeffs);
-    } catch(std::exception const& e) {
-      LOG(FATAL) << "Recieved irregular distortion vector size. Size = "
-                 << m_distortion_coeffs.size() << "\n"
-                 << "Additional message: " << e.what() << "\n";
-    }
+    m_rpc.set_distortion_parameters(m_distortion_coeffs);
   }
-}
-
-// TODO(oalexan1): Use numerical undistortion as in VW!
-// Test that results agree.
-// This must be called before a model having RPC distortion can be used
-// for undistortion. Here it is assumed that the distortion component
-// of m_distortion_coeffs is up-to-date, and its undistortion component
-// must be updated.
-void camera::CameraParameters::updateRpcUndistortion(int num_threads) {
-  int num_samples = 400; // in each of rows and columns; should be enough
-  bool verbose = false;
-  int num_iterations = 100; // should be plenty
-  double parameter_tolerance = 1e-12; // should be enough
-
-  std::cout << "Finding RPC undistortion. Using " << num_samples
-            << " samples in width and height, "
-            << num_iterations << " iterations, and "
-            << num_threads << " threads." << std::endl;
-  
-  if (m_distortion_coeffs.size() % 2 != 0) 
-    LOG(FATAL) << "Must have an even number of RPC distortion coefficients.\n";
-
-  // m_distortion_coeffs stores both distortion and undistortion rpc coeffs. Get
-  // the distortion ones, and update the undistortion ones.
-  // This is quite confusing, but an outside user of this class need not know
-  // these details
-  int num_dist = m_distortion_coeffs.size()/2;
-  Eigen::VectorXd rpc_dist_coeffs(num_dist);
-  for (int it = 0; it < num_dist; it++)
-    rpc_dist_coeffs[it] = m_distortion_coeffs[it];
-
-  Eigen::VectorXd rpc_undist_coeffs;
-  dense_map::fitRpcUndist(rpc_dist_coeffs, num_samples,
-                          *this,
-                          num_threads, num_iterations,
-                          parameter_tolerance,
-                          verbose,
-                          // Output
-                          rpc_undist_coeffs);
-
-  dense_map::RPCLensDistortion rpc;
-  rpc.set_distortion_parameters(rpc_dist_coeffs);
-  rpc.set_undistortion_parameters(rpc_undist_coeffs);
-  dense_map::evalRpcDistUndist(num_samples, *this, rpc);
-
-  // Copy back the updated values
-  for (int it = 0; it < num_dist; it++)
-    m_distortion_coeffs[it + num_dist] = rpc_undist_coeffs[it];
 }
 
 const Eigen::VectorXd& camera::CameraParameters::GetDistortion() const {
@@ -377,9 +322,17 @@ void camera::CameraParameters::DistortCentered(Eigen::Vector2d const& undistorte
     *distorted_c = distorted_c->cwiseProduct(m_focal_length) +
       (m_optical_offset - m_distorted_half_size);
   } else {
-    // If we got so far, we validated that RPC distortion should work
-    *distorted_c = m_rpc.distort_centered(undistorted_c);
-    //LOG(ERROR) << "Unknown distortion vector size.";
+  
+    // RPC 
+    // Normalize the pixel
+    Eigen::Vector2d norm = undistorted_c.cwiseQuotient(m_focal_length);
+
+    // Apply the distortion to the normalized pixel
+    *distorted_c = dense_map::compute_rpc(norm, m_distortion_coeffs);
+   
+    // Scale by the focal length and add the optical offset
+    *distorted_c = distorted_c->cwiseProduct(m_focal_length) +
+     (m_optical_offset - m_distorted_half_size);
   }
 }
 
@@ -415,6 +368,8 @@ void camera::CameraParameters::UndistortCentered(Eigen::Vector2d const& distorte
   } else if (m_distortion_coeffs.size() == 4 ||
              m_distortion_coeffs.size() == 5) {
     // Tsai lens distortion (radial-tangential)
+    // TODO(oalexan1): Must test this! There is apparently an issue with 
+    // the OpenCV implementation! Must use the numerical Jacobian here!
     cv::Mat src(1, 1, CV_64FC2);
     cv::Mat dst(1, 1, CV_64FC2);
     Eigen::Map<Eigen::Vector2d> src_map(src.ptr<double>()), dst_map(dst.ptr<double>());
@@ -431,9 +386,17 @@ void camera::CameraParameters::UndistortCentered(Eigen::Vector2d const& distorte
     cv::undistortPoints(src, dst, dist_int_mat, cvdist, cv::Mat(), undist_int_mat);
     *undistorted_c = dst_map - m_undistorted_half_size;
   } else {
-    // If we got so far, we validated that RPC distortion should work
-    *undistorted_c = m_rpc.undistort_centered(distorted_c);
-    //LOG(ERROR) << "Unknown distortion vector size.";
+    // RPC lens distortion
+    // Center and normalize
+    Eigen::Vector2d norm =
+    (distorted_c - (m_optical_offset - m_distorted_half_size)).cwiseQuotient(m_focal_length);
+
+     // Find the normalized undistorted pixel using Newton-Raphson
+     Eigen::Vector2d U = newtonRaphson(norm, m_distortion_coeffs,
+                                       dense_map::compute_rpc, numericalJacobian);
+     
+     // Undo the normalization
+     *undistorted_c = U.cwiseProduct(m_focal_length);
   }
 }
 
@@ -488,6 +451,9 @@ namespace camera {
     Convert<UNDISTORTED, UNDISTORTED_C>(input, output);
     Convert<UNDISTORTED_C, DISTORTED_C>(*output, &centered_output);
     *output = centered_output + m_distorted_half_size;
+  }
+  DEFINE_CONVERSION(DISTORTED, DISTORTED_C) {
+    *output = input - m_distorted_half_size;
   }
   DEFINE_CONVERSION(DISTORTED, UNDISTORTED_C) {
     Convert<DISTORTED_C, UNDISTORTED_C>(input - m_distorted_half_size, output);

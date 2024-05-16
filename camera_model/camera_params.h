@@ -58,7 +58,7 @@ namespace camera {
     FOV_DISTORTION,     // 1 distortion param
     FISHEYE_DISTORTION, // 4 distortion params
     RADTAN_DISTORTION,  // 4 or 5 distortion params
-    RPC_DISTORTION
+    RPC_DISTORTION      // many distortion params
   };
   
   // These are the names of the distortion models as strings in the config files
@@ -137,13 +137,6 @@ namespace camera {
 
     dense_map::RPCLensDistortion m_rpc;
 
-    // This must be called before a model having RPC distortion can be used
-    // for undistortion. Here it is assumed that the distortion component
-    // of m_distortion_coeffs is up-to-date, and its undistortion component
-    // must be updated.
-    void updateRpcUndistortion(int num_threads);
-    
-    
     // Comparison operator
     friend bool operator== (CameraParameters const& A, CameraParameters const& B) {
       return (A.m_crop_offset          == B.m_crop_offset          &&
@@ -211,6 +204,7 @@ namespace camera {
   DECLARE_CONVERSION(UNDISTORTED, UNDISTORTED_C);
   DECLARE_CONVERSION(UNDISTORTED, DISTORTED);
   DECLARE_CONVERSION(UNDISTORTED, DISTORTED_C);
+  DECLARE_CONVERSION(DISTORTED, DISTORTED_C);
   DECLARE_CONVERSION(DISTORTED_C, UNDISTORTED_C);
   DECLARE_CONVERSION(DISTORTED, UNDISTORTED);
   DECLARE_CONVERSION(DISTORTED, UNDISTORTED_C);
