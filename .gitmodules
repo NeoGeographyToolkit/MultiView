@@ -1,6 +1,6 @@
 [submodule "texrecon"]
 	path = texrecon
-	url = https://github.com/oleg-alexandrov/mvs-texturing
+	url = git@github.com:oleg-alexandrov/mvs-texturing.git
 [submodule "voxblox"]
 	path = voxblox
 	url = git@github.com:oleg-alexandrov/voxblox.git
@@ -12,7 +12,7 @@
 	url = git@github.com:oleg-alexandrov/mve.git
 [submodule "rayint"]
 	path = rayint
-	url = https://github.com/oleg-alexandrov/rayint
+	url = git@github.com:oleg-alexandrov/rayint.git
 [submodule "TheiaSfM"]
 	path = TheiaSfM
 	url = git@github.com:oleg-alexandrov/TheiaSfM.git
