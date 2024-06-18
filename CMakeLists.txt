@@ -11,6 +11,12 @@ message(STATUS "Setting build type: ${CMAKE_BUILD_TYPE}")
 
 set(CMAKE_CXX_STANDARD 11)
 
+if (NOT APPLE)
+  # Fix for not being able to find OpenGL on Linux
+  set(OPENGL_opengl_LIBRARY "/usr/lib/x86_64-linux-gnu/libGL.so")
+  set(OPENGL_glx_LIBRARY "/usr/lib/x86_64-linux-gnu/libGLX.so")
+endif()
+
 # Make clang behave
 if (APPLE)
   add_compile_options(-Wno-error -Wno-deprecated-declarations -Wno-unused-but-set-variable -Wno-implicit-const-int-float-conversion)
@@ -25,10 +31,6 @@ include_directories("${MULTIVIEW_DEPS_DIR}/include")
 
 set(CMAKE_INSTALL_LIBDIR "lib") # install in lib and not lib64
 
-# Option to build only the rig calibrator
-option(BUILD_RIG_CALIBRATOR_ONLY "Build only the rig calibrator" OFF)
- 
-# OpenMP
 # TODO(oalexan1): Figure out why clang does not find OpenMP
 # and remove the clucky logic below.
 if (APPLE)
@@ -191,47 +193,39 @@ include_directories(${CMAKE_SOURCE_DIR}/rayint/libs
     ${CMAKE_SOURCE_DIR}/texrecon/libs
 )
 
-add_subdirectory(camera_model)
-add_subdirectory(openMVG)
-add_subdirectory(rig_calibrator)
+# CGAL mesh tools
+set(CGAL_TOOLS_INSTALL_DIR ${CMAKE_INSTALL_PREFIX})
+add_subdirectory(cgal_tools)
 
-# build the ones below only if BUILD_RIG_CALIBRATOR_ONLY is OFF
-if (NOT BUILD_RIG_CALIBRATOR_ONLY)
-   
-   # CGAL mesh tools
-   set(CGAL_TOOLS_INSTALL_DIR ${CMAKE_INSTALL_PREFIX})
-   add_subdirectory(cgal_tools)
+# Build voxblox, which provides the voxblox_mesh tool for fusing point clouds into meshes
+add_subdirectory(voxblox)
 
-   # Build voxblox, which provides the voxblox_mesh tool for fusing point clouds into meshes
-   add_subdirectory(voxblox)
-
-   # For TheiaSfM
-   set(BUILD_SHARED_LIBS ON CACHE INTERNAL "" FORCE)
-   set(USE_PYTHON OFF CACHE INTERNAL "" FORCE)
-   set(USE_OPENCV OFF CACHE INTERNAL "" FORCE)
-   set(USE_QT OFF CACHE INTERNAL "" FORCE)
-   set(USE_DICOM OFF CACHE INTERNAL "" FORCE)
-   set(USE_NUKE OFF CACHE INTERNAL "" FORCE)
-   set(USE_LIBRAW OFF CACHE INTERNAL "" FORCE)
-   set(OIIO_BUILD_TESTS OFF CACHE INTERNAL "" FORCE)
-   set(OIIO_BUILD_TOOLS OFF CACHE INTERNAL "" FORCE)
-   set(USE_OPENGL OFF CACHE INTERNAL "" FORCE)
-   set(BUILD_DOCS OFF CACHE INTERNAL "" FORCE)
-   set(INSTALL_DOCS OFF CACHE INTERNAL "" FORCE)
-   set(INSTALL_FONTS OFF CACHE INTERNAL "" FORCE)
-   set(OIIO_THREAD_ALLOW_DCLP OFF CACHE INTERNAL "" FORCE)
-   set(EMBEDPLUGINS OFF CACHE INTERNAL "" FORCE)
-   set(PROJECT_IS_TOP_LEVEL OFF CACHE INTERNAL "" FORCE)
-   set(USE_TBB OFF CACHE INTERNAL "" FORCE)
-   set(USE_FIELD3D OFF CACHE INTERNAL "" FORCE)
-   set(USE_OPENVDB OFF CACHE INTERNAL "" FORCE)
-   set(USE_QT OFF CACHE INTERNAL "" FORCE)
-   set(USE_OCIO OFF CACHE INTERNAL "" FORCE)
-   include_directories(${CMAKE_BINARY_DIR}/include)
-   include_directories(${CMAKE_SOURCE_DIR}/OpenImageIO/src/include)
-   add_subdirectory(OpenImageIO)
-   set(BUILD_DOCUMENTATION OFF CACHE INTERNAL "" FORCE)
-   set(BUILD_TESTING OFF CACHE INTERNAL "" FORCE)
-   add_subdirectory(TheiaSfM)
-   
-endif(NOT BUILD_RIG_CALIBRATOR_ONLY)
+# For TheiaSfM
+# TODDO(oalexan1): Eliminate the need for OpenImageIO, use instead OpenCV.
+set(BUILD_SHARED_LIBS ON CACHE INTERNAL "" FORCE)
+set(USE_PYTHON OFF CACHE INTERNAL "" FORCE)
+set(USE_OPENCV OFF CACHE INTERNAL "" FORCE)
+set(USE_QT OFF CACHE INTERNAL "" FORCE)
+set(USE_DICOM OFF CACHE INTERNAL "" FORCE)
+set(USE_NUKE OFF CACHE INTERNAL "" FORCE)
+set(USE_LIBRAW OFF CACHE INTERNAL "" FORCE)
+set(OIIO_BUILD_TESTS OFF CACHE INTERNAL "" FORCE)
+set(OIIO_BUILD_TOOLS OFF CACHE INTERNAL "" FORCE)
+set(USE_OPENGL OFF CACHE INTERNAL "" FORCE)
+set(BUILD_DOCS OFF CACHE INTERNAL "" FORCE)
+set(INSTALL_DOCS OFF CACHE INTERNAL "" FORCE)
+set(INSTALL_FONTS OFF CACHE INTERNAL "" FORCE)
+set(OIIO_THREAD_ALLOW_DCLP OFF CACHE INTERNAL "" FORCE)
+set(EMBEDPLUGINS OFF CACHE INTERNAL "" FORCE)
+set(PROJECT_IS_TOP_LEVEL OFF CACHE INTERNAL "" FORCE)
+set(USE_TBB OFF CACHE INTERNAL "" FORCE)
+set(USE_FIELD3D OFF CACHE INTERNAL "" FORCE)
+set(USE_OPENVDB OFF CACHE INTERNAL "" FORCE)
+set(USE_QT OFF CACHE INTERNAL "" FORCE)
+set(USE_OCIO OFF CACHE INTERNAL "" FORCE)
+include_directories(${CMAKE_BINARY_DIR}/include)
+include_directories(${CMAKE_SOURCE_DIR}/OpenImageIO/src/include)
+add_subdirectory(OpenImageIO)
+set(BUILD_DOCUMENTATION OFF CACHE INTERNAL "" FORCE)
+set(BUILD_TESTING OFF CACHE INTERNAL "" FORCE)
+add_subdirectory(TheiaSfM)

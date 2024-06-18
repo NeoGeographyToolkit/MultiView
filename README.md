@@ -1,7 +1,10 @@
-This software provides a collection of tools for joint calibration of
-a set of rigs, each with one or more image and/or depth+image cameras,
-fusion of point clouds into a mesh, and seamless texturing of meshes
-with the input images and optimized cameras.
+This software provides a collection programs for structure-from-motion, fusion of
+point clouds into a mesh, and seamless texturing of meshes with the input images
+and optimized cameras.
+
+A program for for joint calibration of a set of rigs, each with one or more
+image and/or depth+image cameras, was part of this codebase as well, but now
+has been integrated into the Ames Stereo Pipeline source code.
 
 The software was originally developed as part of the [NASA
 ISAAC](https://github.com/nasa/isaac#readme) project, which uses 
@@ -47,15 +50,21 @@ Otherwise, after cloning it, run:
 
     git submodule update --init --recursive
 
-Fetch the dependencies for this package with conda. For Linux, use:
-
-    conda env create -f MultiView/conda/linux_deps_env_asp_3.2.0.yaml
-
-while for OSX:
-
-    conda env create -f MultiView/conda/osx_deps_env_asp_3.2.0.yaml
-
 # Build
+
+Create a conda environment having the dependencies for this package with conda:
+
+    conda env create -n multiview -f MultiView/conda/environment.yml
+
+Activate the conda environment:
+
+  conda activate multiview
+
+Create the build directory:
+
+    cd MultiView
+    mkdir build
+    cd build
 
 Set the compilers, depending on the system architecture.
 
@@ -70,22 +79,16 @@ Set the compilers, depending on the system architecture.
 
 Run ``cmake``:
     
-    cd MultiView
-    mkdir build
-    cd build
-    conda activate rig_calibrator
-    toolsPath=$HOME/miniconda3/envs/rig_calibrator
-    $toolsPath/bin/cmake ..                        \
-      -DCMAKE_VERBOSE_MAKEFILE=TRUE                \
-      -DMULTIVIEW_DEPS_DIR=$toolsPath              \
-      -DCMAKE_INSTALL_PREFIX=$(pwd)/../install     \
-      -DCMAKE_C_COMPILER=${toolsPath}/bin/$cc_comp \
-      -DCMAKE_CXX_COMPILER=${toolsPath}/bin/$cxx_comp
+    cmake ..                                           \
+      -DCMAKE_VERBOSE_MAKEFILE=TRUE                    \
+      -DMULTIVIEW_DEPS_DIR=$CONDA_PREFIX               \
+      -DCMAKE_C_COMPILER=$CONDA_PREFIX/bin/$cc_comp    \
+      -DCMAKE_CXX_COMPILER=$CONDA_PREFIX/bin/$cxx_comp \
+      -DCMAKE_INSTALL_PREFIX=$(pwd)/../install
 
-Carefully check if all dependencies are found. If some are picked
-not from the environment in $toolsPath, check your PATH and other
-environmental variables, and remove from those the locations
-which may tell ``cmake`` to look elsewhere. Then, run:
+Carefully check if all dependencies are found. If some are picked not from the
+conda environment, check your PATH and other environmental variables, and remove
+from those the locations which may tell ``cmake`` to look elsewhere. Then, run:
 
     make -j 20 && make install
 
