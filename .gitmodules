@@ -1,24 +1,24 @@
 [submodule "texrecon"]
 	path = texrecon
-	url = git@github.com:NeoGeographyToolkit/mvs-texturing.git
+	url = https://github.com/NeoGeographyToolkit/mvs-texturing.git
 [submodule "voxblox"]
 	path = voxblox
-	url = git@github.com:NeoGeographyToolkit/voxblox.git
+	url = https://github.com/NeoGeographyToolkit/voxblox.git
 [submodule "mapmap"]
 	path = mapmap
-	url = git@github.com:NeoGeographyToolkit/mapmap_cpu.git
+	url = https://github.com/NeoGeographyToolkit/mapmap_cpu.git
 [submodule "mve"]
 	path = mve
-	url = git@github.com:NeoGeographyToolkit/mve.git
+	url = https://github.com/NeoGeographyToolkit/mve.git
 [submodule "rayint"]
 	path = rayint
-	url = git@github.com:NeoGeographyToolkit/rayint.git
+	url = https://github.com/NeoGeographyToolkit/rayint.git
 [submodule "TheiaSfM"]
 	path = TheiaSfM
-	url = git@github.com:NeoGeographyToolkit/TheiaSfM.git
+	url = https://github.com/NeoGeographyToolkit/TheiaSfM.git
 [submodule "oiio"]
 	path = OpenImageIO
-	url = git@github.com:NeoGeographyToolkit/oiio.git
+	url = https://github.com/NeoGeographyToolkit/oiio.git
 [submodule "cgal_tools"]
 	path = cgal_tools
-	url = git@github.com:NeoGeographyToolkit/cgal_tools.git
+	url = https://github.com/NeoGeographyToolkit/cgal_tools.git
