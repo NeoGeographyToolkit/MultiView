@@ -45,7 +45,7 @@ if (APPLE)
     set(OpenMP_CXX_FOUND ON)
     set(WITH_OPENMP ON)
     message(STATUS "Manually set: OpenMP_CXX_FLAGS=${OpenMP_CXX_FLAGS}")
-    message(STATUS "Mamually set: OpenMP_CXX_LIB_NAMES=${OpenMP_CXX_FLAGS}")
+    message(STATUS "Manually set: OpenMP_CXX_LIB_NAMES=${OpenMP_CXX_FLAGS}")
 else()
     find_package(OpenMP REQUIRED)
 endif()
@@ -201,7 +201,7 @@ add_subdirectory(cgal_tools)
 add_subdirectory(voxblox)
 
 # For TheiaSfM
-# TODDO(oalexan1): Eliminate the need for OpenImageIO, use instead OpenCV.
+# TODO(oalexan1): Eliminate the need for OpenImageIO, use instead OpenCV.
 set(BUILD_SHARED_LIBS ON CACHE INTERNAL "" FORCE)
 set(USE_PYTHON OFF CACHE INTERNAL "" FORCE)
 set(USE_OPENCV OFF CACHE INTERNAL "" FORCE)
