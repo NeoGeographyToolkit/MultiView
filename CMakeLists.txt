@@ -32,7 +32,7 @@ include_directories("${MULTIVIEW_DEPS_DIR}/include")
 set(CMAKE_INSTALL_LIBDIR "lib") # install in lib and not lib64
 
 # TODO(oalexan1): Figure out why clang does not find OpenMP
-# and remove the clucky logic below.
+# and remove the clunky logic below.
 if (APPLE)
     find_package(OpenMP)
     set(OPENMP_INCLUDES "${MULTIVIEW_DEPS_DIR}/include")
@@ -52,6 +52,18 @@ endif()
 set (CMAKE_C_FLAGS "${CMAKE_C_FLAGS} ${OpenMP_C_FLAGS}")
 set (CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} ${OpenMP_CXX_FLAGS}")
 set (CMAKE_EXE_LINKER_FLAGS "${CMAKE_EXE_LINKER_FLAGS} ${OpenMP_EXE_LINKER_FLAGS}")
+
+if (APPLE)
+   # TODO(oalexan1): Figure out why clang does not find Threads
+   find_package(Threads)
+   set(CMAKE_THREAD_LIBS_INIT "-lpthread")
+   set(CMAKE_HAVE_THREADS_LIBRARY 1)
+   set(CMAKE_USE_WIN32_THREADS_INIT 0)
+   set(CMAKE_USE_PTHREADS_INIT 1)
+   set(THREADS_PREFER_PTHREAD_FLAG ON)
+else()
+    find_package(Threads REQUIRED)
+endif(APPLE)
 
 # Image libs
 find_package(PNG REQUIRED)
