@@ -146,23 +146,6 @@ endif (JASPER_FOUND)
 
 # OpenCV
 find_package(OpenCV 4.0.0 REQUIRED)
-# Find OpenCV and fix a 3.3.1 bug
-if (${OpenCV_VERSION} MATCHES "3.3.1")
-  foreach(__cvcomponent ${OpenCV_LIB_COMPONENTS})
-    set (__original_cvcomponent ${__cvcomponent})
-    if(NOT __cvcomponent MATCHES "^opencv_")
-      set(__cvcomponent opencv_${__cvcomponent})
-    endif()
-    if (TARGET ${__cvcomponent})
-      set_target_properties(${__cvcomponent} PROPERTIES
-          MAP_IMPORTED_CONFIG_DEBUG ""
-          MAP_IMPORTED_CONFIG_RELEASE ""
-          MAP_IMPORTED_CONFIG_RELWITHDEBINFO ""
-          MAP_IMPORTED_CONFIG_MINSIZEREL ""
-      )
-    endif()
-  endforeach(__cvcomponent)
-endif()
 set(OpenCV_LIBRARIES ${OpenCV_LIBS})
 if (OPENCV_FOUND)
    message("-- Found OpenCV: ${OPENCV_INCLUDE_DIRS}")
@@ -212,32 +195,9 @@ add_subdirectory(cgal_tools)
 # Build voxblox, which provides the voxblox_mesh tool for fusing point clouds into meshes
 add_subdirectory(voxblox)
 
-# For TheiaSfM
-# TODO(oalexan1): Eliminate the need for OpenImageIO, use instead OpenCV.
+# TheiaSfM
 set(BUILD_SHARED_LIBS ON CACHE INTERNAL "" FORCE)
-set(USE_PYTHON OFF CACHE INTERNAL "" FORCE)
-set(USE_OPENCV OFF CACHE INTERNAL "" FORCE)
-set(USE_QT OFF CACHE INTERNAL "" FORCE)
-set(USE_DICOM OFF CACHE INTERNAL "" FORCE)
-set(USE_NUKE OFF CACHE INTERNAL "" FORCE)
-set(USE_LIBRAW OFF CACHE INTERNAL "" FORCE)
-set(OIIO_BUILD_TESTS OFF CACHE INTERNAL "" FORCE)
-set(OIIO_BUILD_TOOLS OFF CACHE INTERNAL "" FORCE)
-set(USE_OPENGL OFF CACHE INTERNAL "" FORCE)
-set(BUILD_DOCS OFF CACHE INTERNAL "" FORCE)
-set(INSTALL_DOCS OFF CACHE INTERNAL "" FORCE)
-set(INSTALL_FONTS OFF CACHE INTERNAL "" FORCE)
-set(OIIO_THREAD_ALLOW_DCLP OFF CACHE INTERNAL "" FORCE)
-set(EMBEDPLUGINS OFF CACHE INTERNAL "" FORCE)
-set(PROJECT_IS_TOP_LEVEL OFF CACHE INTERNAL "" FORCE)
-set(USE_TBB OFF CACHE INTERNAL "" FORCE)
-set(USE_FIELD3D OFF CACHE INTERNAL "" FORCE)
-set(USE_OPENVDB OFF CACHE INTERNAL "" FORCE)
-set(USE_QT OFF CACHE INTERNAL "" FORCE)
-set(USE_OCIO OFF CACHE INTERNAL "" FORCE)
 include_directories(${CMAKE_BINARY_DIR}/include)
-include_directories(${CMAKE_SOURCE_DIR}/OpenImageIO/src/include)
-add_subdirectory(OpenImageIO)
 set(BUILD_DOCUMENTATION OFF CACHE INTERNAL "" FORCE)
 set(BUILD_TESTING OFF CACHE INTERNAL "" FORCE)
 add_subdirectory(TheiaSfM)

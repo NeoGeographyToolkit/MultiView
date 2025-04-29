@@ -16,9 +16,6 @@
 [submodule "TheiaSfM"]
 	path = TheiaSfM
 	url = https://github.com/NeoGeographyToolkit/TheiaSfM.git
-[submodule "oiio"]
-	path = OpenImageIO
-	url = https://github.com/NeoGeographyToolkit/oiio.git
 [submodule "cgal_tools"]
 	path = cgal_tools
 	url = https://github.com/NeoGeographyToolkit/cgal_tools.git
