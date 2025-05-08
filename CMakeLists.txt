@@ -161,7 +161,8 @@ if(OPENMP_FOUND)
     set(CMAKE_EXE_LINKER_FLAGS "${CMAKE_EXE_LINKER_FLAGS} ${OpenMP_EXE_LINKER_FLAGS}")
 endif()
 
-# Pcl
+# Pcl 
+set( QT_REQUIRE_HOST_PATH_CHECK OFF) # otherwise Qt6 fails
 set(QHULL_ROOT "${MULTIVIEW_DEPS_DIR}") # so it does not pick system Qhull
 find_package(PCL REQUIRED)
 if (PCL_FOUND)
