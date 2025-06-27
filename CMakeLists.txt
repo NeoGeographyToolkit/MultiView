@@ -9,8 +9,11 @@ endif()
 set(CMAKE_BUILD_TYPE "Release")
 message(STATUS "Setting build type: ${CMAKE_BUILD_TYPE}")
 
+# TODO(oalexan1): These need revisiting.
 set(CMAKE_CXX_STANDARD 11)
+set (CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} -O3 -Wno-error")
 
+# TODO(oalexan1): These need revisiting.
 if (NOT APPLE)
   # Fix for not being able to find OpenGL on Linux
   set(OPENGL_opengl_LIBRARY "/usr/lib/x86_64-linux-gnu/libGL.so")
@@ -162,7 +165,7 @@ if(OPENMP_FOUND)
 endif()
 
 # Pcl 
-set( QT_REQUIRE_HOST_PATH_CHECK OFF) # otherwise Qt6 fails
+set(QT_REQUIRE_HOST_PATH_CHECK OFF) # otherwise Qt6 fails
 set(QHULL_ROOT "${MULTIVIEW_DEPS_DIR}") # so it does not pick system Qhull
 find_package(PCL REQUIRED)
 if (PCL_FOUND)
