@@ -13,6 +13,9 @@ message(STATUS "Setting build type: ${CMAKE_BUILD_TYPE}")
 set(CMAKE_CXX_STANDARD 11)
 set (CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} -O3 -Wno-error")
 
+# Must be set BEFORE find_package(OpenGL)
+set(OpenGL_GL_PREFERENCE LEGACY)
+set(OPENGL_gl_LIBRARY "$ENV{PREFIX}/lib/libGL.so") # Hard override
 find_package(OpenGL REQUIRED)
 
 # TODO(oalexan1): These need revisiting.
@@ -180,7 +183,7 @@ include_directories("${PCL_COMMON_INCLUDE_DIR}")
 # Build mapmap
 add_subdirectory(mapmap)
 
-# build mve
+# Build multiview 
 add_subdirectory(mve)
 
 # Build rayint
