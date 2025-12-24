@@ -13,17 +13,27 @@ message(STATUS "Setting build type: ${CMAKE_BUILD_TYPE}")
 set(CMAKE_CXX_STANDARD 11)
 set (CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} -O3 -Wno-error")
 
-# Must be set BEFORE find_package(OpenGL)
-set(OpenGL_GL_PREFERENCE LEGACY)
-set(OPENGL_gl_LIBRARY "$ENV{PREFIX}/lib/libGL.so") # Hard override
-find_package(OpenGL REQUIRED)
+if(UNIX AND NOT APPLE)
+  # 1. Define paths for BOTH locations
+  # (Make sure these paths match your specific conda environment structure)
+  set(SYSROOT_LIB "$ENV{PREFIX}/x86_64-conda-linux-gnu/sysroot/usr/lib64")
+  set(CONDA_LIB "$ENV{PREFIX}/lib")
 
-# TODO(oalexan1): These need revisiting.
-if (NOT APPLE)
-  # Fix for not being able to find OpenGL on Linux
-  #set(OPENGL_opengl_LIBRARY "/usr/lib/x86_64-linux-gnu/libGL.so")
-  #set(OPENGL_glx_LIBRARY "/usr/lib/x86_64-linux-gnu/libGLX.so")
+  # 2. Prefer Legacy OpenGL
+  set(OpenGL_GL_PREFERENCE LEGACY)
+
+  # 3. Force libGL location
+  set(OPENGL_gl_LIBRARY "${SYSROOT_LIB}/libGL.so")
+  set(OPENGL_glx_LIBRARY "${SYSROOT_LIB}/libGLX.so")
+  
+  # 4. Add BOTH paths to -rpath-link
+  set(RPATH_LINK_FLAGS "-Wl,-rpath-link,${SYSROOT_LIB} -Wl,-rpath-link,${CONDA_LIB}")
+  set(CMAKE_EXE_LINKER_FLAGS "${CMAKE_EXE_LINKER_FLAGS} ${RPATH_LINK_FLAGS}")
+  set(CMAKE_SHARED_LINKER_FLAGS "${CMAKE_SHARED_LINKER_FLAGS} ${RPATH_LINK_FLAGS}")
+  set(CMAKE_MODULE_LINKER_FLAGS "${CMAKE_MODULE_LINKER_FLAGS} ${RPATH_LINK_FLAGS}")
 endif()
+
+find_package(OpenGL REQUIRED)
 
 # Make clang behave
 if (APPLE)
