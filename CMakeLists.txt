@@ -13,11 +13,13 @@ message(STATUS "Setting build type: ${CMAKE_BUILD_TYPE}")
 set(CMAKE_CXX_STANDARD 11)
 set (CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} -O3 -Wno-error")
 
+find_package(OpenGL REQUIRED)
+
 # TODO(oalexan1): These need revisiting.
 if (NOT APPLE)
   # Fix for not being able to find OpenGL on Linux
-  set(OPENGL_opengl_LIBRARY "/usr/lib/x86_64-linux-gnu/libGL.so")
-  set(OPENGL_glx_LIBRARY "/usr/lib/x86_64-linux-gnu/libGLX.so")
+  #set(OPENGL_opengl_LIBRARY "/usr/lib/x86_64-linux-gnu/libGL.so")
+  #set(OPENGL_glx_LIBRARY "/usr/lib/x86_64-linux-gnu/libGLX.so")
 endif()
 
 # Make clang behave
@@ -178,7 +180,7 @@ include_directories("${PCL_COMMON_INCLUDE_DIR}")
 # Build mapmap
 add_subdirectory(mapmap)
 
-# Build mve
+# build mve
 add_subdirectory(mve)
 
 # Build rayint
