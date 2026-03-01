@@ -83,15 +83,22 @@ else()
     find_package(Threads REQUIRED)
 endif(APPLE)
 
-# Image libs
+# Image libs (needed by MVE and other tools)
 find_package(PNG REQUIRED)
 find_package(JPEG REQUIRED)
 find_package(TIFF REQUIRED)
 
+option(BUILD_MVE_ONLY "Build only MVE (sfm_view)" OFF)
+
+# Build MVE (sfm_view)
+add_subdirectory(mve)
+
+if (NOT BUILD_MVE_ONLY)
+
 # TBB
 FIND_PACKAGE(TBB REQUIRED)
 
-# GFlags 
+# GFlags
 find_package(Gflags REQUIRED)
 if (Gflags_FOUND)
    message("-- Found Google Flags: ${GFLAGS_INCLUDE_DIRS} in namespace: ${GFLAGS_NAMESPACE}")
@@ -179,7 +186,7 @@ if(OPENMP_FOUND)
     set(CMAKE_EXE_LINKER_FLAGS "${CMAKE_EXE_LINKER_FLAGS} ${OpenMP_EXE_LINKER_FLAGS}")
 endif()
 
-# Pcl 
+# Pcl
 set(QT_REQUIRE_HOST_PATH_CHECK OFF) # otherwise Qt6 fails
 set(QHULL_ROOT "${MULTIVIEW_DEPS_DIR}") # so it does not pick system Qhull
 find_package(PCL REQUIRED)
@@ -192,9 +199,6 @@ include_directories("${PCL_COMMON_INCLUDE_DIR}")
 
 # Build mapmap
 add_subdirectory(mapmap)
-
-# Build multiview 
-add_subdirectory(mve)
 
 # Build rayint
 add_subdirectory(rayint)
@@ -220,3 +224,5 @@ include_directories(${CMAKE_BINARY_DIR}/include)
 set(BUILD_DOCUMENTATION OFF CACHE INTERNAL "" FORCE)
 set(BUILD_TESTING OFF CACHE INTERNAL "" FORCE)
 add_subdirectory(TheiaSfM)
+
+endif (NOT BUILD_MVE_ONLY)
