@@ -211,9 +211,8 @@ include_directories(${CMAKE_SOURCE_DIR}/rayint/libs
     ${CMAKE_SOURCE_DIR}/texrecon/libs
 )
 
-# CGAL mesh tools
-set(CGAL_TOOLS_INSTALL_DIR ${CMAKE_INSTALL_PREFIX})
-add_subdirectory(cgal_tools)
+# cgal_tools is now built separately (not as a submodule).
+# See https://github.com/NeoGeographyToolkit/cgal_tools
 
 # Build voxblox, which provides the voxblox_mesh tool for fusing point clouds into meshes
 add_subdirectory(voxblox)

@@ -16,6 +16,3 @@
 [submodule "TheiaSfM"]
 	path = TheiaSfM
 	url = https://github.com/NeoGeographyToolkit/TheiaSfM.git
-[submodule "cgal_tools"]
-	path = cgal_tools
-	url = https://github.com/NeoGeographyToolkit/cgal_tools.git
